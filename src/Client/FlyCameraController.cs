@@ -21,6 +21,13 @@ internal sealed class FlyCameraController(Camera camera, Vector3 startPosition)
     /// <summary>Позиция на последнем тике (не интерполированная).</summary>
     public Vector3 Position => _position;
 
+    /// <summary>Мгновенно переносит камеру, без интерполяции от старой позиции.</summary>
+    public void Teleport(Vector3 position)
+    {
+        _position = position;
+        _previousPosition = position;
+    }
+
     /// <summary>Вызывается каждый кадр, пока курсор захвачен.</summary>
     public void Look(Vector2 mouseDelta)
     {

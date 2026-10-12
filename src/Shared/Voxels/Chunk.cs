@@ -18,6 +18,26 @@ public sealed class Chunk(ChunkPos position)
     /// <summary>Все блоки в порядке <see cref="LocalPos.Index"/>, для построения меша и сериализации.</summary>
     public ReadOnlySpan<BlockId> Blocks => _blocks;
 
+    /// <summary>Создаёт чанк из готового массива блоков (копирует его), например из сообщения сервера.</summary>
+    public static Chunk FromBlocks(ChunkPos position, ReadOnlySpan<BlockId> blocks)
+    {
+        if (blocks.Length != ChunkMath.Volume)
+            throw new ArgumentException($"Ожидалось {ChunkMath.Volume} блоков, получено {blocks.Length}.", nameof(blocks));
+
+        var chunk = new Chunk(position);
+        blocks.CopyTo(chunk._blocks);
+
+        var nonAir = 0;
+        foreach (var block in blocks)
+        {
+            if (!block.IsAir)
+                nonAir++;
+        }
+
+        chunk.NonAirCount = nonAir;
+        return chunk;
+    }
+
     public BlockId Get(LocalPos pos) => _blocks[CheckedIndex(pos)];
 
     public void Set(LocalPos pos, BlockId block)

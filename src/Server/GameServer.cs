@@ -1,5 +1,5 @@
-using System.Numerics;
-using Shared;
+using System.Collections.Immutable;
+using Shared.Blocks;
 using Shared.Networking;
 using Shared.Protocol;
 
@@ -14,17 +14,21 @@ namespace Server;
 /// </remarks>
 public sealed class GameServer
 {
-    // Временная сущность для проверки связи клиент ↔ сервер: куб, летающий по кругу.
-    private const int OrbitingCubeId = 1;
-
-    // Центр орбиты перед стартовой точкой камеры, чтобы куб был в кадре и не пролетал сквозь камеру.
-    private static readonly Vector3 OrbitCenter = new(0.5f, 1.5f, -4f);
-    private const float OrbitRadius = 3f;
-    private const float OrbitSpeed = 0.5f; // рад/с
-
     private readonly List<ClientSession> _sessions = [];
+    private readonly ImmutableArray<string> _blockNames;
     private int _nextPlayerId = 1;
-    private long _tick;
+
+    public World World { get; }
+
+    public GameServer()
+    {
+        var registry = new BlockRegistry();
+        var blocks = BaseBlocks.Register(registry);
+        registry.Freeze();
+
+        _blockNames = [.. registry.All.Select(b => b.Name)];
+        World = new World(blocks);
+    }
 
     public void Connect(IConnection<ServerMessage, ClientMessage> connection) => _sessions.Add(new ClientSession(connection));
 
@@ -35,12 +39,6 @@ public sealed class GameServer
             while (session.Connection.TryReceive(out var message))
                 Handle(session, message);
         }
-
-        _tick++;
-
-        var angle = _tick * GameTime.TickDuration * OrbitSpeed;
-        var (sin, cos) = MathF.SinCos(angle);
-        Broadcast(new EntityMoved(OrbitingCubeId, OrbitCenter + new Vector3(cos, 0f, sin) * OrbitRadius));
     }
 
     private void Handle(ClientSession session, ClientMessage message)
@@ -49,7 +47,8 @@ public sealed class GameServer
         {
             case JoinRequest join when !session.IsJoined:
                 session.Join(_nextPlayerId++, join.PlayerName);
-                session.Connection.Send(new JoinAccepted(session.PlayerId));
+                session.Connection.Send(new JoinAccepted(session.PlayerId, World.SpawnPosition, _blockNames));
+                SendWorld(session);
                 Console.WriteLine($"[Server] {session.PlayerName} подключился (id {session.PlayerId})");
                 break;
 
@@ -64,12 +63,10 @@ public sealed class GameServer
         }
     }
 
-    private void Broadcast(ServerMessage message)
+    /// <summary>Пока мир маленький, при подключении он отправляется целиком. На этапе 2 — только чанки вокруг игрока.</summary>
+    private void SendWorld(ClientSession session)
     {
-        foreach (var session in _sessions)
-        {
-            if (session.IsJoined)
-                session.Connection.Send(message);
-        }
+        foreach (var chunk in World.Chunks.All)
+            session.Connection.Send(ChunkData.From(chunk));
     }
 }

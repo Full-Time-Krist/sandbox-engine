@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Numerics;
 using Client.Rendering;
 using Engine;
@@ -23,21 +22,14 @@ internal sealed class ClientApp(
     GameServer? integratedServer)
     : Application(settings, GameTime.TicksPerSecond)
 {
-    // Камера над углом тестового чанка, взгляд по диагонали на его центр.
-    private readonly Camera _camera = new() { Yaw = 0.75f * MathF.PI, Pitch = -0.45f };
+    private readonly Camera _camera = new() { Pitch = -0.4f };
+    private readonly ClientWorld _world = new();
     private FlyCameraController _controller = null!;
 
-    private ShaderProgram _shader = null!;
+    private BlockRegistry _registry = null!;
     private ShaderProgram _chunkShader = null!;
     private TextureArray _blockTextures = null!;
-    private ColorMesh _cube = null!;
-    private ColorMesh _grid = null!;
-    private ChunkRenderMesh _testChunkMesh = null!;
-
-    // Куб, которым управляет сервер: две последние полученные позиции для интерполяции.
-    private Vector3 _serverCubePrevious;
-    private Vector3 _serverCubeCurrent;
-    private bool _hasServerCube;
+    private ChunkRenderer _chunkRenderer = null!;
 
     private Vector3 _lastSentPosition = new(float.NaN);
 
@@ -45,41 +37,24 @@ internal sealed class ClientApp(
     {
         Gl.ClearColor(0.53f, 0.81f, 0.92f, 1f);
 
+        // Клиент собирает свой реестр и сверяет его с таблицей сервера при подключении (см. JoinAccepted).
+        _registry = new BlockRegistry();
+        BaseBlocks.Register(_registry);
+        _registry.Freeze();
+
+        var visuals = new BlockVisuals(_registry, BlockVisuals.BaseAppearances);
+        _blockTextures = LoadBlockTextures(visuals.TextureNames);
+        _chunkRenderer = new ChunkRenderer(Gl, new ChunkMesher(visuals));
+
         var shaders = Path.Combine(AppContext.BaseDirectory, "Assets", "Shaders");
-        _shader = ShaderProgram.FromFiles(Gl, Path.Combine(shaders, "basic"));
         _chunkShader = ShaderProgram.FromFiles(Gl, Path.Combine(shaders, "chunk"));
         _chunkShader.SetUniform("u_Textures", 0); // сэмплер читает текстурный блок 0
-        _cube = DebugGeometry.CreateCube(Gl);
-        _grid = DebugGeometry.CreateGrid(Gl, halfSize: 16);
 
-        // Клиент собирает свой реестр. В мультиплеере таблицу id будет присылать сервер.
-        var registry = new BlockRegistry();
-        var blocks = BaseBlocks.Register(registry);
-        registry.Freeze();
-
-        var visuals = new BlockVisuals(registry, BlockVisuals.BaseAppearances);
-        _blockTextures = LoadBlockTextures(visuals.TextureNames);
-        _testChunkMesh = BuildTestChunkMesh(visuals, blocks);
-
-        _controller = new FlyCameraController(_camera, startPosition: new Vector3(-10f, 22f, -10f));
+        // Позицию задаст сервер в JoinAccepted.
+        _controller = new FlyCameraController(_camera, startPosition: Vector3.Zero);
         UpdateAspectRatio(Window.FramebufferSize);
 
         connection.Send(new JoinRequest("Player"));
-    }
-
-    private ChunkRenderMesh BuildTestChunkMesh(BlockVisuals visuals, BaseBlocks blocks)
-    {
-        var mesher = new ChunkMesher(visuals);
-        var chunk = DebugTerrain.CreateTestChunk(blocks);
-        var data = new ChunkMeshData();
-
-        var stopwatch = Stopwatch.StartNew();
-        mesher.Build(chunk, default, data);
-        stopwatch.Stop();
-        // Первый вызов включает JIT-компиляцию, поэтому время завышено. Честный замер — на шаге 1.5, по многим чанкам.
-        Console.WriteLine($"[Client] Меш чанка: {data.QuadCount} граней, {chunk.NonAirCount} блоков, {stopwatch.Elapsed.TotalMilliseconds:F2} мс");
-
-        return new ChunkRenderMesh(Gl, data);
     }
 
     private TextureArray LoadBlockTextures(IReadOnlyList<string> names)
@@ -113,8 +88,8 @@ internal sealed class ClientApp(
 
     protected override void OnTick()
     {
-        // Порядок: сервер обрабатывает прошлые действия клиента и рассылает состояние,
-        // затем клиент получает его в том же тике. Так интерполяции хватает ровно двух последних позиций.
+        // Порядок: сервер обрабатывает прошлые действия клиента и рассылает результат,
+        // затем клиент получает его в том же тике.
         integratedServer?.Tick();
         ProcessServerMessages();
 
@@ -135,13 +110,13 @@ internal sealed class ClientApp(
             switch (message)
             {
                 case JoinAccepted accepted:
+                    VerifyBlockTable(accepted.BlockNames);
+                    _controller.Teleport(accepted.SpawnPosition);
                     Console.WriteLine($"[Client] Подключён к серверу, id игрока {accepted.PlayerId}");
                     break;
 
-                case EntityMoved moved:
-                    _serverCubePrevious = _hasServerCube ? _serverCubeCurrent : moved.Position;
-                    _serverCubeCurrent = moved.Position;
-                    _hasServerCube = true;
+                case ChunkData data:
+                    _world.AddChunk(data.ToChunk());
                     break;
 
                 default:
@@ -151,33 +126,38 @@ internal sealed class ClientApp(
         }
     }
 
+    /// <summary>
+    /// Числовые id блоков у клиента и сервера должны означать одно и то же. Если таблицы разошлись
+    /// (разные версии или моды), продолжать нельзя: мир молча отрисовался бы не теми блоками.
+    /// </summary>
+    private void VerifyBlockTable(IReadOnlyList<string> serverNames)
+    {
+        var clientNames = _registry.All.Select(b => b.Name).ToArray();
+        if (!clientNames.SequenceEqual(serverNames))
+        {
+            throw new InvalidOperationException(
+                $"Таблица блоков сервера не совпадает с клиентской.\nСервер: {string.Join(", ", serverNames)}\nКлиент: {string.Join(", ", clientNames)}");
+        }
+    }
+
     protected override void OnRender(double deltaTime, float alpha)
     {
         HandleFrameInput();
         _controller.UpdateCamera(alpha);
 
-        Gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
-
-        _shader.Use();
-        _shader.SetUniform("u_ViewProjection", _camera.ViewProjection);
-
-        _shader.SetUniform("u_Model", Matrix4x4.Identity);
-        _grid.Draw();
-
-        if (_hasServerCube)
+        var stats = _chunkRenderer.Update(_world);
+        if (stats.Chunks > 0)
         {
-            // Позиция сущности — центр куба, а меш куба построен от угла (0, 0, 0).
-            var center = Vector3.Lerp(_serverCubePrevious, _serverCubeCurrent, alpha);
-            _shader.SetUniform("u_Model", Matrix4x4.CreateTranslation(center - new Vector3(0.5f)));
-            _cube.Draw();
+            Console.WriteLine($"[Client] Меши: {stats.Chunks} чанков, {stats.Quads} граней за {stats.TotalMs:F1} мс " +
+                              $"(в среднем {stats.TotalMs / stats.Chunks:F2} мс, максимум {stats.MaxMs:F2} мс), в видеопамяти {_chunkRenderer.MeshCount}");
         }
+
+        Gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
         _chunkShader.Use();
         _chunkShader.SetUniform("u_ViewProjection", _camera.ViewProjection);
-        // Тестовый чанк стоит в (0, 0, 0), поэтому матрица модели единичная.
-        _chunkShader.SetUniform("u_Model", Matrix4x4.Identity);
         _blockTextures.Bind(0);
-        _testChunkMesh.Draw();
+        _chunkRenderer.Draw(_chunkShader);
     }
 
     protected override void OnResize(Vector2D<int> framebufferSize) => UpdateAspectRatio(framebufferSize);
@@ -202,11 +182,8 @@ internal sealed class ClientApp(
 
     protected override void OnUnload()
     {
-        _testChunkMesh.Dispose();
+        _chunkRenderer.Dispose();
         _blockTextures.Dispose();
-        _grid.Dispose();
-        _cube.Dispose();
         _chunkShader.Dispose();
-        _shader.Dispose();
     }
 }
