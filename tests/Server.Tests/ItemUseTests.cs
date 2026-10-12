@@ -7,14 +7,15 @@ using Shared.Voxels;
 
 namespace Server.Tests;
 
-public class ItemUseTests
+public sealed class ItemUseTests : IDisposable
 {
-    // Поверхность в столбце (0, 0) — на высоте 42, верхний блок (0, 41, 0).
-    private static readonly BlockPos Surface = new(0, TerrainGenerator.SurfaceHeight(0, 0) - 1, 0);
-    private static readonly Vector3 EyeAbove = new(0.5f, Surface.Y + 3.5f, 0.5f);
     private static readonly Vector3 Down = -Vector3.UnitY;
 
-    private readonly GameServer _server = new();
+    /// <summary>Верхний блок столбца (0, 0) и точка взгляда на 3,5 блока над ним.</summary>
+    private readonly BlockPos _surface;
+    private readonly Vector3 _eyeAbove;
+
+    private readonly GameServer _server = TestServers.CreateLoaded();
     private readonly IConnection<ClientMessage, ServerMessage> _client;
     private readonly BlockRegistry _registry = new();
     private readonly BaseBlocks _blocks;
@@ -24,7 +25,11 @@ public class ItemUseTests
         _blocks = BaseBlocks.Register(_registry);
         _registry.Freeze();
         _client = Join(_server);
+        _surface = TestServers.TopBlock(_server.World, 0, 0);
+        _eyeAbove = new Vector3(0.5f, _surface.Y + 3.5f, 0.5f);
     }
+
+    public void Dispose() => _server.Dispose();
 
     private static IConnection<ClientMessage, ServerMessage> Join(GameServer server)
     {
@@ -54,18 +59,18 @@ public class ItemUseTests
     [Fact]
     public void Primary_BreaksTargetBlock()
     {
-        var changes = Send(new PlayerMove(EyeAbove), new UseItem(ItemAction.Primary, EyeAbove, Down));
+        var changes = Send(new PlayerMove(_eyeAbove), new UseItem(ItemAction.Primary, _eyeAbove, Down));
 
-        Assert.Equal([new BlockChanged(Surface, BlockId.Air)], changes);
-        Assert.True(BlockAt(Surface).IsAir);
+        Assert.Equal([new BlockChanged(_surface, BlockId.Air)], changes);
+        Assert.True(BlockAt(_surface).IsAir);
     }
 
     [Fact]
     public void Secondary_PlacesSelectedBlock_OnFaceUnderCrosshair()
     {
-        var above = Surface + new BlockPos(0, 1, 0);
+        var above = _surface + new BlockPos(0, 1, 0);
 
-        var changes = Send(new PlayerMove(EyeAbove), new UseItem(ItemAction.Secondary, EyeAbove, Down));
+        var changes = Send(new PlayerMove(_eyeAbove), new UseItem(ItemAction.Secondary, _eyeAbove, Down));
 
         Assert.Equal([new BlockChanged(above, _blocks.Stone)], changes); // слот 1 — камень
         Assert.Equal(_blocks.Stone, BlockAt(above));
@@ -74,9 +79,9 @@ public class ItemUseTests
     [Fact]
     public void SelectedSlot_DecidesPlacedBlock()
     {
-        var above = Surface + new BlockPos(0, 1, 0);
+        var above = _surface + new BlockPos(0, 1, 0);
 
-        Send(new PlayerMove(EyeAbove), new SelectHotbarSlot(5), new UseItem(ItemAction.Secondary, EyeAbove, Down));
+        Send(new PlayerMove(_eyeAbove), new SelectHotbarSlot(5), new UseItem(ItemAction.Secondary, _eyeAbove, Down));
 
         Assert.Equal(_blocks.Planks, BlockAt(above));
     }
@@ -84,9 +89,9 @@ public class ItemUseTests
     [Fact]
     public void InvalidSlot_IsIgnored()
     {
-        var above = Surface + new BlockPos(0, 1, 0);
+        var above = _surface + new BlockPos(0, 1, 0);
 
-        Send(new PlayerMove(EyeAbove), new SelectHotbarSlot(Hotbar.Size), new UseItem(ItemAction.Secondary, EyeAbove, Down));
+        Send(new PlayerMove(_eyeAbove), new SelectHotbarSlot(Hotbar.Size), new UseItem(ItemAction.Secondary, _eyeAbove, Down));
 
         Assert.Equal(_blocks.Stone, BlockAt(above));
     }
@@ -94,18 +99,19 @@ public class ItemUseTests
     [Fact]
     public void EyeFarFromPlayer_IsRejected()
     {
-        var farAway = EyeAbove + new Vector3(0, 0, 20);
+        var farAway = _eyeAbove + new Vector3(0, 0, 20);
+        var before = BlockAt(_surface);
 
-        var changes = Send(new PlayerMove(farAway), new UseItem(ItemAction.Primary, EyeAbove, Down));
+        var changes = Send(new PlayerMove(farAway), new UseItem(ItemAction.Primary, _eyeAbove, Down));
 
         Assert.Empty(changes);
-        Assert.Equal(_blocks.Grass, BlockAt(Surface));
+        Assert.Equal(before, BlockAt(_surface));
     }
 
     [Fact]
     public void CannotPlaceBlockIntoEye()
     {
-        var eyeRightAbove = new Vector3(0.5f, Surface.Y + 1.5f, 0.5f);
+        var eyeRightAbove = new Vector3(0.5f, _surface.Y + 1.5f, 0.5f);
 
         var changes = Send(new PlayerMove(eyeRightAbove), new UseItem(ItemAction.Secondary, eyeRightAbove, Down));
 
@@ -115,7 +121,7 @@ public class ItemUseTests
     [Fact]
     public void NothingInReach_DoesNothing()
     {
-        var changes = Send(new PlayerMove(EyeAbove), new UseItem(ItemAction.Primary, EyeAbove, Vector3.UnitY));
+        var changes = Send(new PlayerMove(_eyeAbove), new UseItem(ItemAction.Primary, _eyeAbove, Vector3.UnitY));
 
         Assert.Empty(changes);
     }
@@ -125,10 +131,10 @@ public class ItemUseTests
     {
         var nan = new Vector3(float.NaN);
 
-        var changes = Send(new PlayerMove(EyeAbove),
+        var changes = Send(new PlayerMove(_eyeAbove),
             new UseItem(ItemAction.Primary, nan, Down),
-            new UseItem(ItemAction.Primary, EyeAbove, nan),
-            new UseItem(ItemAction.Primary, EyeAbove, Vector3.Zero));
+            new UseItem(ItemAction.Primary, _eyeAbove, nan),
+            new UseItem(ItemAction.Primary, _eyeAbove, Vector3.Zero));
 
         Assert.Empty(changes);
     }
@@ -138,9 +144,9 @@ public class ItemUseTests
     {
         var second = Join(_server);
 
-        Send(new PlayerMove(EyeAbove), new UseItem(ItemAction.Primary, EyeAbove, Down));
+        Send(new PlayerMove(_eyeAbove), new UseItem(ItemAction.Primary, _eyeAbove, Down));
 
         Assert.True(second.TryReceive(out var message));
-        Assert.Equal(new BlockChanged(Surface, BlockId.Air), message);
+        Assert.Equal(new BlockChanged(_surface, BlockId.Air), message);
     }
 }

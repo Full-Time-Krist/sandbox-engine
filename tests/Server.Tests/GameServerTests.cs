@@ -4,8 +4,12 @@ using Shared.Voxels;
 
 namespace Server.Tests;
 
-public class GameServerTests
+public sealed class GameServerTests : IDisposable
 {
+    private readonly List<GameServer> _servers = [];
+
+    public void Dispose() => _servers.ForEach(s => s.Dispose());
+
     private static List<ServerMessage> Drain(IConnection<ClientMessage, ServerMessage> client)
     {
         var messages = new List<ServerMessage>();
@@ -14,9 +18,10 @@ public class GameServerTests
         return messages;
     }
 
-    private static (GameServer Server, IConnection<ClientMessage, ServerMessage> Client) Connect()
+    private (GameServer Server, IConnection<ClientMessage, ServerMessage> Client) Connect(bool waitForWorld = true)
     {
-        var server = new GameServer();
+        var server = waitForWorld ? TestServers.CreateLoaded() : new GameServer(TestServers.Seed);
+        _servers.Add(server);
         var (client, serverSide) = LocalConnection.CreatePair<ClientMessage, ServerMessage>();
         server.Connect(serverSide);
         return (server, client);
@@ -35,12 +40,31 @@ public class GameServerTests
         Assert.Equal("base:air", accepted.BlockNames[0]);
 
         var chunks = messages.Skip(1).Select(m => Assert.IsType<ChunkData>(m)).ToList();
-        var expected = (World.MaxChunk.X - World.MinChunk.X + 1)
-                       * (World.MaxChunk.Y - World.MinChunk.Y + 1)
-                       * (World.MaxChunk.Z - World.MinChunk.Z + 1);
-        Assert.Equal(expected, chunks.Count);
-        Assert.Equal(expected, chunks.Select(c => c.Position).Distinct().Count());
+        Assert.Equal(World.TotalChunks, chunks.Count);
+        Assert.Equal(World.TotalChunks, chunks.Select(c => c.Position).Distinct().Count());
         Assert.All(chunks, c => Assert.Equal(c.Position, c.ToChunk().Position));
+    }
+
+    [Fact]
+    public void JoinDuringGeneration_EventuallyReceivesEveryChunkOnce()
+    {
+        // Игрок входит сразу, пока мир ещё генерируется: готовые чанки он получает при входе,
+        // остальные — по мере готовности. Ни один не должен потеряться или прийти дважды.
+        var (server, client) = Connect(waitForWorld: false);
+        client.Send(new JoinRequest("Tester"));
+
+        var received = new List<ChunkPos>();
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        while (received.Count < World.TotalChunks && clock.Elapsed < TimeSpan.FromSeconds(30))
+        {
+            server.Tick();
+            received.AddRange(Drain(client).OfType<ChunkData>().Select(c => c.Position));
+            Thread.Sleep(1);
+        }
+
+        Assert.Equal(World.TotalChunks, received.Count);
+        Assert.Equal(World.TotalChunks, received.Distinct().Count());
+        Assert.Equal(0, server.World.PendingChunks);
     }
 
     [Fact]

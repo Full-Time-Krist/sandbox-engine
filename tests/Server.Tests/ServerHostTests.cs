@@ -96,7 +96,7 @@ public class ServerHostTests
     [Fact]
     public void ClientConnectedWhileRunning_IsServedWithoutManualTicks()
     {
-        var server = new GameServer();
+        using var server = new GameServer(TestServers.Seed);
         using var host = new ServerHost(server, logStats: false);
         host.Start();
 

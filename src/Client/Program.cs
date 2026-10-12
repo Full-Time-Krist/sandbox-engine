@@ -13,11 +13,18 @@ var product = Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyProductAtt
 
 // Одиночная игра: встроенный сервер в том же процессе, в своём потоке, связь через очереди в памяти.
 // Для мультиплеера здесь будет сетевое соединение вместо LocalConnection и null вместо сервера.
-var server = new GameServer();
+// Сид можно задать аргументом: Sandbox.exe --seed 123. Пока сохранений нет (шаг 2.7), по умолчанию он постоянный,
+// чтобы мир не менялся от запуска к запуску и скриншоты можно было сравнивать.
+const int DefaultSeed = 1;
+var seedIndex = Array.IndexOf(args, "--seed");
+var seed = seedIndex >= 0 && seedIndex + 1 < args.Length ? int.Parse(args[seedIndex + 1]) : DefaultSeed;
+
+using var server = new GameServer(seed);
 var (clientConnection, serverConnection) = LocalConnection.CreatePair<ClientMessage, ServerMessage>();
 server.Connect(serverConnection);
 
-// Порядок освобождения обратный: сначала закрывается окно, затем останавливается сервер.
+// Порядок освобождения обратный: сначала закрывается окно, затем останавливается поток сервера,
+// и только потом сервер (его фоновые потоки генерации).
 using var host = new ServerHost(server);
 host.Start();
 

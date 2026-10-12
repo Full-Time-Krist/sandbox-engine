@@ -3,7 +3,7 @@
 Подключение (dot-source) в начале одного вызова PowerShell — каждый вызов идёт в новом процессе:
 
     . D:\Projects\test\tools\playtest.ps1
-    $game = Start-Game                       # Debug-сборка; -Configuration Release для замеров
+    $game = Start-Game                       # Debug-сборка; -Configuration Release для замеров; -Arguments '--seed 2'
     Enter-Game $game                         # клик в центр окна: захват мыши
     Hold-Key $game 0x57 1000                 # W одну секунду (коды: https://learn.microsoft.com/windows/win32/inputdev/virtual-key-codes)
     Move-Mouse $game 0 10 30                 # 30 шагов по 10 px вниз
@@ -31,7 +31,7 @@ public static class PlaytestNative {
 
 $PlaytestRoot = Split-Path -Parent $PSScriptRoot
 
-function Start-Game([string]$Configuration = 'Debug', [int]$WaitSeconds = 3) {
+function Start-Game([string]$Configuration = 'Debug', [int]$WaitSeconds = 3, [string]$Arguments = '') {
     $exe = Join-Path $PlaytestRoot "src\Client\bin\$Configuration\net10.0\Sandbox.exe"
     if (-not (Test-Path $exe)) {
         # Имя exe берётся из GameName в Directory.Build.props; если его переименовали — ищем любой exe клиента.
@@ -39,7 +39,9 @@ function Start-Game([string]$Configuration = 'Debug', [int]$WaitSeconds = 3) {
     }
     $log = Join-Path $env:TEMP "playtest-$PID"
     New-Item -ItemType Directory -Force $log | Out-Null
-    $process = Start-Process -FilePath $exe -WorkingDirectory $env:TEMP -PassThru `
+    $extra = @{}
+    if ($Arguments) { $extra.ArgumentList = $Arguments }
+    $process = Start-Process -FilePath $exe -WorkingDirectory $env:TEMP -PassThru @extra `
         -RedirectStandardOutput "$log\out.txt" -RedirectStandardError "$log\err.txt"
     Start-Sleep -Seconds $WaitSeconds
     $process.Refresh()

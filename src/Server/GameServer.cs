@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Numerics;
 using Server.Items;
 using Shared;
@@ -18,7 +19,7 @@ namespace Server;
 /// Сервер не знает, кто и в каком потоке вызывает <see cref="Tick"/>: в одиночной игре это <see cref="ServerHost"/>,
 /// в тестах — сам тест. Всё состояние сервера меняется только внутри <see cref="Tick"/>, из одного потока.
 /// </remarks>
-public sealed class GameServer
+public sealed class GameServer : IDisposable
 {
     /// <summary>
     /// Насколько присланная точка взгляда может отличаться от последней известной позиции игрока.
@@ -36,16 +37,23 @@ public sealed class GameServer
     private readonly WorldEditor _editor;
     private int _nextPlayerId = 1;
 
+    /// <summary>Чанки, готовые в этом тике. Поле, а не локальная переменная, чтобы не создавать список каждый тик.</summary>
+    private readonly List<Chunk> _generated = [];
+    private readonly Stopwatch _generationClock = Stopwatch.StartNew();
+    private bool _generationLogged;
+
     public World World { get; }
 
-    public GameServer()
+    /// <param name="seed">Сид мира: одинаковый сид — одинаковый мир.</param>
+    /// <param name="generatorThreads">Сколько фоновых потоков генерирует чанки; null — по числу ядер.</param>
+    public GameServer(int seed, int? generatorThreads = null)
     {
         var registry = new BlockRegistry();
         _blocks = BaseBlocks.Register(registry);
         registry.Freeze();
 
         _blockNames = [.. registry.All.Select(b => b.Name)];
-        World = new World(_blocks);
+        World = new World(_blocks, seed, generatorThreads ?? ChunkGenerator.DefaultWorkerCount);
         _editor = new WorldEditor(this);
     }
 
@@ -65,7 +73,28 @@ public sealed class GameServer
             while (session.Connection.TryReceive(out var message))
                 Handle(session, message);
         }
+
+        AcceptGeneratedChunks();
     }
+
+    /// <summary>Забирает чанки, готовые в фоновых потоках, и рассылает их игрокам, которые уже в мире.</summary>
+    private void AcceptGeneratedChunks()
+    {
+        _generated.Clear();
+        World.CollectGenerated(_generated);
+        foreach (var chunk in _generated)
+            Broadcast(ChunkData.From(chunk));
+
+        if (!_generationLogged && World.PendingChunks == 0)
+        {
+            _generationLogged = true;
+            Console.WriteLine($"[Server] Мир сгенерирован (сид {World.Seed}): {World.Chunks.Count} чанков " +
+                              $"за {_generationClock.Elapsed.TotalMilliseconds:F0} мс");
+        }
+    }
+
+    /// <summary>Останавливает фоновые потоки генерации. Вызывать после остановки потока сервера.</summary>
+    public void Dispose() => World.Dispose();
 
     private void Handle(ClientSession session, ClientMessage message)
     {
@@ -141,7 +170,10 @@ public sealed class GameServer
         }
     }
 
-    /// <summary>Пока мир маленький, при подключении он отправляется целиком. На этапе 2 — только чанки вокруг игрока.</summary>
+    /// <summary>
+    /// Отправляет игроку уже сгенерированные чанки; остальные он получит по мере готовности (<see cref="AcceptGeneratedChunks"/>).
+    /// Пока мир маленький, отправляется целиком. На шаге 2.4 — только чанки вокруг игрока.
+    /// </summary>
     private void SendWorld(ClientSession session)
     {
         var count = 0;
