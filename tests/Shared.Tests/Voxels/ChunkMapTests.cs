@@ -77,6 +77,18 @@ public class ChunkMapTests
     }
 
     [Fact]
+    public void Remove_DeletesChunk_OnlyOnce()
+    {
+        var map = new ChunkMap();
+        map.Set(new Chunk(new ChunkPos(1, 2, 3)));
+
+        Assert.True(map.Remove(new ChunkPos(1, 2, 3)));
+        Assert.False(map.Remove(new ChunkPos(1, 2, 3)));
+        Assert.Equal(0, map.Count);
+        Assert.False(map.TrySetBlock(new BlockPos(32, 64, 96), Stone));
+    }
+
+    [Fact]
     public void ChunkData_EmptyChunk_IsTiny()
     {
         var data = ChunkData.From(new Chunk(new ChunkPos(0, 2, 0)));

@@ -13,6 +13,9 @@ public sealed class ChunkMap
     /// <summary>Добавляет чанк или заменяет уже загруженный в той же позиции.</summary>
     public void Set(Chunk chunk) => _chunks[chunk.Position] = chunk;
 
+    /// <summary>Удаляет чанк. Возвращает false, если его не было.</summary>
+    public bool Remove(ChunkPos position) => _chunks.Remove(position);
+
     public Chunk? Get(ChunkPos position) => _chunks.GetValueOrDefault(position);
 
     public bool Contains(ChunkPos position) => _chunks.ContainsKey(position);

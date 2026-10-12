@@ -5,29 +5,31 @@ using Shared.Voxels;
 namespace Server;
 
 /// <summary>
-/// Мир на сервере. Пока фиксированного размера и целиком в памяти; подгрузка вокруг игрока — шаг 2.4.
-/// Чанки генерируются в фоновых потоках и попадают в мир в тике сервера (<see cref="CollectGenerated"/>).
+/// Мир на сервере: загруженные чанки и их генерация. Мир бесконечный: чанки генерируются по запросу
+/// (<see cref="TryRequest"/>) в фоновых потоках, попадают в мир в тике сервера (<see cref="CollectGenerated"/>)
+/// и выгружаются, когда рядом нет игроков (<see cref="Unload"/>). Все методы — только из потока сервера.
 /// </summary>
 public sealed class World : IDisposable
 {
     /// <summary>
-    /// Границы мира в чанках, включительно: 8×8 чанков по горизонтали с центром в начале координат,
-    /// по высоте от −64 до +192 — весь диапазон рельефа.
+    /// Сколько чанков может генерироваться одновременно. Больше в очередь не ставим: пока игрок летит,
+    /// важное меняется каждый тик, а длинная очередь генерировала бы то, что уже позади. Сервер каждый тик
+    /// заново выбирает ближайшие недостающие чанки, поэтому порядок всегда актуальный.
     /// </summary>
-    public static readonly ChunkPos MinChunk = new(-4, TerrainGenerator.MinSurface >> ChunkMath.Bits, -4);
-    public static readonly ChunkPos MaxChunk = new(3, (TerrainGenerator.MaxSurface >> ChunkMath.Bits) - 1, 3);
+    public const int MaxGenerating = 64;
 
     private readonly ChunkGenerator _generator;
+    private readonly HashSet<ChunkPos> _generating = [];
 
     public ChunkMap Chunks { get; } = new();
 
     public int Seed { get; }
 
-    /// <summary>Точка появления: над поверхностью в центре мира, с запасом для обзора.</summary>
+    /// <summary>Точка появления: над поверхностью в начале координат, с запасом для обзора.</summary>
     public Vector3 SpawnPosition { get; }
 
-    /// <summary>Чанков ещё в генерации. 0 — мир готов целиком.</summary>
-    public int PendingChunks => _generator.Pending;
+    /// <summary>Сколько чанков сейчас генерируется.</summary>
+    public int GeneratingCount => _generating.Count;
 
     internal World(BaseBlocks blocks, int seed, int generatorThreads)
     {
@@ -35,37 +37,46 @@ public sealed class World : IDisposable
         var terrain = new TerrainGenerator(blocks, seed);
         SpawnPosition = new Vector3(0.5f, terrain.SurfaceHeight(0, 0) + 12f, 0.5f);
         _generator = new ChunkGenerator(terrain, generatorThreads);
-
-        // Сначала ближние к точке появления: игрок увидит мир вокруг себя раньше дальних краёв.
-        var center = BlockPos.Containing(SpawnPosition).Chunk;
-        var positions = new List<ChunkPos>();
-        for (var x = MinChunk.X; x <= MaxChunk.X; x++)
-        for (var y = MinChunk.Y; y <= MaxChunk.Y; y++)
-        for (var z = MinChunk.Z; z <= MaxChunk.Z; z++)
-            positions.Add(new ChunkPos(x, y, z));
-
-        foreach (var position in positions.OrderBy(p => DistanceSquared(p, center)))
-            _generator.Request(position);
     }
 
-    /// <summary>Число чанков в мире после окончания генерации.</summary>
-    public static int TotalChunks =>
-        (MaxChunk.X - MinChunk.X + 1) * (MaxChunk.Y - MinChunk.Y + 1) * (MaxChunk.Z - MinChunk.Z + 1);
+    public bool IsGenerating(ChunkPos position) => _generating.Contains(position);
 
-    /// <summary>Переносит готовые чанки в мир и добавляет их в <paramref name="added"/>. Только из потока сервера.</summary>
-    internal void CollectGenerated(List<Chunk> added)
+    /// <summary>
+    /// Ставит чанк в генерацию, если его нет в мире и он ещё не генерируется.
+    /// Возвращает false, если очередь заполнена (<see cref="MaxGenerating"/>): тогда дальше в этом тике просить незачем.
+    /// </summary>
+    public bool TryRequest(ChunkPos position)
+    {
+        if (Chunks.Contains(position) || _generating.Contains(position))
+            return true;
+        if (_generating.Count >= MaxGenerating)
+            return false;
+
+        _generating.Add(position);
+        _generator.Request(position);
+        return true;
+    }
+
+    /// <summary>Переносит готовые чанки в мир.</summary>
+    internal void CollectGenerated()
     {
         while (_generator.TryTakeCompleted(out var chunk))
         {
+            _generating.Remove(chunk.Position);
             Chunks.Set(chunk);
-            added.Add(chunk);
         }
     }
 
-    private static int DistanceSquared(ChunkPos a, ChunkPos b)
+    /// <summary>
+    /// Удаляет чанки, для которых <paramref name="isNeeded"/> вернул false. Возвращает число удалённых.
+    /// Изменения в выгруженных чанках пока теряются: сохранение на диск — шаг 2.7.
+    /// </summary>
+    internal int Unload(Func<ChunkPos, bool> isNeeded)
     {
-        int dx = a.X - b.X, dy = a.Y - b.Y, dz = a.Z - b.Z;
-        return dx * dx + dy * dy + dz * dz;
+        var unneeded = Chunks.All.Select(c => c.Position).Where(p => !isNeeded(p)).ToList();
+        foreach (var position in unneeded)
+            Chunks.Remove(position);
+        return unneeded.Count;
     }
 
     public void Dispose() => _generator.Dispose();

@@ -30,5 +30,11 @@ public sealed record ChunkData(ChunkPos Position, ImmutableArray<byte> Data) : S
     public Chunk ToChunk() => ChunkCodec.Decode(Position, Data.AsMemory());
 }
 
+/// <summary>
+/// Чанк ушёл далеко от игрока: клиент удаляет его и его меш. Сервер шлёт это с запасом
+/// (дальше радиуса загрузки), чтобы чанки на границе не загружались и не выгружались туда-сюда.
+/// </summary>
+public sealed record ChunkUnload(ChunkPos Position) : ServerMessage;
+
 /// <summary>Блок в мире изменился. Клиент меняет свою копию и перестраивает меши.</summary>
 public sealed record BlockChanged(BlockPos Position, BlockId Block) : ServerMessage;

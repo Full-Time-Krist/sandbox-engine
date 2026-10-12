@@ -46,6 +46,10 @@ internal sealed class ClientApp(
     private ChunkRenderer _chunkRenderer = null!;
 
     private Vector3 _lastSentPosition = new(float.NaN);
+    private long _tick;
+
+    /// <summary>Построение мешей за последние 10 секунд: пишется в лог вместе с числом чанков.</summary>
+    private MeshStatsWindow _meshStats;
     private Vector2D<int> _framebufferSize;
 
     /// <summary>Блок под прицелом в текущем кадре.</summary>
@@ -118,6 +122,16 @@ internal sealed class ClientApp(
 
         _controller.Tick(Input, (float)TickDuration);
 
+        if (++_tick % GameTime.TicksPerSecond == 0)
+            UpdateStatusText();
+        if (_tick % (GameTime.TicksPerSecond * 10) == 0)
+        {
+            // Память — чтобы при долгом полёте было видно, что она не растёт без предела.
+            Console.WriteLine($"[Client] Чанков {_world.Chunks.Count}, мешей {_chunkRenderer.MeshCount}, " +
+                              $"память {GC.GetTotalMemory(false) / 1024 / 1024} МБ, позиция {_controller.Position:F0}; {_meshStats}");
+            _meshStats = default;
+        }
+
         // Шлём позицию, только если она изменилась. NaN в начальном значении гарантирует первую отправку.
         if (_controller.Position != _lastSentPosition)
         {
@@ -140,6 +154,10 @@ internal sealed class ClientApp(
 
                 case ChunkData data:
                     _world.AddChunk(data.ToChunk());
+                    break;
+
+                case ChunkUnload unload:
+                    _world.RemoveChunk(unload.Position);
                     break;
 
                 case BlockChanged changed:
@@ -176,11 +194,7 @@ internal sealed class ClientApp(
             HandleItemActions();
 
         var stats = _chunkRenderer.Update(_world);
-        if (stats.Chunks > 0)
-        {
-            Console.WriteLine($"[Client] Меши: {stats.Chunks} чанков, {stats.Quads} граней за {stats.TotalMs:F1} мс " +
-                              $"(в среднем {stats.TotalMs / stats.Chunks:F2} мс, максимум {stats.MaxMs:F2} мс), в видеопамяти {_chunkRenderer.MeshCount}");
-        }
+        _meshStats.Add(stats);
 
         Gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
@@ -289,7 +303,7 @@ internal sealed class ClientApp(
     private void UpdateStatusText()
     {
         var name = _registry.Get(_hotbar.SelectedItem).Name;
-        StatusText = $"слот {_hotbar.SelectedSlot + 1}: {name}";
+        StatusText = $"слот {_hotbar.SelectedSlot + 1}: {name} | чанков {_world.Chunks.Count}, мешей {_chunkRenderer?.MeshCount ?? 0}";
     }
 
     protected override void OnUnload()

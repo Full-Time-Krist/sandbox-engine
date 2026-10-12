@@ -116,4 +116,83 @@ public class ClientWorldTests
         Assert.Null(neighbors.PosY);
         Assert.Null(neighbors.NegZ);
     }
+
+    private static Chunk ChunkWithBlock(ChunkPos position)
+    {
+        var chunk = new Chunk(position);
+        chunk.Set(new LocalPos(1, 1, 1), new BlockId(1));
+        return chunk;
+    }
+
+    private static readonly ChunkPos[] Sides =
+    [
+        new(-1, 0, 0), new(1, 0, 0), new(0, -1, 0), new(0, 1, 0), new(0, 0, -1), new(0, 0, 1),
+    ];
+
+    [Fact]
+    public void RemoveChunk_RemovesIt_AndMarksItDirtyForMeshRemoval()
+    {
+        var world = new ClientWorld();
+        var position = new ChunkPos(2, 0, 0);
+        world.AddChunk(ChunkWithBlock(position));
+        TakeDirty(world);
+
+        world.RemoveChunk(position);
+
+        Assert.False(world.Chunks.Contains(position));
+        Assert.Equal([position], TakeDirty(world));
+    }
+
+    [Fact]
+    public void RemoveChunk_Missing_DoesNothing()
+    {
+        var world = new ClientWorld();
+
+        world.RemoveChunk(new ChunkPos(5, 5, 5));
+
+        Assert.Equal(0, world.DirtyCount);
+    }
+
+    [Fact]
+    public void CanMesh_OnlyWhenAllSixNeighborsLoaded()
+    {
+        var world = new ClientWorld();
+        var center = new ChunkPos(0, 0, 0);
+        world.AddChunk(ChunkWithBlock(center));
+
+        foreach (var side in Sides)
+        {
+            Assert.False(world.CanMesh(center), $"Меш строится без соседа {side}");
+            world.AddChunk(new Chunk(side));
+        }
+
+        Assert.True(world.CanMesh(center));
+    }
+
+    [Fact]
+    public void CanMesh_EmptyChunk_NeedsNoNeighbors()
+    {
+        var world = new ClientWorld();
+        world.AddChunk(new Chunk(new ChunkPos(0, 3, 0)));
+
+        Assert.True(world.CanMesh(new ChunkPos(0, 3, 0)));
+        Assert.False(world.CanMesh(new ChunkPos(9, 9, 9)));
+    }
+
+    [Fact]
+    public void LastNeighborArrival_MarksChunkDirtyAgain()
+    {
+        // Без этого чанк, пропущенный рендером из-за нехватки соседа, так и остался бы без меша.
+        var world = new ClientWorld();
+        var center = new ChunkPos(0, 0, 0);
+        world.AddChunk(ChunkWithBlock(center));
+        foreach (var side in Sides[..^1])
+            world.AddChunk(new Chunk(side));
+        TakeDirty(world);
+
+        world.AddChunk(new Chunk(Sides[^1]));
+
+        Assert.Contains(center, TakeDirty(world));
+        Assert.True(world.CanMesh(center));
+    }
 }

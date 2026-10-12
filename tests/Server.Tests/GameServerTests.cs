@@ -1,3 +1,4 @@
+using System.Numerics;
 using Shared.Networking;
 using Shared.Protocol;
 using Shared.Voxels;
@@ -10,6 +11,13 @@ public sealed class GameServerTests : IDisposable
 
     public void Dispose() => _servers.ForEach(s => s.Dispose());
 
+    private GameServer Create(int viewDistance = TestServers.ViewDistance, int verticalDistance = TestServers.VerticalDistance)
+    {
+        var server = TestServers.Create(viewDistance, verticalDistance);
+        _servers.Add(server);
+        return server;
+    }
+
     private static List<ServerMessage> Drain(IConnection<ClientMessage, ServerMessage> client)
     {
         var messages = new List<ServerMessage>();
@@ -18,91 +26,201 @@ public sealed class GameServerTests : IDisposable
         return messages;
     }
 
-    private (GameServer Server, IConnection<ClientMessage, ServerMessage> Client) Connect(bool waitForWorld = true)
+    /// <summary>Чанки, которые сейчас есть у клиента: ChunkData добавляет, ChunkUnload удаляет. Повторная отправка — ошибка.</summary>
+    private static void Apply(HashSet<ChunkPos> clientChunks, IEnumerable<ServerMessage> messages)
     {
-        var server = waitForWorld ? TestServers.CreateLoaded() : new GameServer(TestServers.Seed);
-        _servers.Add(server);
-        var (client, serverSide) = LocalConnection.CreatePair<ClientMessage, ServerMessage>();
-        server.Connect(serverSide);
-        return (server, client);
+        foreach (var message in messages)
+        {
+            switch (message)
+            {
+                case ChunkData data:
+                    Assert.True(clientChunks.Add(data.Position), $"Чанк {data.Position} отправлен повторно");
+                    break;
+                case ChunkUnload unload:
+                    Assert.True(clientChunks.Remove(unload.Position), $"Выгружен чанк {unload.Position}, которого у клиента нет");
+                    break;
+            }
+        }
     }
 
-    [Fact]
-    public void Join_SendsAcceptedFirst_ThenWholeWorld()
-    {
-        var (server, client) = Connect();
+    private static ChunkPos ChunkOf(Vector3 position) => BlockPos.Containing(position).Chunk;
 
-        client.Send(new JoinRequest("Tester"));
-        server.Tick();
-        var messages = Drain(client);
+    private static PlayerChunkView ViewAt(Vector3 position) =>
+        new(TestServers.ViewDistance, TestServers.VerticalDistance, ChunkOf(position));
+
+    [Fact]
+    public void Join_SendsAcceptedFirst_ThenEveryChunkAroundSpawnOnce()
+    {
+        var server = Create();
+        var messages = new List<ServerMessage>();
+
+        TestServers.JoinAndLoad(server, messages);
 
         var accepted = Assert.IsType<JoinAccepted>(messages[0]);
         Assert.Equal("base:air", accepted.BlockNames[0]);
 
-        var chunks = messages.Skip(1).Select(m => Assert.IsType<ChunkData>(m)).ToList();
-        Assert.Equal(World.TotalChunks, chunks.Count);
-        Assert.Equal(World.TotalChunks, chunks.Select(c => c.Position).Distinct().Count());
-        Assert.All(chunks, c => Assert.Equal(c.Position, c.ToChunk().Position));
+        var clientChunks = new HashSet<ChunkPos>();
+        Apply(clientChunks, messages);
+        var view = ViewAt(accepted.SpawnPosition);
+        Assert.Equal(TestServers.AreaSize(), clientChunks.Count);
+        Assert.All(clientChunks, p => Assert.True(view.LoadArea.Contains(view.Center, p), $"{p} вне области загрузки"));
     }
 
     [Fact]
-    public void JoinDuringGeneration_EventuallyReceivesEveryChunkOnce()
+    public void ChunksPerTick_AreLimited()
     {
-        // Игрок входит сразу, пока мир ещё генерируется: готовые чанки он получает при входе,
-        // остальные — по мере готовности. Ни один не должен потеряться или прийти дважды.
-        var (server, client) = Connect(waitForWorld: false);
-        client.Send(new JoinRequest("Tester"));
+        // Первый игрок загружает область; второй входит туда же, когда все чанки уже готовы.
+        // Без лимита второй получил бы их все в первом же тике.
+        var server = Create(viewDistance: 3, verticalDistance: 1);
+        TestServers.JoinAndLoad(server);
+        var (client, serverSide) = LocalConnection.CreatePair<ClientMessage, ServerMessage>();
+        server.Connect(serverSide);
+        client.Send(new JoinRequest("Second"));
 
-        var received = new List<ChunkPos>();
-        var clock = System.Diagnostics.Stopwatch.StartNew();
-        while (received.Count < World.TotalChunks && clock.Elapsed < TimeSpan.FromSeconds(30))
+        var perTick = new List<int>();
+        TestServers.TickUntil(server, () =>
         {
-            server.Tick();
-            received.AddRange(Drain(client).OfType<ChunkData>().Select(c => c.Position));
-            Thread.Sleep(1);
+            perTick.Add(Drain(client).OfType<ChunkData>().Count());
+            return perTick.Sum() >= TestServers.AreaSize(3, 1);
+        }, "второй игрок получит все чанки");
+
+        Assert.True(TestServers.AreaSize(3, 1) > GameServer.MaxChunksPerTick * 3);
+        Assert.Equal(GameServer.MaxChunksPerTick, perTick.Max());
+    }
+
+    [Fact]
+    public void MovingFar_UnloadsOldChunks_AndLoadsNewArea()
+    {
+        var server = Create();
+        var messages = new List<ServerMessage>();
+        var client = TestServers.JoinAndLoad(server, messages);
+        var clientChunks = new HashSet<ChunkPos>();
+        Apply(clientChunks, messages);
+        var spawn = Assert.IsType<JoinAccepted>(messages[0]).SpawnPosition;
+
+        var target = spawn + new Vector3(10 * ChunkMath.Size, 0, 0);
+        client.Send(new PlayerMove(target));
+        var view = ViewAt(target);
+        TestServers.TickUntil(server, () =>
+        {
+            Apply(clientChunks, Drain(client));
+            return view.Missing().All(clientChunks.Contains);
+        }, "новая область загружена");
+
+        // У клиента ровно новая область: старые чанки выгружены, ни одного лишнего.
+        Assert.Equal(TestServers.AreaSize(), clientChunks.Count);
+        Assert.All(clientChunks, p => Assert.True(view.LoadArea.Contains(view.Center, p), $"{p} не выгружен"));
+    }
+
+    [Fact]
+    public void SmallMovesBackAndForth_DoNotUnloadAnything()
+    {
+        // Гистерезис: игрок топчется на границе чанка — у клиента ничего не выгружается.
+        var server = Create();
+        var messages = new List<ServerMessage>();
+        var client = TestServers.JoinAndLoad(server, messages);
+        var spawn = Assert.IsType<JoinAccepted>(messages[0]).SpawnPosition;
+        var unloads = 0;
+
+        for (var i = 0; i < 6; i++)
+        {
+            var offset = i % 2 == 0 ? ChunkMath.Size : 0;
+            client.Send(new PlayerMove(spawn + new Vector3(offset, 0, 0)));
+            for (var t = 0; t < 5; t++)
+            {
+                server.Tick();
+                unloads += Drain(client).OfType<ChunkUnload>().Count();
+            }
         }
 
-        Assert.Equal(World.TotalChunks, received.Count);
-        Assert.Equal(World.TotalChunks, received.Distinct().Count());
-        Assert.Equal(0, server.World.PendingChunks);
+        Assert.Equal(0, unloads);
     }
 
     [Fact]
-    public void Spawn_IsAboveGround_InsideWorld()
+    public void Server_UnloadsChunksNobodyNeeds()
     {
-        var (server, client) = Connect();
-        client.Send(new JoinRequest("Tester"));
+        var server = Create();
+        var messages = new List<ServerMessage>();
+        var client = TestServers.JoinAndLoad(server, messages);
+        var spawn = Assert.IsType<JoinAccepted>(messages[0]).SpawnPosition;
+        var spawnChunk = ChunkOf(spawn);
+
+        var target = spawn + new Vector3(20 * ChunkMath.Size, 0, 0);
+        client.Send(new PlayerMove(target));
+        TestServers.TickUntil(server, () =>
+        {
+            Drain(client);
+            return !server.World.Chunks.Contains(spawnChunk);
+        }, "сервер выгрузит чанки у точки появления");
+
+        // Всё, что осталось в памяти, нужно игроку.
+        var view = ViewAt(target);
+        Assert.All(server.World.Chunks.All, c => Assert.True(view.Keeps(c.Position), $"{c.Position} не выгружен"));
+    }
+
+    [Fact]
+    public void InvalidPosition_IsIgnored()
+    {
+        var server = Create();
+        var client = TestServers.JoinAndLoad(server);
+
+        client.Send(new PlayerMove(new Vector3(float.NaN, 0, 0)));
+        client.Send(new PlayerMove(new Vector3(0, 0, 3e9f)));
+        for (var t = 0; t < 5; t++)
+            server.Tick();
+
+        // Игрок остался на месте: ничего не выгружено и не догружено.
+        Assert.Empty(Drain(client));
+    }
+
+    [Fact]
+    public void BlockChange_IsNotSentToPlayerWithoutThatChunk()
+    {
+        var server = Create();
+        var messages = new List<ServerMessage>();
+        var near = TestServers.JoinAndLoad(server, messages);
+        var spawn = Assert.IsType<JoinAccepted>(messages[0]).SpawnPosition;
+        var surface = TestServers.TopBlock(server.World, 0, 0);
+
+        // Второй игрок улетает далеко, и чанк с блоком у него выгружается.
+        var far = TestServers.JoinAndLoad(server);
+        far.Send(new PlayerMove(spawn + new Vector3(30 * ChunkMath.Size, 0, 0)));
+        TestServers.TickUntil(server, () => Drain(far).OfType<ChunkUnload>().Any(u => u.Position == surface.Chunk),
+            "у второго игрока выгрузится чанк с блоком");
+        Drain(far);
+
+        var eye = new Vector3(0.5f, surface.Y + 3.5f, 0.5f);
+        near.Send(new PlayerMove(eye));
+        near.Send(new UseItem(Shared.Items.ItemAction.Primary, eye, -Vector3.UnitY));
         server.Tick();
 
-        var spawn = Assert.IsType<JoinAccepted>(Drain(client)[0]).SpawnPosition;
-        var spawnBlock = BlockPos.Containing(spawn);
-
-        Assert.True(server.World.Chunks.Contains(spawnBlock.Chunk), $"Точка появления {spawnBlock} вне мира");
-        Assert.True(server.World.Chunks.GetBlock(spawnBlock).IsAir, "Точка появления внутри блока");
+        Assert.Contains(Drain(near), m => m is BlockChanged);
+        Assert.DoesNotContain(Drain(far), m => m is BlockChanged);
     }
 
     [Fact]
     public void MessagesBeforeJoin_AreIgnored()
     {
-        var (server, client) = Connect();
+        var server = Create();
+        var (client, serverSide) = LocalConnection.CreatePair<ClientMessage, ServerMessage>();
+        server.Connect(serverSide);
 
         client.Send(new PlayerMove(default));
         server.Tick();
 
         Assert.Empty(Drain(client));
+        Assert.Equal(0, server.World.GeneratingCount);
     }
 
     [Fact]
     public void SecondJoinRequest_IsIgnored()
     {
-        var (server, client) = Connect();
-        client.Send(new JoinRequest("Tester"));
-        server.Tick();
-        Drain(client);
+        var server = Create();
+        var client = TestServers.JoinAndLoad(server);
 
         client.Send(new JoinRequest("Tester"));
         server.Tick();
 
-        Assert.Empty(Drain(client));
+        Assert.DoesNotContain(Drain(client), m => m is JoinAccepted);
     }
 }

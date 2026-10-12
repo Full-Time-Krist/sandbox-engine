@@ -15,7 +15,7 @@ public sealed class ItemUseTests : IDisposable
     private readonly BlockPos _surface;
     private readonly Vector3 _eyeAbove;
 
-    private readonly GameServer _server = TestServers.CreateLoaded();
+    private readonly GameServer _server = TestServers.Create();
     private readonly IConnection<ClientMessage, ServerMessage> _client;
     private readonly BlockRegistry _registry = new();
     private readonly BaseBlocks _blocks;
@@ -24,22 +24,12 @@ public sealed class ItemUseTests : IDisposable
     {
         _blocks = BaseBlocks.Register(_registry);
         _registry.Freeze();
-        _client = Join(_server);
+        _client = TestServers.JoinAndLoad(_server);
         _surface = TestServers.TopBlock(_server.World, 0, 0);
         _eyeAbove = new Vector3(0.5f, _surface.Y + 3.5f, 0.5f);
     }
 
     public void Dispose() => _server.Dispose();
-
-    private static IConnection<ClientMessage, ServerMessage> Join(GameServer server)
-    {
-        var (client, serverSide) = LocalConnection.CreatePair<ClientMessage, ServerMessage>();
-        server.Connect(serverSide);
-        client.Send(new JoinRequest("Tester"));
-        server.Tick();
-        while (client.TryReceive(out _)) { }
-        return client;
-    }
 
     /// <summary>Отправляет сообщения от основного клиента, тикает сервер и возвращает полученные изменения блоков.</summary>
     private List<BlockChanged> Send(params ClientMessage[] messages)
@@ -48,9 +38,13 @@ public sealed class ItemUseTests : IDisposable
             _client.Send(message);
         _server.Tick();
 
+        // Если игрок перешёл в другой чанк, вместе с изменениями могут прийти чанки: они здесь не важны.
         var changes = new List<BlockChanged>();
         while (_client.TryReceive(out var message))
-            changes.Add(Assert.IsType<BlockChanged>(message));
+        {
+            if (message is BlockChanged change)
+                changes.Add(change);
+        }
         return changes;
     }
 
@@ -142,7 +136,7 @@ public sealed class ItemUseTests : IDisposable
     [Fact]
     public void BlockChange_IsSentToEveryPlayer()
     {
-        var second = Join(_server);
+        var second = TestServers.JoinAndLoad(_server);
 
         Send(new PlayerMove(_eyeAbove), new UseItem(ItemAction.Primary, _eyeAbove, Down));
 

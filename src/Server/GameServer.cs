@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
-using System.Diagnostics;
 using System.Numerics;
 using Server.Items;
 using Shared;
@@ -35,19 +34,40 @@ public sealed class GameServer : IDisposable
     private readonly ImmutableArray<string> _blockNames;
     private readonly BaseBlocks _blocks;
     private readonly WorldEditor _editor;
-    private int _nextPlayerId = 1;
+    /// <summary>
+    /// Сколько чанков отправлять одному игроку за тик. Иначе при входе клиент получил бы сотни чанков разом:
+    /// и сервер сжимал бы их в одном тике, и клиент строил бы их меши в одном кадре.
+    /// </summary>
+    public const int MaxChunksPerTick = 16;
 
-    /// <summary>Чанки, готовые в этом тике. Поле, а не локальная переменная, чтобы не создавать список каждый тик.</summary>
-    private readonly List<Chunk> _generated = [];
-    private readonly Stopwatch _generationClock = Stopwatch.StartNew();
-    private bool _generationLogged;
+    /// <summary>Как часто сервер выгружает чанки, рядом с которыми нет игроков: раз в секунду.</summary>
+    private const int UnloadIntervalTicks = GameTime.TicksPerSecond;
+
+    /// <summary>Дальность прорисовки по умолчанию, в чанках: 6 — 192 блока по горизонтали, 4 — 128 блоков вверх и вниз.</summary>
+    public const int DefaultViewDistance = 6;
+    public const int DefaultVerticalDistance = 4;
+
+    /// <summary>Мир по int тянется до ±2 миллиардов блоков; берём с запасом, чтобы радиусы вокруг игрока не переполнились.</summary>
+    private const float MaxCoordinate = 1_000_000_000f;
+
+    private readonly int _viewDistance;
+    private readonly int _verticalDistance;
+    private int _nextPlayerId = 1;
+    private long _tick;
+    private int _unloadedSinceLog;
 
     public World World { get; }
 
     /// <param name="seed">Сид мира: одинаковый сид — одинаковый мир.</param>
     /// <param name="generatorThreads">Сколько фоновых потоков генерирует чанки; null — по числу ядер.</param>
-    public GameServer(int seed, int? generatorThreads = null)
+    /// <param name="viewDistance">Дальность прорисовки по горизонтали, в чанках. Тесты берут маленькую, чтобы не ждать генерации.</param>
+    /// <param name="verticalDistance">Дальность прорисовки вверх и вниз, в чанках.</param>
+    public GameServer(int seed, int? generatorThreads = null,
+        int viewDistance = DefaultViewDistance, int verticalDistance = DefaultVerticalDistance)
     {
+        _viewDistance = viewDistance;
+        _verticalDistance = verticalDistance;
+
         var registry = new BlockRegistry();
         _blocks = BaseBlocks.Register(registry);
         registry.Freeze();
@@ -74,22 +94,59 @@ public sealed class GameServer : IDisposable
                 Handle(session, message);
         }
 
-        AcceptGeneratedChunks();
+        World.CollectGenerated();
+        foreach (var session in _sessions)
+        {
+            if (session.IsJoined)
+                StreamChunks(session);
+        }
+
+        if (++_tick % UnloadIntervalTicks == 0)
+            UnloadUnusedChunks();
     }
 
-    /// <summary>Забирает чанки, готовые в фоновых потоках, и рассылает их игрокам, которые уже в мире.</summary>
-    private void AcceptGeneratedChunks()
+    /// <summary>
+    /// Подгрузка вокруг игрока: выгружает у клиента ушедшие далеко чанки, отправляет готовые недостающие
+    /// (не больше <see cref="MaxChunksPerTick"/>) и ставит в генерацию те, которых ещё нет. Всё — от ближних к дальним.
+    /// </summary>
+    private void StreamChunks(ClientSession session)
     {
-        _generated.Clear();
-        World.CollectGenerated(_generated);
-        foreach (var chunk in _generated)
-            Broadcast(ChunkData.From(chunk));
+        var view = session.View;
+        foreach (var position in view.MoveTo(BlockPos.Containing(session.PlayerPosition).Chunk))
+            session.Connection.Send(new ChunkUnload(position));
 
-        if (!_generationLogged && World.PendingChunks == 0)
+        var budget = MaxChunksPerTick;
+        var canRequest = true;
+        foreach (var position in view.Missing())
         {
-            _generationLogged = true;
-            Console.WriteLine($"[Server] Мир сгенерирован (сид {World.Seed}): {World.Chunks.Count} чанков " +
-                              $"за {_generationClock.Elapsed.TotalMilliseconds:F0} мс");
+            if (World.Chunks.Get(position) is { } chunk)
+            {
+                if (budget == 0)
+                    continue;
+                session.Connection.Send(ChunkData.From(chunk));
+                view.MarkSent(position);
+                budget--;
+            }
+            else if (canRequest)
+            {
+                canRequest = World.TryRequest(position);
+            }
+
+            if (budget == 0 && !canRequest)
+                break;
+        }
+    }
+
+    /// <summary>Выгружает из памяти сервера чанки, которые не нужны ни одному игроку.</summary>
+    private void UnloadUnusedChunks()
+    {
+        _unloadedSinceLog += World.Unload(position => _sessions.Any(s => s.IsJoined && s.View.Keeps(position)));
+
+        // Сводка раз в 10 секунд, а не каждую выгрузку: в полёте выгрузка идёт каждую секунду.
+        if (_tick % (UnloadIntervalTicks * 10) == 0 && _unloadedSinceLog > 0)
+        {
+            Console.WriteLine($"[Server] За 10 с выгружено {_unloadedSinceLog} чанков, в памяти {World.Chunks.Count}");
+            _unloadedSinceLog = 0;
         }
     }
 
@@ -101,16 +158,22 @@ public sealed class GameServer : IDisposable
         switch (message)
         {
             case JoinRequest join when !session.IsJoined:
-                session.Join(_nextPlayerId++, join.PlayerName, Hotbar.CreateDefault(_blocks));
+                var spawnChunk = BlockPos.Containing(World.SpawnPosition).Chunk;
+                session.Join(_nextPlayerId++, join.PlayerName, Hotbar.CreateDefault(_blocks),
+                    new PlayerChunkView(_viewDistance, _verticalDistance, spawnChunk));
                 // До первого PlayerMove игрок стоит в точке появления, иначе его действия сочлись бы «издалека».
                 session.PlayerPosition = World.SpawnPosition;
+                // Чанки придут в следующих тиках (StreamChunks), начиная с ближайших.
                 session.Connection.Send(new JoinAccepted(session.PlayerId, World.SpawnPosition, _blockNames));
-                SendWorld(session);
                 Console.WriteLine($"[Server] {session.PlayerName} подключился (id {session.PlayerId})");
                 break;
 
             case PlayerMove move when session.IsJoined:
-                session.PlayerPosition = move.Position;
+                // От позиции зависит, какие чанки грузить: NaN или координаты за пределами int сломали бы расчёт.
+                if (IsValidPosition(move.Position))
+                    session.PlayerPosition = move.Position;
+                else
+                    Console.WriteLine($"[Server] {session.PlayerName}: неверная позиция {move.Position}");
                 break;
 
             case SelectHotbarSlot select when session.IsJoined:
@@ -146,16 +209,22 @@ public sealed class GameServer : IDisposable
         ItemBehaviors.For(item).Use(use.Action, new ItemUseContext(_editor, item, target, use.EyePosition));
     }
 
-    private void Broadcast(ServerMessage message)
+    private static bool IsValidPosition(Vector3 position) =>
+        float.IsFinite(position.X) && float.IsFinite(position.Y) && float.IsFinite(position.Z)
+        && Math.Abs(position.X) < MaxCoordinate && Math.Abs(position.Y) < MaxCoordinate && Math.Abs(position.Z) < MaxCoordinate;
+
+    /// <summary>Сообщает об изменении блока игрокам, у которых есть этот чанк: остальным он не нужен.</summary>
+    private void BroadcastBlockChange(BlockChanged change)
     {
+        var chunk = change.Position.Chunk;
         foreach (var session in _sessions)
         {
-            if (session.IsJoined)
-                session.Connection.Send(message);
+            if (session.IsJoined && session.View.WasSent(chunk))
+                session.Connection.Send(change);
         }
     }
 
-    /// <summary>Единственная точка изменения блоков на сервере: меняет мир и сообщает всем клиентам.</summary>
+    /// <summary>Единственная точка изменения блоков на сервере: меняет мир и сообщает игрокам.</summary>
     private sealed class WorldEditor(GameServer server) : IBlockEditor
     {
         public BlockId GetBlock(BlockPos pos) => server.World.Chunks.GetBlock(pos);
@@ -165,28 +234,8 @@ public sealed class GameServer : IDisposable
             if (!server.World.Chunks.TrySetBlock(pos, block))
                 return false;
 
-            server.Broadcast(new BlockChanged(pos, block));
+            server.BroadcastBlockChange(new BlockChanged(pos, block));
             return true;
         }
-    }
-
-    /// <summary>
-    /// Отправляет игроку уже сгенерированные чанки; остальные он получит по мере готовности (<see cref="AcceptGeneratedChunks"/>).
-    /// Пока мир маленький, отправляется целиком. На шаге 2.4 — только чанки вокруг игрока.
-    /// </summary>
-    private void SendWorld(ClientSession session)
-    {
-        var count = 0;
-        long bytes = 0;
-        foreach (var chunk in World.Chunks.All)
-        {
-            var data = ChunkData.From(chunk);
-            session.Connection.Send(data);
-            count++;
-            bytes += data.Data.Length;
-        }
-
-        Console.WriteLine($"[Server] {session.PlayerName}: отправлено {count} чанков, {bytes / 1024.0:F0} КБ " +
-                          $"(без сжатия {count * ChunkMath.Volume * 2 / 1024 / 1024.0:F1} МБ)");
     }
 }
