@@ -16,10 +16,12 @@ var product = Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyProductAtt
 // Сид можно задать аргументом: Sandbox.exe --seed 123. Пока сохранений нет (шаг 2.7), по умолчанию он постоянный,
 // чтобы мир не менялся от запуска к запуску и скриншоты можно было сравнивать.
 const int DefaultSeed = 1;
-var seedIndex = Array.IndexOf(args, "--seed");
-var seed = seedIndex >= 0 && seedIndex + 1 < args.Length ? int.Parse(args[seedIndex + 1]) : DefaultSeed;
+var seed = IntArgument("--seed", 0) ?? DefaultSeed;
 
-using var server = new GameServer(seed);
+// Точка появления: Sandbox.exe --spawn 1000000 1000000 — для проверки мира вдали от центра.
+var spawnColumn = (IntArgument("--spawn", 0) ?? 0, IntArgument("--spawn", 1) ?? 0);
+
+using var server = new GameServer(seed, spawnColumn: spawnColumn);
 var (clientConnection, serverConnection) = LocalConnection.CreatePair<ClientMessage, ServerMessage>();
 server.Connect(serverConnection);
 
@@ -30,3 +32,10 @@ host.Start();
 
 using var app = new ClientApp(new WindowSettings { Title = product }, clientConnection, host);
 app.Run();
+
+// Число после аргумента name (offset — номер числа: у --spawn их два), или null, если аргумента нет.
+int? IntArgument(string name, int offset)
+{
+    var index = Array.IndexOf(args, name);
+    return index >= 0 && index + 1 + offset < args.Length ? int.Parse(args[index + 1 + offset]) : null;
+}

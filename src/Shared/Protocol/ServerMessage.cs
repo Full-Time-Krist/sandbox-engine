@@ -14,7 +14,7 @@ public abstract record ServerMessage;
 /// Имена блоков по порядку числовых id. Клиент сверяет их со своим реестром: при расхождении
 /// одинаковые числа означали бы разные блоки. В мультиплеере клиент будет строить таблицу по этому списку.
 /// </param>
-public sealed record JoinAccepted(int PlayerId, Vector3 SpawnPosition, ImmutableArray<string> BlockNames) : ServerMessage;
+public sealed record JoinAccepted(int PlayerId, Vector3d SpawnPosition, ImmutableArray<string> BlockNames) : ServerMessage;
 
 /// <summary>Содержимое чанка, сжатое <see cref="ChunkCodec"/>.</summary>
 /// <param name="Data">

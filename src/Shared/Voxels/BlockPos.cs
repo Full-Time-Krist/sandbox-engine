@@ -1,5 +1,3 @@
-using System.Numerics;
-
 namespace Shared.Voxels;
 
 /// <summary>Мировые координаты блока. Блок занимает куб от (X, Y, Z) до (X + 1, Y + 1, Z + 1).</summary>
@@ -14,8 +12,8 @@ public readonly record struct BlockPos(int X, int Y, int Z)
     public LocalPos Local => new(X & ChunkMath.Mask, Y & ChunkMath.Mask, Z & ChunkMath.Mask);
 
     /// <summary>Блок, внутри которого лежит точка.</summary>
-    public static BlockPos Containing(Vector3 point) =>
-        new((int)MathF.Floor(point.X), (int)MathF.Floor(point.Y), (int)MathF.Floor(point.Z));
+    public static BlockPos Containing(Vector3d point) =>
+        new((int)Math.Floor(point.X), (int)Math.Floor(point.Y), (int)Math.Floor(point.Z));
 
     public static BlockPos operator +(BlockPos a, BlockPos b) => new(a.X + b.X, a.Y + b.Y, a.Z + b.Z);
     public static BlockPos operator -(BlockPos a, BlockPos b) => new(a.X - b.X, a.Y - b.Y, a.Z - b.Z);

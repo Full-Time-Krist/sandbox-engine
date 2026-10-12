@@ -6,6 +6,12 @@ namespace Engine.Graphics;
 /// Перспективная камера с углами рыскания (yaw) и тангажа (pitch).
 /// Система координат правая: X вправо, Y вверх, при нулевых углах взгляд направлен вдоль −Z.
 /// </summary>
+/// <remarks>
+/// Позиции у камеры нет: она всегда в начале координат, а мир рисуется относительно неё (camera-relative).
+/// Смещение каждого объекта от камеры считает вызывающий код в double и передаёт в шейдер маленьким числом.
+/// Если бы в матрицу вида попадала абсолютная позиция, вдали от центра мира (сотни тысяч блоков)
+/// float терял бы точность, и вершины дрожали бы при каждом движении камеры.
+/// </remarks>
 public sealed class Camera
 {
     // Чуть меньше 90°: при взгляде строго вверх forward совпадает с up и CreateLookAt вырождается.
@@ -13,8 +19,6 @@ public sealed class Camera
 
     private float _yaw;
     private float _pitch;
-
-    public Vector3 Position { get; set; }
 
     /// <summary>Поворот вокруг вертикальной оси в радианах. Положительный поворачивает вправо.</summary>
     public float Yaw
@@ -66,13 +70,14 @@ public sealed class Camera
         }
     }
 
-    public Matrix4x4 View => Matrix4x4.CreateLookAt(Position, Position + Forward, Vector3.UnitY);
+    /// <summary>Только поворот: камера в начале координат.</summary>
+    public Matrix4x4 View => Matrix4x4.CreateLookAt(Vector3.Zero, Forward, Vector3.UnitY);
 
     // Глубина в диапазоне [0; 1]: движок включает glClipControl(ZERO_TO_ONE), см. Application.
     public Matrix4x4 Projection => Matrix4x4.CreatePerspectiveFieldOfView(FieldOfView, AspectRatio, NearPlane, FarPlane);
 
     /// <summary>
-    /// View × Projection в порядке System.Numerics (вектор-строка слева).
+    /// View × Projection в порядке System.Numerics (вектор-строка слева). Точки — относительно камеры.
     /// В шейдере та же матрица умножается как <c>u_ViewProjection * vec4(pos, 1)</c>.
     /// </summary>
     public Matrix4x4 ViewProjection => View * Projection;

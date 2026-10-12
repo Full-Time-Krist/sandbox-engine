@@ -1,4 +1,5 @@
 using System.Numerics;
+using Shared;
 using Shared.Blocks;
 using Shared.Items;
 using Shared.Voxels;
@@ -17,7 +18,7 @@ internal interface IBlockEditor
 /// <summary>Всё, что поведению предмета нужно знать о применении.</summary>
 /// <param name="HeldItem">Предмет в руке. Пока это блок; позже — стопка предметов.</param>
 /// <param name="Target">Блок под прицелом по лучу, повторённому сервером, или null, если в пределах дальности пусто.</param>
-internal readonly record struct ItemUseContext(IBlockEditor World, BlockId HeldItem, BlockHit? Target, Vector3 EyePosition);
+internal readonly record struct ItemUseContext(IBlockEditor World, BlockId HeldItem, BlockHit? Target, Vector3d EyePosition);
 
 /// <summary>
 /// Что делает предмет при основном и дополнительном действии. Новый вид предмета (инструмент, еда, оружие)

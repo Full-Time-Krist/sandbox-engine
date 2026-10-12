@@ -45,8 +45,12 @@ internal sealed class ClientApp(
     private TextureArray _blockTextures = null!;
     private ChunkRenderer _chunkRenderer = null!;
 
-    private Vector3 _lastSentPosition = new(float.NaN);
+    private Vector3d _lastSentPosition = new(double.NaN, double.NaN, double.NaN);
     private long _tick;
+    private bool _joined;
+
+    /// <summary>Сколько чанков нарисовано в последнем кадре (после отсечения невидимых).</summary>
+    private int _drawnChunks;
 
     /// <summary>Построение мешей за последние 10 секунд: пишется в лог вместе с числом чанков.</summary>
     private MeshStatsWindow _meshStats;
@@ -81,7 +85,7 @@ internal sealed class ClientApp(
         _crosshair = LineGeometry.CreateCrosshair(Gl);
 
         // Позицию задаст сервер в JoinAccepted.
-        _controller = new FlyCameraController(_camera, startPosition: Vector3.Zero);
+        _controller = new FlyCameraController(_camera, startPosition: Vector3d.Zero);
         UpdateAspectRatio(Window.FramebufferSize);
 
         connection.Send(new JoinRequest("Player"));
@@ -139,7 +143,8 @@ internal sealed class ClientApp(
         }
 
         // Шлём позицию, только если она изменилась. NaN в начальном значении гарантирует первую отправку.
-        if (_controller.Position != _lastSentPosition)
+        // До JoinAccepted позиция ещё не настоящая (начало координат): сервер начал бы грузить чанки вокруг неё.
+        if (_joined && _controller.Position != _lastSentPosition)
         {
             connection.Send(new PlayerMove(_controller.Position));
             _lastSentPosition = _controller.Position;
@@ -155,6 +160,7 @@ internal sealed class ClientApp(
                 case JoinAccepted accepted:
                     VerifyBlockTable(accepted.BlockNames);
                     _controller.Teleport(accepted.SpawnPosition);
+                    _joined = true;
                     Console.WriteLine($"[Client] Подключён к серверу, id игрока {accepted.PlayerId}");
                     break;
 
@@ -200,26 +206,30 @@ internal sealed class ClientApp(
             _frameTimes = (Math.Max(_frameTimes.MaxMs, frameMs), _frameTimes.Slow + (frameMs > 20 ? 1 : 0));
 
         var actionsAllowed = HandleFrameInput();
-        _controller.UpdateCamera(alpha);
-        _target = VoxelRaycast.Cast(_world.Chunks, _camera.Position, _camera.Forward, GameRules.BlockReach);
+        _controller.UpdateEye(alpha);
+        var eye = _controller.EyePosition;
+        _target = VoxelRaycast.Cast(_world.Chunks, eye, _camera.Forward, GameRules.BlockReach);
         if (actionsAllowed)
             HandleItemActions();
 
-        var stats = _chunkRenderer.Update(_world, _camera.Position);
+        var stats = _chunkRenderer.Update(_world, eye);
         _meshStats.Add(stats);
 
         Gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
         _chunkShader.Use();
-        _chunkShader.SetUniform("u_ViewProjection", _camera.ViewProjection);
+        // Камера в начале координат: матрица содержит только поворот и проекцию, а смещения от камеры
+        // считаются в double для каждого объекта. Так мир не дрожит и в миллионе блоков от центра.
+        var viewProjection = _camera.ViewProjection;
+        _chunkShader.SetUniform("u_ViewProjection", viewProjection);
         _blockTextures.Bind(0);
-        _chunkRenderer.Draw(_chunkShader);
+        _drawnChunks = _chunkRenderer.Draw(_chunkShader, eye, Frustum.FromMatrix(viewProjection));
 
-        DrawSelection();
+        DrawSelection(eye);
         DrawCrosshair();
     }
 
-    private void DrawSelection()
+    private void DrawSelection(Vector3d eye)
     {
         if (_target is not { } target)
             return;
@@ -227,8 +237,9 @@ internal sealed class ClientApp(
         // Рамка чуть больше блока, иначе её линии совпадут с рёбрами граней и будут мерцать (z-fighting).
         const float Grow = 0.004f;
         var block = target.Block;
+        var offset = (new Vector3d(block.X, block.Y, block.Z) - eye).ToVector3();
         var model = Matrix4x4.CreateScale(1f + Grow)
-                    * Matrix4x4.CreateTranslation(block.X - Grow / 2, block.Y - Grow / 2, block.Z - Grow / 2);
+                    * Matrix4x4.CreateTranslation(offset - new Vector3(Grow / 2));
 
         _lineShader.Use();
         _lineShader.SetUniform("u_ViewProjection", _camera.ViewProjection);
@@ -307,15 +318,15 @@ internal sealed class ClientApp(
     private void HandleItemActions()
     {
         if (Input.WasMousePressed(MouseButton.Left))
-            connection.Send(new UseItem(ItemAction.Primary, _camera.Position, _camera.Forward));
+            connection.Send(new UseItem(ItemAction.Primary, _controller.EyePosition, _camera.Forward));
         if (Input.WasMousePressed(MouseButton.Right))
-            connection.Send(new UseItem(ItemAction.Secondary, _camera.Position, _camera.Forward));
+            connection.Send(new UseItem(ItemAction.Secondary, _controller.EyePosition, _camera.Forward));
     }
 
     private void UpdateStatusText()
     {
         var name = _registry.Get(_hotbar.SelectedItem).Name;
-        StatusText = $"слот {_hotbar.SelectedSlot + 1}: {name} | чанков {_world.Chunks.Count}, мешей {_chunkRenderer?.MeshCount ?? 0}";
+        StatusText = $"слот {_hotbar.SelectedSlot + 1}: {name} | чанков {_world.Chunks.Count}, мешей {_chunkRenderer?.MeshCount ?? 0}, нарисовано {_drawnChunks}";
     }
 
     protected override void OnUnload()

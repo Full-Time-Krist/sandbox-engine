@@ -1,4 +1,5 @@
 using System.Numerics;
+using Shared;
 using Shared.Networking;
 using Shared.Protocol;
 using Shared.Voxels;
@@ -43,9 +44,9 @@ public sealed class GameServerTests : IDisposable
         }
     }
 
-    private static ChunkPos ChunkOf(Vector3 position) => BlockPos.Containing(position).Chunk;
+    private static ChunkPos ChunkOf(Vector3d position) => BlockPos.Containing(position).Chunk;
 
-    private static PlayerChunkView ViewAt(Vector3 position) =>
+    private static PlayerChunkView ViewAt(Vector3d position) =>
         new(TestServers.ViewDistance, TestServers.VerticalDistance, ChunkOf(position));
 
     [Fact]

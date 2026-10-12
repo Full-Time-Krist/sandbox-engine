@@ -1,6 +1,7 @@
 using System.Numerics;
 using Engine.Graphics;
 using Engine.Input;
+using Shared;
 using Silk.NET.Input;
 
 namespace Client;
@@ -8,24 +9,29 @@ namespace Client;
 /// <summary>
 /// Свободный полёт камеры. Мышь поворачивает взгляд каждый кадр, чтобы отклик был мгновенным.
 /// Движение считается в тиках, как будущая физика игрока, а на экран выводится интерполированная позиция.
+/// Позиции — в double (<see cref="Vector3d"/>): у камеры своей позиции нет, мир рисуется относительно этой.
 /// </summary>
-internal sealed class FlyCameraController(Camera camera, Vector3 startPosition)
+internal sealed class FlyCameraController(Camera camera, Vector3d startPosition)
 {
     private const float MouseSensitivity = 0.0025f; // радиан на пиксель
     private const float Speed = 10f;                // блоков в секунду
     private const float SprintMultiplier = 3f;
 
-    private Vector3 _position = startPosition;
-    private Vector3 _previousPosition = startPosition;
+    private Vector3d _position = startPosition;
+    private Vector3d _previousPosition = startPosition;
 
     /// <summary>Позиция на последнем тике (не интерполированная).</summary>
-    public Vector3 Position => _position;
+    public Vector3d Position => _position;
+
+    /// <summary>Позиция глаза в текущем кадре, между двумя последними тиками (см. <see cref="UpdateEye"/>).</summary>
+    public Vector3d EyePosition { get; private set; } = startPosition;
 
     /// <summary>Мгновенно переносит камеру, без интерполяции от старой позиции.</summary>
-    public void Teleport(Vector3 position)
+    public void Teleport(Vector3d position)
     {
         _position = position;
         _previousPosition = position;
+        EyePosition = position;
     }
 
     /// <summary>Вызывается каждый кадр, пока курсор захвачен.</summary>
@@ -57,6 +63,6 @@ internal sealed class FlyCameraController(Camera camera, Vector3 startPosition)
         _position += Vector3.Normalize(direction) * speed * tickDuration;
     }
 
-    /// <summary>Выставляет камеру в позицию между двумя последними тиками.</summary>
-    public void UpdateCamera(float alpha) => camera.Position = Vector3.Lerp(_previousPosition, _position, alpha);
+    /// <summary>Выставляет глаз в позицию между двумя последними тиками.</summary>
+    public void UpdateEye(float alpha) => EyePosition = Vector3d.Lerp(_previousPosition, _position, alpha);
 }

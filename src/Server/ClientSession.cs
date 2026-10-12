@@ -1,4 +1,5 @@
 using System.Numerics;
+using Shared;
 using Shared.Items;
 using Shared.Networking;
 using Shared.Protocol;
@@ -13,7 +14,7 @@ internal sealed class ClientSession(IConnection<ServerMessage, ClientMessage> co
     public bool IsJoined { get; private set; }
     public int PlayerId { get; private set; }
     public string PlayerName { get; private set; } = "";
-    public Vector3 PlayerPosition { get; set; }
+    public Vector3d PlayerPosition { get; set; }
 
     /// <summary>Хотбар игрока. Появляется при подключении (<see cref="Join"/>).</summary>
     public Hotbar Hotbar { get; private set; } = null!;

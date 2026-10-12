@@ -48,7 +48,7 @@ public sealed class GameServer : IDisposable
     public const int DefaultVerticalDistance = 4;
 
     /// <summary>Мир по int тянется до ±2 миллиардов блоков; берём с запасом, чтобы радиусы вокруг игрока не переполнились.</summary>
-    private const float MaxCoordinate = 1_000_000_000f;
+    private const double MaxCoordinate = 1_000_000_000;
 
     private readonly int _viewDistance;
     private readonly int _verticalDistance;
@@ -62,8 +62,10 @@ public sealed class GameServer : IDisposable
     /// <param name="generatorThreads">Сколько фоновых потоков генерирует чанки; null — по числу ядер.</param>
     /// <param name="viewDistance">Дальность прорисовки по горизонтали, в чанках. Тесты берут маленькую, чтобы не ждать генерации.</param>
     /// <param name="verticalDistance">Дальность прорисовки вверх и вниз, в чанках.</param>
+    /// <param name="spawnColumn">Столбец точки появления; по умолчанию (0, 0).</param>
     public GameServer(int seed, int? generatorThreads = null,
-        int viewDistance = DefaultViewDistance, int verticalDistance = DefaultVerticalDistance)
+        int viewDistance = DefaultViewDistance, int verticalDistance = DefaultVerticalDistance,
+        (int X, int Z) spawnColumn = default)
     {
         _viewDistance = viewDistance;
         _verticalDistance = verticalDistance;
@@ -73,7 +75,7 @@ public sealed class GameServer : IDisposable
         registry.Freeze();
 
         _blockNames = [.. registry.All.Select(b => b.Name)];
-        World = new World(_blocks, seed, generatorThreads ?? ChunkGenerator.DefaultWorkerCount);
+        World = new World(_blocks, seed, generatorThreads ?? ChunkGenerator.DefaultWorkerCount, spawnColumn);
         _editor = new WorldEditor(this);
     }
 
@@ -194,10 +196,10 @@ public sealed class GameServer : IDisposable
 
     private void HandleUseItem(ClientSession session, UseItem use)
     {
-        if (!float.IsFinite(use.EyePosition.LengthSquared()) || !float.IsFinite(use.LookDirection.LengthSquared()))
+        if (!IsValidPosition(use.EyePosition) || !float.IsFinite(use.LookDirection.LengthSquared()))
             return;
 
-        if (Vector3.Distance(use.EyePosition, session.PlayerPosition) > MaxEyeOffset)
+        if (Vector3d.Distance(use.EyePosition, session.PlayerPosition) > MaxEyeOffset)
         {
             Console.WriteLine($"[Server] {session.PlayerName}: действие отклонено, точка взгляда далеко от игрока");
             return;
@@ -209,8 +211,8 @@ public sealed class GameServer : IDisposable
         ItemBehaviors.For(item).Use(use.Action, new ItemUseContext(_editor, item, target, use.EyePosition));
     }
 
-    private static bool IsValidPosition(Vector3 position) =>
-        float.IsFinite(position.X) && float.IsFinite(position.Y) && float.IsFinite(position.Z)
+    private static bool IsValidPosition(Vector3d position) =>
+        position.IsFinite
         && Math.Abs(position.X) < MaxCoordinate && Math.Abs(position.Y) < MaxCoordinate && Math.Abs(position.Z) < MaxCoordinate;
 
     /// <summary>Сообщает об изменении блока игрокам, у которых есть этот чанк: остальным он не нужен.</summary>

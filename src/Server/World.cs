@@ -1,4 +1,5 @@
 using System.Numerics;
+using Shared;
 using Shared.Blocks;
 using Shared.Voxels;
 
@@ -25,17 +26,19 @@ public sealed class World : IDisposable
 
     public int Seed { get; }
 
-    /// <summary>Точка появления: над поверхностью в начале координат, с запасом для обзора.</summary>
-    public Vector3 SpawnPosition { get; }
+    /// <summary>Точка появления: над поверхностью (по умолчанию в начале координат), с запасом для обзора.</summary>
+    public Vector3d SpawnPosition { get; }
 
     /// <summary>Сколько чанков сейчас генерируется.</summary>
     public int GeneratingCount => _generating.Count;
 
-    internal World(BaseBlocks blocks, int seed, int generatorThreads)
+    /// <param name="spawnColumn">Столбец, над которым появляется игрок. Для проверок вдали от центра мира.</param>
+    internal World(BaseBlocks blocks, int seed, int generatorThreads, (int X, int Z) spawnColumn = default)
     {
         Seed = seed;
         var terrain = new TerrainGenerator(blocks, seed);
-        SpawnPosition = new Vector3(0.5f, terrain.SurfaceHeight(0, 0) + 12f, 0.5f);
+        var (sx, sz) = spawnColumn;
+        SpawnPosition = new Vector3d(sx + 0.5, terrain.SurfaceHeight(sx, sz) + 12, sz + 0.5);
         _generator = new ChunkGenerator(terrain, generatorThreads);
     }
 

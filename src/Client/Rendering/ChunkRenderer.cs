@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Numerics;
 using Engine.Graphics;
+using Shared;
 using Shared.Voxels;
 using Silk.NET.OpenGL;
 
@@ -68,7 +69,7 @@ internal sealed class ChunkRenderer : IDisposable
     /// <summary>Сколько чанков ждёт отправки или строится.</summary>
     public int Pending => _waiting.Count + _versions.Count;
 
-    public MeshUpdateStats Update(ClientWorld world, Vector3 cameraPosition)
+    public MeshUpdateStats Update(ClientWorld world, Vector3d cameraPosition)
     {
         var clock = Stopwatch.StartNew();
         SubmitDirty(world, BlockPos.Containing(cameraPosition).Chunk, clock);
@@ -151,15 +152,27 @@ internal sealed class ChunkRenderer : IDisposable
         return dx * dx + dy * dy + dz * dz;
     }
 
-    /// <summary>Рисует все меши. Шейдер чанков должен быть активен, ViewProjection и текстуры выставлены.</summary>
-    public void Draw(ShaderProgram shader)
+    /// <summary>
+    /// Рисует меши, попавшие в пирамиду видимости, и возвращает их число. Шейдер чанков должен быть активен,
+    /// ViewProjection (без позиции камеры) и текстуры выставлены.
+    /// </summary>
+    public int Draw(ShaderProgram shader, Vector3d cameraPosition, in Frustum frustum)
     {
+        var drawn = 0;
         foreach (var (position, mesh) in _meshes)
         {
+            // Смещение чанка от камеры считается в double и только потом становится float: так оно точное
+            // (не дальше нескольких сотен блоков), даже если сами координаты — миллионы.
             var origin = position.Origin;
-            shader.SetUniform("u_Model", Matrix4x4.CreateTranslation(origin.X, origin.Y, origin.Z));
+            var offset = (new Vector3d(origin.X, origin.Y, origin.Z) - cameraPosition).ToVector3();
+            if (!frustum.Intersects(offset, offset + new Vector3(ChunkMath.Size)))
+                continue;
+
+            shader.SetUniform("u_Model", Matrix4x4.CreateTranslation(offset));
             mesh.Draw();
+            drawn++;
         }
+        return drawn;
     }
 
     public void Dispose()

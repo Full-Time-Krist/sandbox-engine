@@ -8,7 +8,7 @@
 
 ## Текущее состояние
 
-- Этапы 0 и 1 завершены, шаги 2.1–2.5 сделаны. **Следующий шаг — 2.6 «Отсечение и точность»** (план этапа 2 — раздел 10 DESIGN.md).
+- Этапы 0 и 1 завершены, шаги 2.1–2.6 сделаны. **Следующий шаг — 2.7 «Сохранение и загрузка»** (план этапа 2 — раздел 10 DESIGN.md).
 - Репозиторий: https://github.com/Full-Time-Krist/sandbox-engine, ветка `main`. На момент написания ветка совпадает с `origin/main`.
 - Название игры временное (`Sandbox`). Оно задаётся одной строкой `GameName` в `Directory.Build.props`; в коде название не пишем, namespace'ы нейтральные.
 
@@ -37,7 +37,7 @@
 - Версии NuGet-пакетов — только в `Directory.Packages.props`.
 - `global.json` включает Microsoft.Testing.Platform: без него `dotnet test` в .NET 10 с xUnit v3 падает.
 - Текстуры-заглушки генерирует `python tools/generate_textures.py`.
-- Сид мира — аргумент `--seed N` (по умолчанию 1); в `tools/playtest.ps1`: `Start-Game -Arguments '--seed 2'`.
+- Сид мира — аргумент `--seed N` (по умолчанию 1), точка появления — `--spawn X Z` (по умолчанию 0 0); в `tools/playtest.ps1`: `Start-Game -Arguments '--seed 2 --spawn 1000000 0'`.
 - Консоль игры пишет в UTF-8. Читая её лог из PowerShell, указывай `-Encoding UTF8`.
 
 ## Грабли, на которые уже наступали
