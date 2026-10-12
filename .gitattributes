@@ -1,0 +1,7 @@
+# В репозитории все текстовые файлы хранятся с LF, при checkout git сам подставит концы строк ОС.
+* text=auto
+
+*.png binary
+*.jpg binary
+*.ogg binary
+*.wav binary

@@ -1,0 +1,20 @@
+<Project>
+
+  <!-- Название игры. Чтобы переименовать проект, достаточно поменять эту строку. -->
+  <PropertyGroup>
+    <GameName>Sandbox</GameName>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+
+    <!-- Namespace'ы нейтральные (Engine, Shared...), от названия игры не зависят. -->
+    <RootNamespace>$(MSBuildProjectName)</RootNamespace>
+    <AssemblyName>$(GameName).$(MSBuildProjectName)</AssemblyName>
+    <Product>$(GameName)</Product>
+  </PropertyGroup>
+
+</Project>
