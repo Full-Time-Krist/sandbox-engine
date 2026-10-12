@@ -105,6 +105,7 @@ Server не зависит от Engine: сервер должен уметь р�
 - Название игры задаётся одной строкой: `GameName` в `Directory.Build.props`. Из него получаются имена сборок и exe. Namespace'ы нейтральные (`Engine`, `Client`...), в коде название игры не пишем.
 - Версии NuGet-пакетов хранятся только в `Directory.Packages.props`, в csproj пишется лишь имя пакета.
 - Ассеты (шейдеры, текстуры) лежат в `src/Client/Assets` и при сборке копируются рядом с exe.
+- Тесты запускаются командой `dotnet test --solution Game.slnx`. xUnit v3 работает через Microsoft.Testing.Platform, он включён в `global.json`: без этого `dotnet test` в .NET 10 падает с ошибкой.
 
 **Рендер**
 - OpenGL 4.6 core, все объекты через DSA (`glCreate*`, `glNamed*`), без `glBind*` для настройки.
