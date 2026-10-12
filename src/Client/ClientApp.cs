@@ -22,7 +22,12 @@ internal sealed class ClientApp(WindowSettings settings) : Application(settings)
     private GpuBuffer<Vertex> _vertices = null!;
     private GpuBuffer<uint> _indices = null!;
     private VertexArrayObject _vao = null!;
-    private float _time;
+
+    // Состояние логики: угол на предыдущем и текущем тике.
+    private float _previousAngle;
+    private float _angle;
+
+    private const float RotationSpeed = 2f; // рад/с
 
     protected override void OnLoad()
     {
@@ -48,14 +53,26 @@ internal sealed class ClientApp(WindowSettings settings) : Application(settings)
         _vao.SetIndexBuffer(_indices);
     }
 
-    protected override void OnRender(double deltaTime)
+    protected override void OnTick()
     {
-        _time += (float)deltaTime;
+        _previousAngle = _angle;
+        _angle += RotationSpeed * (float)TickDuration;
+    }
 
+    protected override void OnRender(double deltaTime, float alpha)
+    {
         Gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
-
         _shader.Use();
-        _shader.SetUniform("u_Time", _time);
+
+        // Слева: состояние последнего тика как есть. Обновляется 20 раз в секунду и заметно дёргается.
+        _shader.SetUniform("u_Offset", new Vector2(-0.5f, 0f));
+        _shader.SetUniform("u_Angle", _angle);
+        _vao.DrawIndexed();
+
+        // Справа: интерполяция между двумя последними тиками. Плавно на любом FPS.
+        // Отстаёт от логики на один тик (50 мс); это обычная плата за плавность.
+        _shader.SetUniform("u_Offset", new Vector2(0.5f, 0f));
+        _shader.SetUniform("u_Angle", float.Lerp(_previousAngle, _angle, alpha));
         _vao.DrawIndexed();
     }
 

@@ -60,6 +60,7 @@ public sealed unsafe class ShaderProgram : IDisposable
     // ProgramUniform* (DSA) пишет в программу напрямую, её не нужно делать активной.
     public void SetUniform(string name, float value) => _gl.ProgramUniform1(Handle, Location(name), value);
     public void SetUniform(string name, int value) => _gl.ProgramUniform1(Handle, Location(name), value);
+    public void SetUniform(string name, Vector2 value) => _gl.ProgramUniform2(Handle, Location(name), value.X, value.Y);
     public void SetUniform(string name, Vector3 value) => _gl.ProgramUniform3(Handle, Location(name), value.X, value.Y, value.Z);
 
     public void SetUniform(string name, Matrix4x4 value)
