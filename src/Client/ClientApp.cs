@@ -8,6 +8,7 @@ using Shared;
 using Shared.Blocks;
 using Shared.Networking;
 using Shared.Protocol;
+using Shared.Voxels;
 using Silk.NET.Input;
 using Silk.NET.Maths;
 using Silk.NET.OpenGL;
@@ -28,10 +29,17 @@ internal sealed class ClientApp(
 
     private BlockRegistry _registry = null!;
     private ShaderProgram _chunkShader = null!;
+    private ShaderProgram _lineShader = null!;
+    private ColorMesh _selectionBox = null!;
+    private ColorMesh _crosshair = null!;
     private TextureArray _blockTextures = null!;
     private ChunkRenderer _chunkRenderer = null!;
 
     private Vector3 _lastSentPosition = new(float.NaN);
+    private Vector2D<int> _framebufferSize;
+
+    /// <summary>Блок под прицелом в текущем кадре.</summary>
+    private BlockHit? _target;
 
     protected override void OnLoad()
     {
@@ -49,6 +57,9 @@ internal sealed class ClientApp(
         var shaders = Path.Combine(AppContext.BaseDirectory, "Assets", "Shaders");
         _chunkShader = ShaderProgram.FromFiles(Gl, Path.Combine(shaders, "chunk"));
         _chunkShader.SetUniform("u_Textures", 0); // сэмплер читает текстурный блок 0
+        _lineShader = ShaderProgram.FromFiles(Gl, Path.Combine(shaders, "basic"));
+        _selectionBox = LineGeometry.CreateBoxOutline(Gl, new Vector3(0.05f));
+        _crosshair = LineGeometry.CreateCrosshair(Gl);
 
         // Позицию задаст сервер в JoinAccepted.
         _controller = new FlyCameraController(_camera, startPosition: Vector3.Zero);
@@ -144,6 +155,7 @@ internal sealed class ClientApp(
     {
         HandleFrameInput();
         _controller.UpdateCamera(alpha);
+        _target = VoxelRaycast.Cast(_world.Chunks, _camera.Position, _camera.Forward, GameRules.BlockReach);
 
         var stats = _chunkRenderer.Update(_world);
         if (stats.Chunks > 0)
@@ -158,6 +170,46 @@ internal sealed class ClientApp(
         _chunkShader.SetUniform("u_ViewProjection", _camera.ViewProjection);
         _blockTextures.Bind(0);
         _chunkRenderer.Draw(_chunkShader);
+
+        DrawSelection();
+        DrawCrosshair();
+    }
+
+    private void DrawSelection()
+    {
+        if (_target is not { } target)
+            return;
+
+        // Рамка чуть больше блока, иначе её линии совпадут с рёбрами граней и будут мерцать (z-fighting).
+        const float Grow = 0.004f;
+        var block = target.Block;
+        var model = Matrix4x4.CreateScale(1f + Grow)
+                    * Matrix4x4.CreateTranslation(block.X - Grow / 2, block.Y - Grow / 2, block.Z - Grow / 2);
+
+        _lineShader.Use();
+        _lineShader.SetUniform("u_ViewProjection", _camera.ViewProjection);
+        _lineShader.SetUniform("u_Model", model);
+        _selectionBox.Draw();
+    }
+
+    private void DrawCrosshair()
+    {
+        if (_framebufferSize.X <= 0 || _framebufferSize.Y <= 0)
+            return;
+
+        // Перекрестие рисуется прямо в координатах экрана (NDC от −1 до 1), поэтому камера не нужна.
+        // Меш задан в пикселях; масштаб переводит их в NDC отдельно по X и Y, чтобы крест не растягивался с окном.
+        _lineShader.Use();
+        _lineShader.SetUniform("u_ViewProjection", Matrix4x4.Identity);
+        _lineShader.SetUniform("u_Model", Matrix4x4.CreateScale(2f / _framebufferSize.X, 2f / _framebufferSize.Y, 1f));
+
+        // Белый цвет со смешиванием «1 − цвет под крестом» инвертирует фон: крест виден и на небе, и на траве.
+        Gl.Disable(EnableCap.DepthTest);
+        Gl.Enable(EnableCap.Blend);
+        Gl.BlendFunc(BlendingFactor.OneMinusDstColor, BlendingFactor.Zero);
+        _crosshair.Draw();
+        Gl.Disable(EnableCap.Blend);
+        Gl.Enable(EnableCap.DepthTest);
     }
 
     protected override void OnResize(Vector2D<int> framebufferSize) => UpdateAspectRatio(framebufferSize);
@@ -165,6 +217,7 @@ internal sealed class ClientApp(
     private void UpdateAspectRatio(Vector2D<int> size)
     {
         // При сворачивании окна размер становится 0×0, деление дало бы NaN в матрице проекции.
+        _framebufferSize = size;
         if (size.X > 0 && size.Y > 0)
             _camera.AspectRatio = (float)size.X / size.Y;
     }
@@ -184,6 +237,9 @@ internal sealed class ClientApp(
     {
         _chunkRenderer.Dispose();
         _blockTextures.Dispose();
+        _crosshair.Dispose();
+        _selectionBox.Dispose();
+        _lineShader.Dispose();
         _chunkShader.Dispose();
     }
 }
