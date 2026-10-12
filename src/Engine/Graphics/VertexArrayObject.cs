@@ -48,5 +48,12 @@ public sealed unsafe class VertexArrayObject : IDisposable
         _gl.DrawElements(primitive, (uint)_indexCount, DrawElementsType.UnsignedInt, null);
     }
 
+    /// <summary>Рисует вершины подряд, без буфера индексов.</summary>
+    public void DrawArrays(PrimitiveType primitive, int vertexCount, int first = 0)
+    {
+        _gl.BindVertexArray(Handle);
+        _gl.DrawArrays(primitive, first, (uint)vertexCount);
+    }
+
     public void Dispose() => _gl.DeleteVertexArray(Handle);
 }

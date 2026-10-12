@@ -74,6 +74,17 @@ public abstract class Application : IDisposable
         GlDebug.Enable(Gl);
 #endif
         Console.WriteLine($"OpenGL {Gl.GetStringS(StringName.Version)} | {Gl.GetStringS(StringName.Renderer)}");
+
+        // Глубина в NDC от 0 до 1, как в DirectX и Vulkan. Тогда матрицы System.Numerics подходят без переделки,
+        // точность буфера глубины распределяется лучше, и позже можно включить reversed-Z.
+        Gl.ClipControl(ClipControlOrigin.LowerLeft, ClipControlDepth.ZeroToOne);
+
+        Gl.Enable(EnableCap.DepthTest);
+        // Задние грани не рисуются. Лицевыми считаются грани с обходом против часовой стрелки, если смотреть снаружи.
+        Gl.Enable(EnableCap.CullFace);
+        Gl.CullFace(TriangleFace.Back);
+        Gl.FrontFace(FrontFaceDirection.Ccw);
+
         OnLoad();
     }
 
