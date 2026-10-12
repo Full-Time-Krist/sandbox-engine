@@ -8,7 +8,7 @@ public sealed class FixedTimestep
 {
     // Если кадр длился дольше (окно тащили мышью, сработал отладчик), лишнее время отбрасывается.
     // Иначе игра попыталась бы догнать его сотнями тиков подряд и зависла бы («спираль смерти»).
-    private const double MaxFrameTime = 0.25;
+    public const double MaxFrameTime = 0.25;
 
     private double _accumulator;
 

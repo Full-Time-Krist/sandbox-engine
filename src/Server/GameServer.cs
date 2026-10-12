@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Numerics;
 using Server.Items;
@@ -14,8 +15,8 @@ namespace Server;
 /// Владелец мира: вся игровая логика выполняется здесь, клиенты только присылают действия и получают результат.
 /// </summary>
 /// <remarks>
-/// Сервер не знает, кто и в каком потоке вызывает <see cref="Tick"/>. Сейчас это делает клиент в одиночной игре,
-/// позже это может быть отдельный поток или выделенный сервер.
+/// Сервер не знает, кто и в каком потоке вызывает <see cref="Tick"/>: в одиночной игре это <see cref="ServerHost"/>,
+/// в тестах — сам тест. Всё состояние сервера меняется только внутри <see cref="Tick"/>, из одного потока.
 /// </remarks>
 public sealed class GameServer
 {
@@ -27,6 +28,9 @@ public sealed class GameServer
     private const float MaxEyeOffset = 4f;
 
     private readonly List<ClientSession> _sessions = [];
+
+    /// <summary>Подключения, которые ещё не приняты в тике. Пополняются из любого потока.</summary>
+    private readonly ConcurrentQueue<IConnection<ServerMessage, ClientMessage>> _pendingConnections = new();
     private readonly ImmutableArray<string> _blockNames;
     private readonly BaseBlocks _blocks;
     private readonly WorldEditor _editor;
@@ -45,10 +49,17 @@ public sealed class GameServer
         _editor = new WorldEditor(this);
     }
 
-    public void Connect(IConnection<ServerMessage, ClientMessage> connection) => _sessions.Add(new ClientSession(connection));
+    /// <summary>
+    /// Подключает клиента. Можно вызывать из любого потока: сессия появится в начале следующего тика,
+    /// потому что список сессий принадлежит потоку сервера.
+    /// </summary>
+    public void Connect(IConnection<ServerMessage, ClientMessage> connection) => _pendingConnections.Enqueue(connection);
 
     public void Tick()
     {
+        while (_pendingConnections.TryDequeue(out var connection))
+            _sessions.Add(new ClientSession(connection));
+
         foreach (var session in _sessions)
         {
             while (session.Connection.TryReceive(out var message))

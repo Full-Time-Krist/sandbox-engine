@@ -17,11 +17,14 @@ using Silk.NET.OpenGL;
 namespace Client;
 
 /// <param name="connection">Канал к серверу: локальный в одиночной игре, сетевой в мультиплеере.</param>
-/// <param name="integratedServer">Встроенный сервер одиночной игры. Клиент тикает его перед своим тиком; в мультиплеере null.</param>
+/// <param name="integratedServer">
+/// Встроенный сервер одиночной игры, работающий в своём потоке; в мультиплеере null.
+/// Клиент его не тикает, а только следит, не упал ли он.
+/// </param>
 internal sealed class ClientApp(
     WindowSettings settings,
     IConnection<ClientMessage, ServerMessage> connection,
-    GameServer? integratedServer)
+    ServerHost? integratedServer)
     : Application(settings, GameTime.TicksPerSecond)
 {
     private readonly Camera _camera = new() { Pitch = -0.4f };
@@ -107,9 +110,10 @@ internal sealed class ClientApp(
 
     protected override void OnTick()
     {
-        // Порядок: сервер обрабатывает прошлые действия клиента и рассылает результат,
-        // затем клиент получает его в том же тике.
-        integratedServer?.Tick();
+        // Сервер тикает в своём потоке; ответы на действия клиента приходят через очередь, обычно к следующему тику.
+        if (integratedServer?.Fault is { } fault)
+            throw new InvalidOperationException("Встроенный сервер упал", fault);
+
         ProcessServerMessages();
 
         _controller.Tick(Input, (float)TickDuration);

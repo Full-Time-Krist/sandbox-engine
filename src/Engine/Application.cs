@@ -95,6 +95,11 @@ public abstract class Application : IDisposable
     {
         Input.BeginFrame();
 
+        // Время сверх MaxFrameTime логика не наверстает, поэтому такой кадр стоит заметить в логе.
+        // Например, пока окно тащат мышью, Windows не отдаёт управление циклу, и кадр длится секунды.
+        if (deltaTime > FixedTimestep.MaxFrameTime)
+            Console.WriteLine($"[Engine] Кадр длился {deltaTime:F2} с");
+
         var ticks = _timestep.Advance(deltaTime);
         for (var i = 0; i < ticks; i++)
             OnTick();
