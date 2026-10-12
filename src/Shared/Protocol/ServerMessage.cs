@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using Shared.Blocks;
 using Shared.Voxels;
 
@@ -15,19 +16,18 @@ public abstract record ServerMessage;
 /// </param>
 public sealed record JoinAccepted(int PlayerId, Vector3 SpawnPosition, ImmutableArray<string> BlockNames) : ServerMessage;
 
-/// <summary>Содержимое чанка.</summary>
-/// <param name="Blocks">
-/// Все блоки чанка в порядке <see cref="LocalPos.Index"/>, или пустой массив, если чанк целиком из воздуха.
+/// <summary>Содержимое чанка, сжатое <see cref="ChunkCodec"/>.</summary>
+/// <param name="Data">
+/// Блоки чанка в формате <see cref="ChunkCodec"/>: обычно 1–3 КБ вместо 64 КБ, пустой чанк — 8 байт.
 /// ImmutableArray, а не массив: сообщения передаются по ссылке и должны быть неизменяемыми.
 /// </param>
-public sealed record ChunkData(ChunkPos Position, ImmutableArray<BlockId> Blocks) : ServerMessage
+public sealed record ChunkData(ChunkPos Position, ImmutableArray<byte> Data) : ServerMessage
 {
-    public bool IsEmpty => Blocks.IsDefaultOrEmpty;
-
     public static ChunkData From(Chunk chunk) =>
-        new(chunk.Position, chunk.IsEmpty ? [] : ImmutableArray.Create(chunk.Blocks));
+        new(chunk.Position, ImmutableCollectionsMarshal.AsImmutableArray(ChunkCodec.Encode(chunk)));
 
-    public Chunk ToChunk() => IsEmpty ? new Chunk(Position) : Chunk.FromBlocks(Position, Blocks.AsSpan());
+    /// <exception cref="InvalidDataException">Данные повреждены.</exception>
+    public Chunk ToChunk() => ChunkCodec.Decode(Position, Data.AsMemory());
 }
 
 /// <summary>Блок в мире изменился. Клиент меняет свою копию и перестраивает меши.</summary>

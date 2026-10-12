@@ -40,7 +40,7 @@ public class GameServerTests
                        * (World.MaxChunk.Z - World.MinChunk.Z + 1);
         Assert.Equal(expected, chunks.Count);
         Assert.Equal(expected, chunks.Select(c => c.Position).Distinct().Count());
-        Assert.All(chunks, c => Assert.True(c.IsEmpty || c.Blocks.Length == ChunkMath.Volume));
+        Assert.All(chunks, c => Assert.Equal(c.Position, c.ToChunk().Position));
     }
 
     [Fact]

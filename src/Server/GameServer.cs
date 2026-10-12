@@ -144,7 +144,17 @@ public sealed class GameServer
     /// <summary>Пока мир маленький, при подключении он отправляется целиком. На этапе 2 — только чанки вокруг игрока.</summary>
     private void SendWorld(ClientSession session)
     {
+        var count = 0;
+        long bytes = 0;
         foreach (var chunk in World.Chunks.All)
-            session.Connection.Send(ChunkData.From(chunk));
+        {
+            var data = ChunkData.From(chunk);
+            session.Connection.Send(data);
+            count++;
+            bytes += data.Data.Length;
+        }
+
+        Console.WriteLine($"[Server] {session.PlayerName}: отправлено {count} чанков, {bytes / 1024.0:F0} КБ " +
+                          $"(без сжатия {count * ChunkMath.Volume * 2 / 1024 / 1024.0:F1} МБ)");
     }
 }

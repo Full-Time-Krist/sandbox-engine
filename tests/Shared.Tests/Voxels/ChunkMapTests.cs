@@ -77,11 +77,11 @@ public class ChunkMapTests
     }
 
     [Fact]
-    public void ChunkData_EmptyChunk_SendsNoBlocks()
+    public void ChunkData_EmptyChunk_IsTiny()
     {
         var data = ChunkData.From(new Chunk(new ChunkPos(0, 2, 0)));
 
-        Assert.True(data.IsEmpty);
+        Assert.True(data.Data.Length < 16, $"Пустой чанк занял {data.Data.Length} байт");
         Assert.True(data.ToChunk().IsEmpty);
     }
 }
