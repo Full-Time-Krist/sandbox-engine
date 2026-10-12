@@ -18,6 +18,9 @@ internal sealed class FlyCameraController(Camera camera, Vector3 startPosition)
     private Vector3 _position = startPosition;
     private Vector3 _previousPosition = startPosition;
 
+    /// <summary>Позиция на последнем тике (не интерполированная).</summary>
+    public Vector3 Position => _position;
+
     /// <summary>Вызывается каждый кадр, пока курсор захвачен.</summary>
     public void Look(Vector2 mouseDelta)
     {
