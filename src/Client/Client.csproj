@@ -16,4 +16,9 @@
     <None Include="Assets\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Тесты видят internal-классы клиента (построение меша и т. п.). -->
+    <InternalsVisibleTo Include="$(GameName).Client.Tests" />
+  </ItemGroup>
+
 </Project>

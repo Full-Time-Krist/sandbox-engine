@@ -1,10 +1,13 @@
+using System.Diagnostics;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using Client.Rendering;
 using Engine;
 using Engine.Graphics;
 using Engine.Windowing;
 using Server;
 using Shared;
+using Shared.Blocks;
 using Shared.Networking;
 using Shared.Protocol;
 using Silk.NET.Input;
@@ -21,12 +24,14 @@ internal sealed class ClientApp(
     GameServer? integratedServer)
     : Application(settings, GameTime.TicksPerSecond)
 {
-    private readonly Camera _camera = new() { Pitch = -0.3f };
+    // Камера над углом тестового чанка, взгляд по диагонали на его центр.
+    private readonly Camera _camera = new() { Yaw = 0.75f * MathF.PI, Pitch = -0.45f };
     private FlyCameraController _controller = null!;
 
     private ShaderProgram _shader = null!;
     private ColorMesh _cube = null!;
     private ColorMesh _grid = null!;
+    private ColorMesh _testChunkMesh = null!;
 
     // Куб, которым управляет сервер: две последние полученные позиции для интерполяции.
     private Vector3 _serverCubePrevious;
@@ -42,11 +47,32 @@ internal sealed class ClientApp(
         _shader = ShaderProgram.FromFiles(Gl, Path.Combine(AppContext.BaseDirectory, "Assets", "Shaders", "basic"));
         _cube = DebugGeometry.CreateCube(Gl);
         _grid = DebugGeometry.CreateGrid(Gl, halfSize: 16);
+        _testChunkMesh = BuildTestChunkMesh();
 
-        _controller = new FlyCameraController(_camera, startPosition: new Vector3(0.5f, 2f, 4f));
+        _controller = new FlyCameraController(_camera, startPosition: new Vector3(-10f, 22f, -10f));
         UpdateAspectRatio(Window.FramebufferSize);
 
         connection.Send(new JoinRequest("Player"));
+    }
+
+    private ColorMesh BuildTestChunkMesh()
+    {
+        // Клиент собирает свой реестр. В мультиплеере таблицу id будет присылать сервер.
+        var registry = new BlockRegistry();
+        var blocks = BaseBlocks.Register(registry);
+        registry.Freeze();
+
+        var mesher = new ChunkMesher(new BlockVisuals(registry, BlockVisuals.BaseColors));
+        var chunk = DebugTerrain.CreateTestChunk(blocks);
+        var data = new ChunkMeshData();
+
+        var stopwatch = Stopwatch.StartNew();
+        mesher.Build(chunk, default, data);
+        stopwatch.Stop();
+        // Первый вызов включает JIT-компиляцию, поэтому время завышено. Честный замер — на шаге 1.5, по многим чанкам.
+        Console.WriteLine($"[Client] Меш чанка: {data.QuadCount} граней, {chunk.NonAirCount} блоков, {stopwatch.Elapsed.TotalMilliseconds:F2} мс");
+
+        return new ColorMesh(Gl, CollectionsMarshal.AsSpan(data.Vertices), CollectionsMarshal.AsSpan(data.Indices), PrimitiveType.Triangles);
     }
 
     protected override void OnTick()
@@ -101,7 +127,8 @@ internal sealed class ClientApp(
 
         _shader.SetUniform("u_Model", Matrix4x4.Identity);
         _grid.Draw();
-        _cube.Draw();
+        // Тестовый чанк стоит в (0, 0, 0), поэтому матрица модели единичная.
+        _testChunkMesh.Draw();
 
         if (_hasServerCube)
         {
@@ -134,6 +161,7 @@ internal sealed class ClientApp(
 
     protected override void OnUnload()
     {
+        _testChunkMesh.Dispose();
         _grid.Dispose();
         _cube.Dispose();
         _shader.Dispose();
