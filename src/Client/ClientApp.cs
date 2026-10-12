@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using Engine;
 using Engine.Graphics;
 using Engine.Windowing;
+using Silk.NET.Input;
 using Silk.NET.OpenGL;
 
 namespace Client;
@@ -28,6 +29,9 @@ internal sealed class ClientApp(WindowSettings settings) : Application(settings)
     private float _angle;
 
     private const float RotationSpeed = 2f; // рад/с
+    private const float MouseSensitivity = 0.002f;
+
+    private Vector2 _rightOffset = new(0.5f, 0f);
 
     protected override void OnLoad()
     {
@@ -56,11 +60,15 @@ internal sealed class ClientApp(WindowSettings settings) : Application(settings)
     protected override void OnTick()
     {
         _previousAngle = _angle;
-        _angle += RotationSpeed * (float)TickDuration;
+        // Удержание клавиши в тике читать можно: это состояние, а не событие.
+        var speed = Input.IsKeyDown(Key.Space) ? RotationSpeed * 4 : RotationSpeed;
+        _angle += speed * (float)TickDuration;
     }
 
     protected override void OnRender(double deltaTime, float alpha)
     {
+        HandleFrameInput();
+
         Gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
         _shader.Use();
 
@@ -71,9 +79,24 @@ internal sealed class ClientApp(WindowSettings settings) : Application(settings)
 
         // Справа: интерполяция между двумя последними тиками. Плавно на любом FPS.
         // Отстаёт от логики на один тик (50 мс); это обычная плата за плавность.
-        _shader.SetUniform("u_Offset", new Vector2(0.5f, 0f));
+        _shader.SetUniform("u_Offset", _rightOffset);
         _shader.SetUniform("u_Angle", float.Lerp(_previousAngle, _angle, alpha));
         _vao.DrawIndexed();
+    }
+
+    private void HandleFrameInput()
+    {
+        if (!Input.IsCursorCaptured && Input.WasMousePressed(MouseButton.Left))
+            Input.CaptureCursor();
+        else if (Input.IsCursorCaptured && Input.WasKeyPressed(Key.Escape))
+            Input.ReleaseCursor();
+
+        if (Input.IsCursorCaptured)
+        {
+            // Экранный Y растёт вниз, а в OpenGL вверх, поэтому Y инвертируется.
+            var delta = Input.MouseDelta * MouseSensitivity;
+            _rightOffset += new Vector2(delta.X, -delta.Y);
+        }
     }
 
     protected override void OnUnload()

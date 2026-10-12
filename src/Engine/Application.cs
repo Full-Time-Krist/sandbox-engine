@@ -1,4 +1,5 @@
 using Engine.Graphics;
+using Engine.Input;
 using Engine.Timing;
 using Engine.Windowing;
 using Silk.NET.Maths;
@@ -23,6 +24,7 @@ public abstract class Application : IDisposable
     private readonly FrameStats _stats = new();
 
     protected GL Gl { get; private set; } = null!;
+    protected InputState Input { get; private set; } = null!;
     protected IWindow Window => _window;
     protected double TickDuration => _timestep.TickDuration;
 
@@ -67,6 +69,7 @@ public abstract class Application : IDisposable
     private void HandleLoad()
     {
         Gl = _window.CreateOpenGL();
+        Input = new InputState(_window);
 #if DEBUG
         GlDebug.Enable(Gl);
 #endif
@@ -76,6 +79,8 @@ public abstract class Application : IDisposable
 
     private void HandleFrame(double deltaTime)
     {
+        Input.BeginFrame();
+
         var ticks = _timestep.Advance(deltaTime);
         for (var i = 0; i < ticks; i++)
             OnTick();
@@ -96,6 +101,7 @@ public abstract class Application : IDisposable
     private void HandleClosing()
     {
         OnUnload();
+        Input.Dispose();
         Gl.Dispose();
     }
 
