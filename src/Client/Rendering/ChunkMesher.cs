@@ -13,7 +13,7 @@ internal readonly record struct ChunkNeighbors(
 /// <summary>Результат построения меша. Переиспользуется между чанками, чтобы не аллоцировать списки заново.</summary>
 internal sealed class ChunkMeshData
 {
-    public List<ColorVertex> Vertices { get; } = [];
+    public List<ChunkVertex> Vertices { get; } = [];
     public List<uint> Indices { get; } = [];
 
     public int QuadCount => Vertices.Count / 4;
@@ -46,15 +46,16 @@ internal sealed class ChunkMesher(BlockVisuals visuals)
                 continue;
 
             var pos = LocalPos.FromIndex(i);
-            var color = visuals.GetColor(block);
+            var origin = new Vector3(pos.X, pos.Y, pos.Z);
 
-            foreach (ref readonly var face in BlockFace.All.AsSpan())
+            for (var f = 0; f < BlockFace.All.Length; f++)
             {
+                ref readonly var face = ref BlockFace.All[f];
                 var neighbor = GetBlock(blocks, neighbors, pos.X + face.Dx, pos.Y + face.Dy, pos.Z + face.Dz);
                 if (visuals.IsOpaque(neighbor))
                     continue;
 
-                AddQuad(output, new Vector3(pos.X, pos.Y, pos.Z), face, color * face.Brightness);
+                AddQuad(output, origin, face, visuals.GetLayer(block, f));
             }
         }
     }
@@ -78,14 +79,14 @@ internal sealed class ChunkMesher(BlockVisuals visuals)
         return neighbor?.Get(new LocalPos(x & ChunkMath.Mask, y & ChunkMath.Mask, z & ChunkMath.Mask)) ?? BlockId.Air;
     }
 
-    private static void AddQuad(ChunkMeshData output, Vector3 origin, in BlockFace face, Vector3 color)
+    private static void AddQuad(ChunkMeshData output, Vector3 origin, in BlockFace face, int layer)
     {
         var first = (uint)output.Vertices.Count;
 
-        output.Vertices.Add(new ColorVertex(origin + face.A, color));
-        output.Vertices.Add(new ColorVertex(origin + face.B, color));
-        output.Vertices.Add(new ColorVertex(origin + face.C, color));
-        output.Vertices.Add(new ColorVertex(origin + face.D, color));
+        output.Vertices.Add(new ChunkVertex(origin + face.A, face.UvA, layer, face.Brightness));
+        output.Vertices.Add(new ChunkVertex(origin + face.B, face.UvB, layer, face.Brightness));
+        output.Vertices.Add(new ChunkVertex(origin + face.C, face.UvC, layer, face.Brightness));
+        output.Vertices.Add(new ChunkVertex(origin + face.D, face.UvD, layer, face.Brightness));
 
         // Два треугольника с тем же обходом, что у углов грани: (A, B, C) и (A, C, D).
         output.Indices.Add(first);

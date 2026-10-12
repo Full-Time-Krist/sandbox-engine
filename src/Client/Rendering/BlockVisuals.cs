@@ -1,46 +1,69 @@
-using System.Numerics;
 using Shared.Blocks;
 
 namespace Client.Rendering;
 
 /// <summary>
-/// Внешний вид блоков на клиенте: таблицы с доступом по <see cref="BlockId"/>, чтобы построение меша
-/// не искало ничего по строкам. Строится один раз из замороженного реестра.
+/// Внешний вид блоков на клиенте: для каждого блока и каждой грани — номер слоя в массиве текстур.
+/// Таблицы с доступом по <see cref="BlockId"/>, чтобы построение меша не искало ничего по строкам.
+/// Строится один раз из замороженного реестра.
 /// </summary>
 internal sealed class BlockVisuals
 {
-    // Ярко-розовый — общепринятый цвет «нет данных»: сразу видно блок, для которого забыли описать вид.
-    private static readonly Vector3 MissingColor = new(1f, 0f, 1f);
+    /// <summary>Слой 0 всегда «нет текстуры»: им отрисуются блоки без описания и текстуры без файла.</summary>
+    public const string MissingTexture = "missing";
 
-    public static readonly IReadOnlyDictionary<string, Vector3> BaseColors = new Dictionary<string, Vector3>
+    public static readonly IReadOnlyDictionary<string, BlockAppearance> BaseAppearances = new Dictionary<string, BlockAppearance>
     {
-        ["base:stone"] = new(0.50f, 0.50f, 0.52f),
-        ["base:dirt"] = new(0.45f, 0.30f, 0.18f),
-        ["base:grass"] = new(0.35f, 0.65f, 0.25f),
-        ["base:sand"] = new(0.86f, 0.80f, 0.55f),
-        ["base:log"] = new(0.40f, 0.28f, 0.15f),
-        ["base:planks"] = new(0.72f, 0.56f, 0.32f),
+        ["base:stone"] = BlockAppearance.Uniform("stone"),
+        ["base:dirt"] = BlockAppearance.Uniform("dirt"),
+        ["base:grass"] = new("grass_top", "grass_side", "dirt"),
+        ["base:sand"] = BlockAppearance.Uniform("sand"),
+        ["base:log"] = new("log_top", "log_side", "log_top"),
+        ["base:planks"] = BlockAppearance.Uniform("planks"),
     };
 
     private readonly bool[] _isOpaque;
-    private readonly Vector3[] _colors;
+    private readonly int[] _faceLayers;
+    private readonly List<string> _textureNames = [MissingTexture];
+    private readonly Dictionary<string, int> _layerByName = new() { [MissingTexture] = 0 };
 
-    public BlockVisuals(BlockRegistry registry, IReadOnlyDictionary<string, Vector3> colors)
+    public BlockVisuals(BlockRegistry registry, IReadOnlyDictionary<string, BlockAppearance> appearances)
     {
         // Таблицы имеют фиксированный размер: блок, зарегистрированный позже, вышел бы за их пределы.
         if (!registry.IsFrozen)
             throw new InvalidOperationException("Реестр блоков нужно заморозить до построения таблиц внешнего вида.");
 
         _isOpaque = new bool[registry.Count];
-        _colors = new Vector3[registry.Count];
+        _faceLayers = new int[registry.Count * BlockFace.All.Length];
 
         foreach (var definition in registry.All)
         {
             _isOpaque[definition.Id.Value] = definition.IsOpaque;
-            _colors[definition.Id.Value] = colors.GetValueOrDefault(definition.Name, MissingColor);
+            if (definition.Id.IsAir)
+                continue;
+
+            var appearance = appearances.GetValueOrDefault(definition.Name) ?? BlockAppearance.Uniform(MissingTexture);
+            for (var face = 0; face < BlockFace.All.Length; face++)
+                _faceLayers[definition.Id.Value * BlockFace.All.Length + face] = GetOrAddLayer(appearance.For(BlockFace.All[face].Kind));
         }
     }
 
+    /// <summary>Имена текстур по порядку слоёв. В этом порядке их нужно загрузить в массив текстур.</summary>
+    public IReadOnlyList<string> TextureNames => _textureNames;
+
     public bool IsOpaque(BlockId id) => _isOpaque[id.Value];
-    public Vector3 GetColor(BlockId id) => _colors[id.Value];
+
+    /// <summary>Слой текстуры для грани блока; <paramref name="faceIndex"/> — индекс в <see cref="BlockFace.All"/>.</summary>
+    public int GetLayer(BlockId id, int faceIndex) => _faceLayers[id.Value * BlockFace.All.Length + faceIndex];
+
+    private int GetOrAddLayer(string textureName)
+    {
+        if (_layerByName.TryGetValue(textureName, out var layer))
+            return layer;
+
+        layer = _textureNames.Count;
+        _textureNames.Add(textureName);
+        _layerByName.Add(textureName, layer);
+        return layer;
+    }
 }

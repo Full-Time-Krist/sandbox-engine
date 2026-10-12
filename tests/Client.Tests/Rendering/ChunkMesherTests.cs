@@ -19,7 +19,7 @@ public class ChunkMesherTests
         var registry = new BlockRegistry();
         _blocks = BaseBlocks.Register(registry);
         registry.Freeze();
-        _visuals = new BlockVisuals(registry, BlockVisuals.BaseColors);
+        _visuals = new BlockVisuals(registry, BlockVisuals.BaseAppearances);
         _mesher = new ChunkMesher(_visuals);
     }
 
@@ -148,11 +148,20 @@ public class ChunkMesherTests
     }
 
     [Fact]
-    public void BlockVisuals_RequiresFrozenRegistry()
+    public void Quads_UseLayerOfTheirFace()
     {
-        var registry = new BlockRegistry();
+        var chunk = new Chunk(default);
+        chunk.Set(new LocalPos(5, 5, 5), _blocks.Grass);
 
-        Assert.Throws<InvalidOperationException>(() => new BlockVisuals(registry, BlockVisuals.BaseColors));
+        _mesher.Build(chunk, default, _output);
+
+        // Порядок граней в меше совпадает с BlockFace.All, у каждой 4 вершины.
+        for (var f = 0; f < BlockFace.All.Length; f++)
+        {
+            var expected = _visuals.GetLayer(_blocks.Grass, f);
+            for (var v = 0; v < 4; v++)
+                Assert.Equal(expected, _output.Vertices[f * 4 + v].Layer);
+        }
     }
 
     private Chunk CreateFullChunk(ChunkPos position)
