@@ -50,6 +50,10 @@ internal sealed class ClientApp(
 
     /// <summary>Построение мешей за последние 10 секунд: пишется в лог вместе с числом чанков.</summary>
     private MeshStatsWindow _meshStats;
+
+    /// <summary>Самый долгий кадр и число кадров дольше 20 мс за последние 10 секунд. Цель этапа 2 — ни одного такого.</summary>
+    private (double MaxMs, int Slow) _frameTimes;
+    private long _framesRendered;
     private Vector2D<int> _framebufferSize;
 
     /// <summary>Блок под прицелом в текущем кадре.</summary>
@@ -67,7 +71,7 @@ internal sealed class ClientApp(
 
         var visuals = new BlockVisuals(_registry, BlockVisuals.BaseAppearances);
         _blockTextures = LoadBlockTextures(visuals.TextureNames);
-        _chunkRenderer = new ChunkRenderer(Gl, new ChunkMesher(visuals));
+        _chunkRenderer = new ChunkRenderer(Gl, new ChunkMesher(visuals), MeshBuildQueue.DefaultWorkerCount);
 
         var shaders = Path.Combine(AppContext.BaseDirectory, "Assets", "Shaders");
         _chunkShader = ShaderProgram.FromFiles(Gl, Path.Combine(shaders, "chunk"));
@@ -127,9 +131,11 @@ internal sealed class ClientApp(
         if (_tick % (GameTime.TicksPerSecond * 10) == 0)
         {
             // Память — чтобы при долгом полёте было видно, что она не растёт без предела.
-            Console.WriteLine($"[Client] Чанков {_world.Chunks.Count}, мешей {_chunkRenderer.MeshCount}, " +
-                              $"память {GC.GetTotalMemory(false) / 1024 / 1024} МБ, позиция {_controller.Position:F0}; {_meshStats}");
+            Console.WriteLine($"[Client] Чанков {_world.Chunks.Count}, мешей {_chunkRenderer.MeshCount} (в очереди {_chunkRenderer.Pending}), " +
+                              $"память {GC.GetTotalMemory(false) / 1024 / 1024} МБ, позиция {_controller.Position:F0}; {_meshStats}; " +
+                              $"самый долгий кадр {_frameTimes.MaxMs:F1} мс, кадров дольше 20 мс: {_frameTimes.Slow}");
             _meshStats = default;
+            _frameTimes = default;
         }
 
         // Шлём позицию, только если она изменилась. NaN в начальном значении гарантирует первую отправку.
@@ -187,13 +193,19 @@ internal sealed class ClientApp(
 
     protected override void OnRender(double deltaTime, float alpha)
     {
+        // deltaTime — промежуток от прошлого кадра: долгий кадр виден по нему в следующем.
+        // Первый промежуток не считаем: в него входит запуск (окно, текстуры, шейдеры), а не игра.
+        var frameMs = deltaTime * 1000;
+        if (_framesRendered++ > 0)
+            _frameTimes = (Math.Max(_frameTimes.MaxMs, frameMs), _frameTimes.Slow + (frameMs > 20 ? 1 : 0));
+
         var actionsAllowed = HandleFrameInput();
         _controller.UpdateCamera(alpha);
         _target = VoxelRaycast.Cast(_world.Chunks, _camera.Position, _camera.Forward, GameRules.BlockReach);
         if (actionsAllowed)
             HandleItemActions();
 
-        var stats = _chunkRenderer.Update(_world);
+        var stats = _chunkRenderer.Update(_world, _camera.Position);
         _meshStats.Add(stats);
 
         Gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);

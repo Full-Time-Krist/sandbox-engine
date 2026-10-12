@@ -32,51 +32,49 @@ internal sealed class ChunkMeshData
 /// </summary>
 internal sealed class ChunkMesher(BlockVisuals visuals)
 {
+    /// <summary>Сдвиг индекса в снимке к соседу по каждой грани (в порядке <see cref="BlockFace.All"/>).</summary>
+    private static readonly int[] FaceOffsets = BlockFace.All
+        .Select(f => ChunkSnapshot.Index(f.Dx, f.Dy, f.Dz) - ChunkSnapshot.Index(0, 0, 0))
+        .ToArray();
+
+    /// <summary>Строит меш прямо по чанку и соседям. Для тестов и мест, где снимок не нужен.</summary>
     public void Build(Chunk chunk, in ChunkNeighbors neighbors, ChunkMeshData output)
     {
-        output.Clear();
-        if (chunk.IsEmpty)
-            return;
-
-        var blocks = chunk.Blocks;
-        for (var i = 0; i < blocks.Length; i++)
-        {
-            var block = blocks[i];
-            if (block.IsAir)
-                continue;
-
-            var pos = LocalPos.FromIndex(i);
-            var origin = new Vector3(pos.X, pos.Y, pos.Z);
-
-            for (var f = 0; f < BlockFace.All.Length; f++)
-            {
-                ref readonly var face = ref BlockFace.All[f];
-                var neighbor = GetBlock(blocks, neighbors, pos.X + face.Dx, pos.Y + face.Dy, pos.Z + face.Dz);
-                if (visuals.IsOpaque(neighbor))
-                    continue;
-
-                AddQuad(output, origin, face, visuals.GetLayer(block, f));
-            }
-        }
+        var snapshot = new ChunkSnapshot();
+        snapshot.Capture(chunk, neighbors);
+        Build(snapshot, output);
     }
 
-    /// <summary>Блок по локальным координатам, которые могут выйти за чанк на 1 по одной оси.</summary>
-    private static BlockId GetBlock(ReadOnlySpan<BlockId> blocks, in ChunkNeighbors neighbors, int x, int y, int z)
+    /// <summary>Строит меш по снимку. Потокобезопасен: снимок и <see cref="BlockVisuals"/> только читаются.</summary>
+    public void Build(ChunkSnapshot snapshot, ChunkMeshData output)
     {
-        var local = new LocalPos(x, y, z);
-        if (local.IsInBounds)
-            return blocks[local.Index];
+        output.Clear();
+        if (snapshot.IsEmpty)
+            return;
 
-        var neighbor =
-            x < 0 ? neighbors.NegX :
-            x >= ChunkMath.Size ? neighbors.PosX :
-            y < 0 ? neighbors.NegY :
-            y >= ChunkMath.Size ? neighbors.PosY :
-            z < 0 ? neighbors.NegZ :
-            neighbors.PosZ;
+        var blocks = snapshot.Blocks;
+        for (var y = 0; y < ChunkMath.Size; y++)
+        for (var z = 0; z < ChunkMath.Size; z++)
+        {
+            var row = ChunkSnapshot.Index(0, y, z);
+            for (var x = 0; x < ChunkMath.Size; x++)
+            {
+                var index = row + x;
+                var block = blocks[index];
+                if (block.IsAir)
+                    continue;
 
-        // Маска переводит −1 в 31 и 32 в 0: та же позиция в системе координат соседа.
-        return neighbor?.Get(new LocalPos(x & ChunkMath.Mask, y & ChunkMath.Mask, z & ChunkMath.Mask)) ?? BlockId.Air;
+                var origin = new Vector3(x, y, z);
+                for (var f = 0; f < FaceOffsets.Length; f++)
+                {
+                    // Рамка снимка содержит соседние блоки, поэтому выхода за массив нет.
+                    if (visuals.IsOpaque(blocks[index + FaceOffsets[f]]))
+                        continue;
+
+                    AddQuad(output, origin, BlockFace.All[f], visuals.GetLayer(block, f));
+                }
+            }
+        }
     }
 
     private static void AddQuad(ChunkMeshData output, Vector3 origin, in BlockFace face, int layer)

@@ -57,6 +57,35 @@ public class ChunkMesherTests
         Assert.Equal(10, _output.QuadCount);
     }
 
+    [Theory]
+    [InlineData(1, 0, 0)]
+    [InlineData(0, 1, 0)]
+    [InlineData(0, 0, 1)]
+    public void TwoAdjacentBlocks_HideExactlyTheFacesBetweenThem(int dx, int dy, int dz)
+    {
+        // Число граней не отличает «скрыта общая грань» от «скрыта противоположная»: проверяем, какие именно.
+        var chunk = new Chunk(default);
+        chunk.Set(new LocalPos(5, 5, 5), _blocks.Stone);
+        chunk.Set(new LocalPos(5 + dx, 5 + dy, 5 + dz), _blocks.Stone);
+
+        _mesher.Build(chunk, default, _output);
+
+        // Общая плоскость между блоками: координата 6 по оси соседства.
+        static float Along(Vector3 v, int dx, int dy) => dx == 1 ? v.X : dy == 1 ? v.Y : v.Z;
+        for (var q = 0; q < _output.QuadCount; q++)
+        {
+            var quad = _output.Vertices.Skip(q * 4).Take(4).Select(v => Along(v.Position, dx, dy)).ToList();
+            Assert.False(quad.All(c => c == 6f), $"Грань {q} лежит между блоками и должна быть скрыта");
+        }
+
+        // А крайние грани (плоскости 5 и 7) на месте.
+        var planes = Enumerable.Range(0, _output.QuadCount)
+            .Select(q => _output.Vertices.Skip(q * 4).Take(4).Select(v => Along(v.Position, dx, dy)).ToList())
+            .Where(c => c.Distinct().Count() == 1).Select(c => c[0]).ToList();
+        Assert.Contains(5f, planes);
+        Assert.Contains(7f, planes);
+    }
+
     [Fact]
     public void FullChunk_WithoutNeighbors_HasOnlyOuterFaces()
     {
