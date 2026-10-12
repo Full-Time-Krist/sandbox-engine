@@ -29,3 +29,6 @@ public sealed record ChunkData(ChunkPos Position, ImmutableArray<BlockId> Blocks
 
     public Chunk ToChunk() => IsEmpty ? new Chunk(Position) : Chunk.FromBlocks(Position, Blocks.AsSpan());
 }
+
+/// <summary>Блок в мире изменился. Клиент меняет свою копию и перестраивает меши.</summary>
+public sealed record BlockChanged(BlockPos Position, BlockId Block) : ServerMessage;

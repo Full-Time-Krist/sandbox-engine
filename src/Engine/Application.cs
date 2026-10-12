@@ -28,6 +28,9 @@ public abstract class Application : IDisposable
     protected IWindow Window => _window;
     protected double TickDuration => _timestep.TickDuration;
 
+    /// <summary>Строка состояния в заголовке окна после FPS и TPS (пока в игре нет вывода текста).</summary>
+    protected string StatusText { get; set; } = "";
+
     protected Application(WindowSettings settings, int ticksPerSecond = 20)
     {
         _title = settings.Title;
@@ -99,7 +102,9 @@ public abstract class Application : IDisposable
         OnRender(deltaTime, _timestep.Alpha);
 
         if (_stats.Record(deltaTime, ticks))
-            _window.Title = $"{_title} | FPS {_stats.Fps} | TPS {_stats.Tps}";
+            _window.Title = StatusText.Length == 0
+                ? $"{_title} | FPS {_stats.Fps} | TPS {_stats.Tps}"
+                : $"{_title} | FPS {_stats.Fps} | TPS {_stats.Tps} | {StatusText}";
     }
 
     private void HandleResize(Vector2D<int> size)

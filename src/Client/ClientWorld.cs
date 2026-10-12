@@ -1,4 +1,5 @@
 using Client.Rendering;
+using Shared.Blocks;
 using Shared.Voxels;
 
 namespace Client;
@@ -22,10 +23,35 @@ internal sealed class ClientWorld
 
         // У соседей меняются граничные грани: раньше на месте нового чанка был «воздух».
         foreach (var neighbor in NeighborPositions(chunk.Position))
-        {
-            if (Chunks.Contains(neighbor))
-                _dirty.Add(neighbor);
-        }
+            MarkIfLoaded(neighbor);
+    }
+
+    /// <summary>
+    /// Меняет блок по сообщению сервера и помечает меш чанка для перестройки. Если блок на границе чанка,
+    /// перестраивается и сосед за этой границей: у него открывается или закрывается граничная грань.
+    /// </summary>
+    public bool SetBlock(BlockPos pos, BlockId block)
+    {
+        if (!Chunks.TrySetBlock(pos, block))
+            return false;
+
+        var chunk = pos.Chunk;
+        var local = pos.Local;
+        _dirty.Add(chunk);
+
+        if (local.X == 0) MarkIfLoaded(chunk with { X = chunk.X - 1 });
+        if (local.X == ChunkMath.Mask) MarkIfLoaded(chunk with { X = chunk.X + 1 });
+        if (local.Y == 0) MarkIfLoaded(chunk with { Y = chunk.Y - 1 });
+        if (local.Y == ChunkMath.Mask) MarkIfLoaded(chunk with { Y = chunk.Y + 1 });
+        if (local.Z == 0) MarkIfLoaded(chunk with { Z = chunk.Z - 1 });
+        if (local.Z == ChunkMath.Mask) MarkIfLoaded(chunk with { Z = chunk.Z + 1 });
+        return true;
+    }
+
+    private void MarkIfLoaded(ChunkPos position)
+    {
+        if (Chunks.Contains(position))
+            _dirty.Add(position);
     }
 
     public ChunkNeighbors GetNeighbors(ChunkPos p) => new(

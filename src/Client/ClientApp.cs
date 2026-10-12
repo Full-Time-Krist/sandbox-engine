@@ -6,6 +6,7 @@ using Engine.Windowing;
 using Server;
 using Shared;
 using Shared.Blocks;
+using Shared.Items;
 using Shared.Networking;
 using Shared.Protocol;
 using Shared.Voxels;
@@ -28,6 +29,12 @@ internal sealed class ClientApp(
     private FlyCameraController _controller = null!;
 
     private BlockRegistry _registry = null!;
+
+    /// <summary>
+    /// Копия хотбара для отображения. Авторитетная живёт на сервере: клиент только сообщает выбор слота,
+    /// а что делает предмет при нажатии, решает сервер.
+    /// </summary>
+    private Hotbar _hotbar = null!;
     private ShaderProgram _chunkShader = null!;
     private ShaderProgram _lineShader = null!;
     private ColorMesh _selectionBox = null!;
@@ -47,8 +54,9 @@ internal sealed class ClientApp(
 
         // Клиент собирает свой реестр и сверяет его с таблицей сервера при подключении (см. JoinAccepted).
         _registry = new BlockRegistry();
-        BaseBlocks.Register(_registry);
+        _hotbar = Hotbar.CreateDefault(BaseBlocks.Register(_registry));
         _registry.Freeze();
+        UpdateStatusText();
 
         var visuals = new BlockVisuals(_registry, BlockVisuals.BaseAppearances);
         _blockTextures = LoadBlockTextures(visuals.TextureNames);
@@ -130,6 +138,10 @@ internal sealed class ClientApp(
                     _world.AddChunk(data.ToChunk());
                     break;
 
+                case BlockChanged changed:
+                    _world.SetBlock(changed.Position, changed.Block);
+                    break;
+
                 default:
                     Console.WriteLine($"[Client] Неизвестное сообщение {message.GetType().Name}");
                     break;
@@ -153,9 +165,11 @@ internal sealed class ClientApp(
 
     protected override void OnRender(double deltaTime, float alpha)
     {
-        HandleFrameInput();
+        var actionsAllowed = HandleFrameInput();
         _controller.UpdateCamera(alpha);
         _target = VoxelRaycast.Cast(_world.Chunks, _camera.Position, _camera.Forward, GameRules.BlockReach);
+        if (actionsAllowed)
+            HandleItemActions();
 
         var stats = _chunkRenderer.Update(_world);
         if (stats.Chunks > 0)
@@ -222,15 +236,56 @@ internal sealed class ClientApp(
             _camera.AspectRatio = (float)size.X / size.Y;
     }
 
-    private void HandleFrameInput()
-    {
-        if (!Input.IsCursorCaptured && Input.WasMousePressed(MouseButton.Left))
-            Input.CaptureCursor();
-        else if (Input.IsCursorCaptured && Input.WasKeyPressed(Key.Escape))
-            Input.ReleaseCursor();
+    private static readonly Key[] HotbarKeys = [Key.Number1, Key.Number2, Key.Number3, Key.Number4, Key.Number5, Key.Number6];
 
-        if (Input.IsCursorCaptured)
-            _controller.Look(Input.MouseDelta);
+    /// <summary>Захват курсора, взгляд мышью и выбор слота. Возвращает, можно ли в этом кадре применять предмет.</summary>
+    private bool HandleFrameInput()
+    {
+        if (!Input.IsCursorCaptured)
+        {
+            // Клик, захвативший курсор, не должен заодно сломать блок: действия — только со следующего кадра.
+            if (Input.WasMousePressed(MouseButton.Left))
+                Input.CaptureCursor();
+            return false;
+        }
+
+        if (Input.WasKeyPressed(Key.Escape))
+        {
+            Input.ReleaseCursor();
+            return false;
+        }
+
+        _controller.Look(Input.MouseDelta);
+
+        for (var slot = 0; slot < HotbarKeys.Length; slot++)
+        {
+            if (Input.WasKeyPressed(HotbarKeys[slot]) && _hotbar.TrySelect(slot))
+            {
+                connection.Send(new SelectHotbarSlot(slot));
+                UpdateStatusText();
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Кнопки мыши означают действия предмета, а не «сломать/поставить»: смысл задаёт предмет в руке на сервере.
+    /// Вызывается после обновления камеры и луча выделения, поэтому сервер повторит луч из того же положения,
+    /// по которому нарисована рамка, и изменится именно выделенный блок.
+    /// </summary>
+    private void HandleItemActions()
+    {
+        if (Input.WasMousePressed(MouseButton.Left))
+            connection.Send(new UseItem(ItemAction.Primary, _camera.Position, _camera.Forward));
+        if (Input.WasMousePressed(MouseButton.Right))
+            connection.Send(new UseItem(ItemAction.Secondary, _camera.Position, _camera.Forward));
+    }
+
+    private void UpdateStatusText()
+    {
+        var name = _registry.Get(_hotbar.SelectedItem).Name;
+        StatusText = $"слот {_hotbar.SelectedSlot + 1}: {name}";
     }
 
     protected override void OnUnload()
