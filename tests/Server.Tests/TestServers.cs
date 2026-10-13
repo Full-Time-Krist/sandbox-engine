@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
+using Shared;
 using Shared.Networking;
 using Shared.Protocol;
 using Shared.Voxels;
@@ -38,13 +40,30 @@ internal static class TestServers
         }
     }
 
+    /// <summary>Клиент в тесте: соединение с сервером и номер игрока из <see cref="JoinAccepted"/>.</summary>
+    public sealed class TestClient(IConnection<ClientMessage, ServerMessage> connection) : IConnection<ClientMessage, ServerMessage>
+    {
+        public int PlayerId { get; set; }
+
+        public void Send(ClientMessage message) => connection.Send(message);
+
+        public bool TryReceive([MaybeNullWhen(false)] out ServerMessage message) => connection.TryReceive(out message);
+    }
+
+    /// <summary>
+    /// Переносит игрока сразу, без проверки движения: тестам подгрузки, предметов и сохранений нужно ставить
+    /// игрока куда угодно, а не идти туда тиками. Клиент получит <see cref="PlayerTeleport"/>.
+    /// </summary>
+    public static void Teleport(GameServer server, TestClient client, Vector3d feet) => server.Teleport(client.PlayerId, feet);
+
     /// <summary>
     /// Подключает игрока и ждёт, пока он получит все чанки вокруг точки появления. Полученные сообщения
     /// попадают в <paramref name="received"/>, если он передан, иначе выбрасываются.
     /// </summary>
-    public static IConnection<ClientMessage, ServerMessage> JoinAndLoad(GameServer server, List<ServerMessage>? received = null)
+    public static TestClient JoinAndLoad(GameServer server, List<ServerMessage>? received = null)
     {
-        var (client, serverSide) = LocalConnection.CreatePair<ClientMessage, ServerMessage>();
+        var (connection, serverSide) = LocalConnection.CreatePair<ClientMessage, ServerMessage>();
+        var client = new TestClient(connection);
         server.Connect(serverSide);
         client.Send(new JoinRequest("Tester"));
 
@@ -55,6 +74,8 @@ internal static class TestServers
             while (client.TryReceive(out var message))
             {
                 messages.Add(message);
+                if (message is JoinAccepted accepted)
+                    client.PlayerId = accepted.PlayerId;
                 if (message is ChunkData)
                     chunks++;
             }

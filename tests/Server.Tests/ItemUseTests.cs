@@ -22,7 +22,7 @@ public sealed class ItemUseTests : IDisposable
     private readonly Vector3d _eyeAbove;
 
     private readonly GameServer _server = TestServers.Create();
-    private readonly IConnection<ClientMessage, ServerMessage> _client;
+    private readonly TestServers.TestClient _client;
     private readonly BlockRegistry _registry = new();
     private readonly BaseBlocks _blocks;
 
@@ -55,6 +55,13 @@ public sealed class ItemUseTests : IDisposable
         return changes;
     }
 
+    /// <summary>Ставит игрока ногами в <paramref name="feet"/> и отправляет сообщения от его имени.</summary>
+    private List<BlockChanged> SendFrom(Vector3d feet, params ClientMessage[] messages)
+    {
+        TestServers.Teleport(_server, _client, feet);
+        return Send(messages);
+    }
+
     private BlockId BlockAt(BlockPos pos) => _server.World.Chunks.GetBlock(pos);
 
     private static Vector3d EyeOf(Vector3d feet) => feet + new Vector3d(0, PlayerPhysics.EyeHeight, 0);
@@ -62,7 +69,7 @@ public sealed class ItemUseTests : IDisposable
     [Fact]
     public void Primary_BreaksTargetBlock()
     {
-        var changes = Send(new PlayerMove(_feetAbove), new UseItem(ItemAction.Primary, _eyeAbove, Down));
+        var changes = SendFrom(_feetAbove, new UseItem(ItemAction.Primary, _eyeAbove, Down));
 
         Assert.Equal([new BlockChanged(_surface, BlockId.Air)], changes);
         Assert.True(BlockAt(_surface).IsAir);
@@ -73,7 +80,7 @@ public sealed class ItemUseTests : IDisposable
     {
         var above = _surface + new BlockPos(0, 1, 0);
 
-        var changes = Send(new PlayerMove(_feetAbove), new UseItem(ItemAction.Secondary, _eyeAbove, Down));
+        var changes = SendFrom(_feetAbove, new UseItem(ItemAction.Secondary, _eyeAbove, Down));
 
         Assert.Equal([new BlockChanged(above, _blocks.Stone)], changes); // слот 1 — камень
         Assert.Equal(_blocks.Stone, BlockAt(above));
@@ -84,7 +91,7 @@ public sealed class ItemUseTests : IDisposable
     {
         var above = _surface + new BlockPos(0, 1, 0);
 
-        Send(new PlayerMove(_feetAbove), new SelectHotbarSlot(5), new UseItem(ItemAction.Secondary, _eyeAbove, Down));
+        SendFrom(_feetAbove, new SelectHotbarSlot(5), new UseItem(ItemAction.Secondary, _eyeAbove, Down));
 
         Assert.Equal(_blocks.Planks, BlockAt(above));
     }
@@ -94,7 +101,7 @@ public sealed class ItemUseTests : IDisposable
     {
         var above = _surface + new BlockPos(0, 1, 0);
 
-        Send(new PlayerMove(_feetAbove), new SelectHotbarSlot(Hotbar.Size), new UseItem(ItemAction.Secondary, _eyeAbove, Down));
+        SendFrom(_feetAbove, new SelectHotbarSlot(Hotbar.Size), new UseItem(ItemAction.Secondary, _eyeAbove, Down));
 
         Assert.Equal(_blocks.Stone, BlockAt(above));
     }
@@ -105,7 +112,7 @@ public sealed class ItemUseTests : IDisposable
         var farAway = _feetAbove + new Vector3(0, 0, 20);
         var before = BlockAt(_surface);
 
-        var changes = Send(new PlayerMove(farAway), new UseItem(ItemAction.Primary, _eyeAbove, Down));
+        var changes = SendFrom(farAway, new UseItem(ItemAction.Primary, _eyeAbove, Down));
 
         Assert.Empty(changes);
         Assert.Equal(before, BlockAt(_surface));
@@ -117,7 +124,7 @@ public sealed class ItemUseTests : IDisposable
         // Стоит на поверхности: блок над ней — у него в ногах.
         var standing = new Vector3d(0.5, _surface.Y + 1, 0.5);
 
-        var changes = Send(new PlayerMove(standing), new UseItem(ItemAction.Secondary, EyeOf(standing), Down));
+        var changes = SendFrom(standing, new UseItem(ItemAction.Secondary, EyeOf(standing), Down));
 
         Assert.Empty(changes);
     }
@@ -126,12 +133,9 @@ public sealed class ItemUseTests : IDisposable
     public void CannotPlaceBlockIntoOtherPlayer()
     {
         var other = TestServers.JoinAndLoad(_server);
-        other.Send(new PlayerMove(new Vector3d(0.5, _surface.Y + 1, 0.5)));
-        // Сессии обрабатываются по порядку подключения: без отдельного тика действие первого игрока
-        // выполнилось бы раньше, чем сервер примет новую позицию второго.
-        _server.Tick();
+        TestServers.Teleport(_server, other, new Vector3d(0.5, _surface.Y + 1, 0.5));
 
-        var changes = Send(new PlayerMove(_feetAbove), new UseItem(ItemAction.Secondary, _eyeAbove, Down));
+        var changes = SendFrom(_feetAbove, new UseItem(ItemAction.Secondary, _eyeAbove, Down));
 
         Assert.Empty(changes);
     }
@@ -142,10 +146,9 @@ public sealed class ItemUseTests : IDisposable
         // Второй игрок стоит в соседнем столбце вплотную к месту установки: касание — не пересечение.
         var other = TestServers.JoinAndLoad(_server);
         var otherSurface = TestServers.TopBlock(_server.World, 1, 0);
-        other.Send(new PlayerMove(new Vector3d(1 + PlayerPhysics.Width / 2, otherSurface.Y + 1, 0.5)));
-        _server.Tick();
+        TestServers.Teleport(_server, other, new Vector3d(1 + PlayerPhysics.Width / 2, otherSurface.Y + 1, 0.5));
 
-        var changes = Send(new PlayerMove(_feetAbove), new UseItem(ItemAction.Secondary, _eyeAbove, Down));
+        var changes = SendFrom(_feetAbove, new UseItem(ItemAction.Secondary, _eyeAbove, Down));
 
         Assert.Single(changes);
     }
@@ -153,7 +156,7 @@ public sealed class ItemUseTests : IDisposable
     [Fact]
     public void NothingInReach_DoesNothing()
     {
-        var changes = Send(new PlayerMove(_feetAbove), new UseItem(ItemAction.Primary, _eyeAbove, Vector3.UnitY));
+        var changes = SendFrom(_feetAbove, new UseItem(ItemAction.Primary, _eyeAbove, Vector3.UnitY));
 
         Assert.Empty(changes);
     }
@@ -163,8 +166,7 @@ public sealed class ItemUseTests : IDisposable
     {
         var nan = new Vector3(float.NaN);
 
-        var changes = Send(new PlayerMove(_feetAbove),
-            new UseItem(ItemAction.Primary, new Vector3d(double.NaN, 0, 0), Down),
+        var changes = SendFrom(_feetAbove, new UseItem(ItemAction.Primary, new Vector3d(double.NaN, 0, 0), Down),
             new UseItem(ItemAction.Primary, _eyeAbove, nan),
             new UseItem(ItemAction.Primary, _eyeAbove, Vector3.Zero));
 
@@ -176,7 +178,7 @@ public sealed class ItemUseTests : IDisposable
     {
         var second = TestServers.JoinAndLoad(_server);
 
-        Send(new PlayerMove(_feetAbove), new UseItem(ItemAction.Primary, _eyeAbove, Down));
+        SendFrom(_feetAbove, new UseItem(ItemAction.Primary, _eyeAbove, Down));
 
         Assert.True(second.TryReceive(out var message));
         Assert.Equal(new BlockChanged(_surface, BlockId.Air), message);

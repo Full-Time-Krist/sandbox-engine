@@ -135,6 +135,8 @@ public sealed class GameServer : IDisposable
 
         foreach (var session in _sessions)
         {
+            if (session.IsJoined)
+                session.Movement.Refill();
             while (session.Connection.TryReceive(out var message))
                 Handle(session, message);
         }
@@ -261,11 +263,7 @@ public sealed class GameServer : IDisposable
                 break;
 
             case PlayerMove move when session.IsJoined:
-                // От позиции зависит, какие чанки грузить: NaN или координаты за пределами int сломали бы расчёт.
-                if (IsValidPosition(move.Position))
-                    session.PlayerPosition = move.Position;
-                else
-                    Console.WriteLine($"[Server] {session.PlayerName}: неверная позиция {move.Position}");
+                HandleMove(session, move);
                 break;
 
             case SelectHotbarSlot select when session.IsJoined:
@@ -283,6 +281,46 @@ public sealed class GameServer : IDisposable
                 break;
         }
     }
+
+    private void HandleMove(ClientSession session, PlayerMove move)
+    {
+        // Отправлено до последнего телепорта и посчитано от старой позиции.
+        if (move.TeleportId != session.Movement.TeleportId)
+            return;
+
+        // От позиции зависит, какие чанки грузить: NaN или координаты за пределами int сломали бы расчёт.
+        var problem = IsValidPosition(move.Position)
+            ? session.Movement.Check(session.PlayerPosition, move.Position, World.Chunks, _registry)
+            : "неверная позиция";
+        if (problem == null)
+        {
+            session.PlayerPosition = move.Position;
+            return;
+        }
+
+        Console.WriteLine($"[Server] {session.PlayerName}: движение в {move.Position} отклонено ({problem}), возврат в {session.PlayerPosition}");
+        SendTeleport(session);
+    }
+
+    /// <summary>
+    /// Переносит игрока (ноги в <paramref name="feet"/>) и сообщает клиенту. Только из потока сервера:
+    /// для будущих команд и для тестов, которым нужно переместить игрока далеко.
+    /// </summary>
+    internal void Teleport(int playerId, Vector3d feet)
+    {
+        if (!IsValidPosition(feet))
+            throw new ArgumentOutOfRangeException(nameof(feet), feet, "Неверная позиция");
+
+        var session = _sessions.Single(s => s.IsJoined && s.PlayerId == playerId);
+        session.PlayerPosition = feet;
+        SendTeleport(session);
+    }
+
+    /// <summary>Последняя принятая позиция игрока (точка ног). Для тестов.</summary>
+    internal Vector3d PlayerPosition(int playerId) => _sessions.Single(s => s.IsJoined && s.PlayerId == playerId).PlayerPosition;
+
+    private static void SendTeleport(ClientSession session) =>
+        session.Connection.Send(new PlayerTeleport(session.PlayerPosition, session.Movement.NextTeleport()));
 
     private void HandleUseItem(ClientSession session, UseItem use)
     {

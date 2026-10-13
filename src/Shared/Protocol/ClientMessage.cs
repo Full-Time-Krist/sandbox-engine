@@ -10,10 +10,14 @@ public abstract record ClientMessage;
 public sealed record JoinRequest(string PlayerName) : ClientMessage;
 
 /// <summary>
-/// Позиция игрока после тика клиента. Пока движение считает клиент (как в Minecraft),
-/// позже сервер начнёт её проверять.
+/// Позиция игрока (точка ног) после тика клиента. Движение считает клиент, а сервер проверяет его тем же кодом
+/// физики; неправдоподобное отклоняет и возвращает игрока назад (<see cref="PlayerTeleport"/>).
 /// </summary>
-public sealed record PlayerMove(Vector3d Position) : ClientMessage;
+/// <param name="TeleportId">
+/// Номер последнего телепорта, который клиент применил. Сообщения со старым номером отправлены до телепорта
+/// и посчитаны от старой позиции: сервер их игнорирует.
+/// </param>
+public sealed record PlayerMove(Vector3d Position, int TeleportId) : ClientMessage;
 
 /// <summary>Игрок выбрал слот хотбара (клавиши 1–6).</summary>
 public sealed record SelectHotbarSlot(int Slot) : ClientMessage;

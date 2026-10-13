@@ -100,7 +100,7 @@ public sealed class GameServerTests : IDisposable
         var spawn = Assert.IsType<JoinAccepted>(messages[0]).StartPosition;
 
         var target = spawn + new Vector3(10 * ChunkMath.Size, 0, 0);
-        client.Send(new PlayerMove(target));
+        TestServers.Teleport(server, client, target);
         var view = ViewAt(target);
         TestServers.TickUntil(server, () =>
         {
@@ -126,7 +126,7 @@ public sealed class GameServerTests : IDisposable
         for (var i = 0; i < 6; i++)
         {
             var offset = i % 2 == 0 ? ChunkMath.Size : 0;
-            client.Send(new PlayerMove(spawn + new Vector3(offset, 0, 0)));
+            TestServers.Teleport(server, client, spawn + new Vector3(offset, 0, 0));
             for (var t = 0; t < 5; t++)
             {
                 server.Tick();
@@ -147,7 +147,7 @@ public sealed class GameServerTests : IDisposable
         var spawnChunk = ChunkOf(spawn);
 
         var target = spawn + new Vector3(20 * ChunkMath.Size, 0, 0);
-        client.Send(new PlayerMove(target));
+        TestServers.Teleport(server, client, target);
         TestServers.TickUntil(server, () =>
         {
             Drain(client);
@@ -160,18 +160,21 @@ public sealed class GameServerTests : IDisposable
     }
 
     [Fact]
-    public void InvalidPosition_IsIgnored()
+    public void InvalidPosition_IsRejected()
     {
         var server = Create();
-        var client = TestServers.JoinAndLoad(server);
+        var messages = new List<ServerMessage>();
+        var client = TestServers.JoinAndLoad(server, messages);
+        var spawn = Assert.IsType<JoinAccepted>(messages[0]).StartPosition;
 
-        client.Send(new PlayerMove(new Vector3(float.NaN, 0, 0)));
-        client.Send(new PlayerMove(new Vector3(0, 0, 3e9f)));
+        client.Send(new PlayerMove(new Vector3(float.NaN, 0, 0), TeleportId: 0));
+        client.Send(new PlayerMove(new Vector3(0, 0, 3e9f), TeleportId: 0));
         for (var t = 0; t < 5; t++)
             server.Tick();
 
-        // Игрок остался на месте: ничего не выгружено и не догружено.
-        Assert.Empty(Drain(client));
+        // Игрок остался на месте: ничего не выгружено и не догружено, клиенту — только возврат на место.
+        // Второе сообщение отправлено до первого телепорта (номер 0), его сервер просто игнорирует.
+        Assert.Equal([new PlayerTeleport(spawn, 1)], Drain(client));
     }
 
     [Fact]
@@ -185,13 +188,13 @@ public sealed class GameServerTests : IDisposable
 
         // Второй игрок улетает далеко, и чанк с блоком у него выгружается.
         var far = TestServers.JoinAndLoad(server);
-        far.Send(new PlayerMove(spawn + new Vector3(30 * ChunkMath.Size, 0, 0)));
+        TestServers.Teleport(server, far, spawn + new Vector3(30 * ChunkMath.Size, 0, 0));
         TestServers.TickUntil(server, () => Drain(far).OfType<ChunkUnload>().Any(u => u.Position == surface.Chunk),
             "у второго игрока выгрузится чанк с блоком");
         Drain(far);
 
         var eye = new Vector3(0.5f, surface.Y + 3.5f, 0.5f);
-        near.Send(new PlayerMove(eye));
+        TestServers.Teleport(server, near, eye);
         near.Send(new UseItem(Shared.Items.ItemAction.Primary, eye, -Vector3.UnitY));
         server.Tick();
 
@@ -206,7 +209,7 @@ public sealed class GameServerTests : IDisposable
         var (client, serverSide) = LocalConnection.CreatePair<ClientMessage, ServerMessage>();
         server.Connect(serverSide);
 
-        client.Send(new PlayerMove(default));
+        client.Send(new PlayerMove(default, TeleportId: 0));
         server.Tick();
 
         Assert.Empty(Drain(client));

@@ -36,5 +36,13 @@ public sealed record ChunkData(ChunkPos Position, ImmutableArray<byte> Data) : S
 /// </summary>
 public sealed record ChunkUnload(ChunkPos Position) : ServerMessage;
 
+/// <summary>
+/// Сервер переносит игрока: возвращает назад после отклонённого движения или телепортирует (команды, тесты).
+/// Клиент ставит игрока в эту точку со сбросом скорости и дальше шлёт <see cref="PlayerMove"/> с этим номером.
+/// </summary>
+/// <param name="Position">Точка ног.</param>
+/// <param name="TeleportId">Номер телепорта; растёт с каждым телепортом этого игрока.</param>
+public sealed record PlayerTeleport(Vector3d Position, int TeleportId) : ServerMessage;
+
 /// <summary>Блок в мире изменился. Клиент меняет свою копию и перестраивает меши.</summary>
 public sealed record BlockChanged(BlockPos Position, BlockId Block) : ServerMessage;

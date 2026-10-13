@@ -46,6 +46,9 @@ internal sealed class ClientApp(
     private ChunkRenderer _chunkRenderer = null!;
 
     private Vector3d _lastSentPosition = new(double.NaN, double.NaN, double.NaN);
+
+    /// <summary>Номер последнего телепорта от сервера: идёт в каждом PlayerMove (см. <see cref="PlayerTeleport"/>).</summary>
+    private int _teleportId;
     private long _tick;
     private bool _joined;
 
@@ -146,7 +149,7 @@ internal sealed class ClientApp(
         // До JoinAccepted позиция ещё не настоящая (начало координат): сервер начал бы грузить чанки вокруг неё.
         if (_joined && _controller.Position != _lastSentPosition)
         {
-            connection.Send(new PlayerMove(_controller.Position));
+            connection.Send(new PlayerMove(_controller.Position, _teleportId));
             _lastSentPosition = _controller.Position;
         }
     }
@@ -162,6 +165,13 @@ internal sealed class ClientApp(
                     _controller.Teleport(accepted.StartPosition);
                     _joined = true;
                     Console.WriteLine($"[Client] Подключён к серверу, id игрока {accepted.PlayerId}");
+                    break;
+
+                case PlayerTeleport teleport:
+                    // Сервер отклонил движение (или перенёс игрока): встаём, где он сказал, и считаем дальше от этой точки.
+                    _controller.Teleport(teleport.Position);
+                    _teleportId = teleport.TeleportId;
+                    Console.WriteLine($"[Client] Сервер перенёс игрока в {teleport.Position}");
                     break;
 
                 case ChunkData data:

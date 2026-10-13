@@ -115,6 +115,14 @@ public static class PlayerPhysics
         return new PlayerState(state.Position + moved, velocity, OnGround: hitY && wanted.Y < 0, state.Flying);
     }
 
+    /// <summary>
+    /// Сдвигает тело с ногами в <paramref name="feet"/> на <paramref name="delta"/>, обрезая движение о твёрдые блоки
+    /// так же, как <see cref="Step"/>. Возвращает фактическое перемещение или null, если путь задевает незагруженный чанк.
+    /// Сервер так проверяет присланное перемещение: честный клиент получил его этим же кодом, и оно не обрежется.
+    /// </summary>
+    public static Vector3d? Sweep(Vector3d feet, Vector3d delta, ChunkMap chunks, BlockRegistry blocks) =>
+        Move(BodyAt(feet), delta, chunks, blocks);
+
     /// <summary>Пересекает ли тело в этой точке твёрдый блок. Незагруженный мир считается пустым.</summary>
     public static bool Collides(Vector3d feet, ChunkMap chunks, BlockRegistry blocks)
     {

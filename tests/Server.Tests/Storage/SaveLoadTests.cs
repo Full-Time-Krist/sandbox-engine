@@ -19,11 +19,11 @@ public sealed class SaveLoadTests : IDisposable
     private GameServer Create(int? seed = TestServers.Seed) => TestServers.Create(savePath: _directory.SaveFile, seed: seed);
 
     /// <summary>Ломает верхний блок столбца (0, 0) так же, как игрок: через сообщения. Возвращает его позицию.</summary>
-    private static BlockPos BreakSurface(GameServer server, IConnection<ClientMessage, ServerMessage> client)
+    private static BlockPos BreakSurface(GameServer server, TestServers.TestClient client)
     {
         var surface = TestServers.TopBlock(server.World, 0, 0);
         var eye = new Vector3d(0.5, surface.Y + 3.5, 0.5);
-        client.Send(new PlayerMove(eye));
+        TestServers.Teleport(server, client, eye);
         client.Send(new UseItem(ItemAction.Primary, eye, -Vector3.UnitY));
         server.Tick();
 
@@ -67,7 +67,7 @@ public sealed class SaveLoadTests : IDisposable
         using (var server = Create())
         {
             var client = TestServers.JoinAndLoad(server);
-            client.Send(new PlayerMove(position));
+            TestServers.Teleport(server, client, position);
             server.Tick();
         }
 
@@ -88,9 +88,9 @@ public sealed class SaveLoadTests : IDisposable
 
         // Улетаем так далеко, что сервер выгружает чанк из памяти, и возвращаемся.
         var eye = new Vector3d(0.5, surface.Y + 3.5, 0.5);
-        client.Send(new PlayerMove(eye + new Vector3d(32 * 20, 0, 0)));
+        TestServers.Teleport(server, client, eye + new Vector3d(32 * 20, 0, 0));
         TestServers.TickUntil(server, () => !server.World.Chunks.Contains(chunk), "сервер выгрузит чанк");
-        client.Send(new PlayerMove(eye));
+        TestServers.Teleport(server, client, eye);
         TestServers.TickUntil(server, () => server.World.Chunks.Contains(chunk), "чанк загрузится снова");
 
         Assert.True(server.World.Chunks.GetBlock(surface).IsAir);
