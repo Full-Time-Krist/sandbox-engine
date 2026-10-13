@@ -477,8 +477,6 @@ $RECYCLE.BIN/
 
 # Windows shortcuts
 *.lnk
-# Кроме ярлыка запуска игры в корне (ведёт на Debug-сборку клиента)
-!/Sandbox.lnk
 
 # Vim temporary swap files
 *.swp

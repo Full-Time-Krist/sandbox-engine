@@ -38,6 +38,7 @@
 - Версии NuGet-пакетов — только в `Directory.Packages.props`.
 - `global.json` включает Microsoft.Testing.Platform: без него `dotnet test` в .NET 10 с xUnit v3 падает.
 - Текстуры-заглушки генерирует `python tools/generate_textures.py`.
+- `Sandbox.cmd` в корне — запуск Debug-сборки для пользователя (путь к exe относительный, работает из любой папки). Без аргументов открывает мир пользователя `world`: для своих проверок запускай с `--world playtest` или через `tools/playtest.ps1`. Ярлык `.lnk` не подходит: относительный путь в нём не работает.
 - Мир — аргумент `--world ИМЯ` (по умолчанию `world`), сохранения в `%LOCALAPPDATA%\Sandbox\Saves\ИМЯ\world.db`. Сид `--seed N` и точка появления `--spawn X Z` действуют только при создании мира; без `--seed` сид случайный.
 - `tools/playtest.ps1` запускает отдельный мир `playtest` и перед запуском удаляет его (сид 1, если не задан): `Start-Game -Arguments '--seed 2 --spawn 1000000 0'`. `-KeepWorld` загружает сохранённый — так проверяются сохранения. Мир пользователя (`world`) скриптами не трогай.
 - Консоль игры пишет в UTF-8. Читая её лог из PowerShell, указывай `-Encoding UTF8`.
