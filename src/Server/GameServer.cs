@@ -6,6 +6,7 @@ using Server.Storage;
 using Shared;
 using Shared.Blocks;
 using Shared.Items;
+using Shared.Physics;
 using Shared.Networking;
 using Shared.Protocol;
 using Shared.Voxels;
@@ -22,7 +23,7 @@ namespace Server;
 public sealed class GameServer : IDisposable
 {
     /// <summary>
-    /// Насколько присланная точка взгляда может отличаться от последней известной позиции игрока.
+    /// Насколько присланная точка взгляда может отличаться от глаза игрока в последней известной позиции.
     /// Клиент рисует камеру с интерполяцией и шлёт позицию раз в тик, так что небольшое расхождение нормально;
     /// большое означает ошибку или попытку действовать издалека.
     /// </summary>
@@ -33,6 +34,7 @@ public sealed class GameServer : IDisposable
     /// <summary>Подключения, которые ещё не приняты в тике. Пополняются из любого потока.</summary>
     private readonly ConcurrentQueue<IConnection<ServerMessage, ClientMessage>> _pendingConnections = new();
     private readonly ImmutableArray<string> _blockNames;
+    private readonly BlockRegistry _registry;
     private readonly BaseBlocks _blocks;
     private readonly WorldEditor _editor;
     /// <summary>
@@ -80,7 +82,7 @@ public sealed class GameServer : IDisposable
         _viewDistance = viewDistance;
         _verticalDistance = verticalDistance;
 
-        var registry = new BlockRegistry();
+        var registry = _registry = new BlockRegistry();
         _blocks = BaseBlocks.Register(registry);
         registry.Freeze();
         _blockNames = [.. registry.All.Select(b => b.Name)];
@@ -287,7 +289,9 @@ public sealed class GameServer : IDisposable
         if (!IsValidPosition(use.EyePosition) || !float.IsFinite(use.LookDirection.LengthSquared()))
             return;
 
-        if (Vector3d.Distance(use.EyePosition, session.PlayerPosition) > MaxEyeOffset)
+        // Позиция игрока — точка ног, глаз выше на EyeHeight.
+        var eye = session.PlayerPosition + new Vector3d(0, PlayerPhysics.EyeHeight, 0);
+        if (Vector3d.Distance(use.EyePosition, eye) > MaxEyeOffset)
         {
             Console.WriteLine($"[Server] {session.PlayerName}: действие отклонено, точка взгляда далеко от игрока");
             return;
@@ -318,6 +322,20 @@ public sealed class GameServer : IDisposable
     private sealed class WorldEditor(GameServer server) : IBlockEditor
     {
         public BlockId GetBlock(BlockPos pos) => server.World.Chunks.GetBlock(pos);
+
+        public bool IsBlockedByPlayer(BlockPos pos, BlockId block)
+        {
+            if (!server._registry.IsSolid(block))
+                return false;
+
+            var box = Aabb.OfBlock(pos);
+            foreach (var session in server._sessions)
+            {
+                if (session.IsJoined && PlayerPhysics.BodyAt(session.PlayerPosition).Intersects(box))
+                    return true;
+            }
+            return false;
+        }
 
         public bool TrySetBlock(BlockPos pos, BlockId block)
         {

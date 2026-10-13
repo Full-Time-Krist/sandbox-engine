@@ -6,7 +6,7 @@
     $game = Start-Game                       # Debug-сборка; -Configuration Release для замеров; -Arguments '--seed 2'
                                              # мир 'playtest', каждый раз новый; -KeepWorld — загрузить сохранённый
     Enter-Game $game                         # клик в центр окна: захват мыши
-    Hold-Key $game 0x57 1000                 # W одну секунду (коды: https://learn.microsoft.com/windows/win32/inputdev/virtual-key-codes)
+    Hold-Key $game 0x57 1000                 # W одну секунду; Hold-Keys $game @(0x57, 0x20) 1500 — W и Space вместе (коды: https://learn.microsoft.com/windows/win32/inputdev/virtual-key-codes)
     Move-Mouse $game 0 10 30                 # 30 шагов по 10 px вниз
     Save-Screenshot $game "$env:TEMP\shot.png" -Half
     Get-GameTitle $game                      # заголовок: FPS, TPS, строка состояния
@@ -82,6 +82,14 @@ function Click-Mouse($game, [ValidateSet('Left', 'Right')][string]$Button = 'Lef
 function Hold-Key($game, [byte]$VirtualKey, [int]$Milliseconds = 50) {
     [PlaytestNative]::keybd_event($VirtualKey, 0, 0, [IntPtr]::Zero); Start-Sleep -Milliseconds $Milliseconds
     [PlaytestNative]::keybd_event($VirtualKey, 0, 2, [IntPtr]::Zero); Start-Sleep -Milliseconds 200
+}
+
+# Несколько клавиш одновременно, например W + Space (разбег с прыжком): Hold-Keys $game @(0x57, 0x20) 1500
+function Hold-Keys($game, [byte[]]$VirtualKeys, [int]$Milliseconds = 50) {
+    foreach ($k in $VirtualKeys) { [PlaytestNative]::keybd_event($k, 0, 0, [IntPtr]::Zero) }
+    Start-Sleep -Milliseconds $Milliseconds
+    foreach ($k in $VirtualKeys) { [PlaytestNative]::keybd_event($k, 0, 2, [IntPtr]::Zero) }
+    Start-Sleep -Milliseconds 200
 }
 
 # Относительное движение мыши: в захваченном режиме игра получает его как сырой ввод.

@@ -29,7 +29,7 @@ internal sealed class ClientApp(
 {
     private readonly Camera _camera = new() { Pitch = -0.4f };
     private readonly ClientWorld _world = new();
-    private FlyCameraController _controller = null!;
+    private PlayerController _controller = null!;
 
     private BlockRegistry _registry = null!;
 
@@ -84,8 +84,8 @@ internal sealed class ClientApp(
         _selectionBox = LineGeometry.CreateBoxOutline(Gl, new Vector3(0.05f));
         _crosshair = LineGeometry.CreateCrosshair(Gl);
 
-        // Позицию задаст сервер в JoinAccepted.
-        _controller = new FlyCameraController(_camera, startPosition: Vector3d.Zero);
+        // Позицию задаст сервер в JoinAccepted. До неё чанков нет, и тело стоит на месте.
+        _controller = new PlayerController(_camera, _world.Chunks, _registry);
         UpdateAspectRatio(Window.FramebufferSize);
 
         connection.Send(new JoinRequest("Player"));
@@ -128,7 +128,7 @@ internal sealed class ClientApp(
 
         ProcessServerMessages();
 
-        _controller.Tick(Input, (float)TickDuration);
+        _controller.Tick(Input, controlsEnabled: Input.IsCursorCaptured);
 
         if (++_tick % GameTime.TicksPerSecond == 0)
             UpdateStatusText();
@@ -298,6 +298,13 @@ internal sealed class ClientApp(
 
         _controller.Look(Input.MouseDelta);
 
+        // Полёт пока доступен всегда; на шаге 3.5 — только в творческом режиме.
+        if (Input.WasKeyPressed(Key.F))
+        {
+            _controller.ToggleFlying();
+            UpdateStatusText();
+        }
+
         for (var slot = 0; slot < HotbarKeys.Length; slot++)
         {
             if (Input.WasKeyPressed(HotbarKeys[slot]) && _hotbar.TrySelect(slot))
@@ -326,7 +333,9 @@ internal sealed class ClientApp(
     private void UpdateStatusText()
     {
         var name = _registry.Get(_hotbar.SelectedItem).Name;
-        StatusText = $"слот {_hotbar.SelectedSlot + 1}: {name} | чанков {_world.Chunks.Count}, мешей {_chunkRenderer?.MeshCount ?? 0}, нарисовано {_drawnChunks}";
+        // Позиция ног и полёт — для проверок скриптом: по заголовку видно, стоит игрок, падает или упёрся.
+        var player = _controller is null ? "" : $"{_controller.Position}{(_controller.IsFlying ? " полёт" : "")} | ";
+        StatusText = $"{player}слот {_hotbar.SelectedSlot + 1}: {name} | чанков {_world.Chunks.Count}, мешей {_chunkRenderer?.MeshCount ?? 0}, нарисовано {_drawnChunks}";
     }
 
     protected override void OnUnload()

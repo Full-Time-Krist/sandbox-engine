@@ -11,6 +11,9 @@ internal interface IBlockEditor
 {
     BlockId GetBlock(BlockPos pos);
 
+    /// <summary>Стоит ли блок <paramref name="block"/> в точке <paramref name="pos"/> поперёк тела какого-нибудь игрока.</summary>
+    bool IsBlockedByPlayer(BlockPos pos, BlockId block);
+
     /// <summary>Меняет блок и рассылает изменение. False, если чанк не загружен.</summary>
     bool TrySetBlock(BlockPos pos, BlockId block);
 }

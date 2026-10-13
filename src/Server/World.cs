@@ -40,7 +40,7 @@ public sealed class World : IDisposable
 
     public int Seed { get; }
 
-    /// <summary>Точка появления: над поверхностью (по умолчанию в начале координат), с запасом для обзора.</summary>
+    /// <summary>Точка появления — ноги игрока на поверхности (по умолчанию над началом координат).</summary>
     public Vector3d SpawnPosition { get; }
 
     /// <summary>Сколько чанков сейчас генерируется.</summary>
@@ -72,7 +72,9 @@ public sealed class World : IDisposable
             Seed = seed;
             _terrain = new TerrainGenerator(blocks, Seed);
             var (sx, sz) = spawnColumn;
-            SpawnPosition = new Vector3d(sx + 0.5, _terrain.SurfaceHeight(sx, sz) + 12, sz + 0.5);
+            // Позиция игрока — точка ног: стоит на верхнем блоке столбца. Тело (0,6) в середине столбца
+            // не задевает соседние, даже если они выше.
+            SpawnPosition = new Vector3d(sx + 0.5, _terrain.SurfaceHeight(sx, sz), sz + 0.5);
             save?.Initialize(new WorldInfo(Seed, SpawnPosition));
         }
 

@@ -36,9 +36,8 @@ internal sealed class BlockItemBehavior : IItemBehavior
         if (!context.World.GetBlock(position).IsAir)
             return;
 
-        // Тела у игрока пока нет (свободный полёт), но ставить блок прямо в глаза камере не даём.
-        // Полноценная проверка пересечения с телом игрока появится вместе с коллизиями (этап 3).
-        if (BlockPos.Containing(context.EyePosition) == position)
+        // Твёрдый блок в теле игрока (своём или чужом) застрял бы в нём.
+        if (context.World.IsBlockedByPlayer(position, context.HeldItem))
             return;
 
         context.World.TrySetBlock(position, context.HeldItem);
