@@ -17,6 +17,20 @@ public class BlockRegistryTests
     }
 
     [Fact]
+    public void IsSolid_AirNo_DefaultYes_ExplicitNo_UnknownYes()
+    {
+        var registry = new BlockRegistry();
+        var stone = registry.Register("base:stone", isOpaque: true).Id;
+        var plant = registry.Register("base:plant", isOpaque: false, isSolid: false).Id;
+
+        Assert.False(registry.IsSolid(BlockId.Air));
+        Assert.True(registry.IsSolid(stone));
+        Assert.False(registry.IsSolid(plant));
+        // Id не из реестра — только из испорченных данных: лучше упереться, чем провалиться.
+        Assert.True(registry.IsSolid(new BlockId(1000)));
+    }
+
+    [Fact]
     public void Register_AssignsSequentialIds_AndLooksUpBothWays()
     {
         var registry = new BlockRegistry();

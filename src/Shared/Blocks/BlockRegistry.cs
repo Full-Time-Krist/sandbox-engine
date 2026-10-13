@@ -23,10 +23,11 @@ public sealed partial class BlockRegistry
     public BlockRegistry()
     {
         // Воздух всегда получает id 0: новый массив блоков заполнен нулями, то есть воздухом.
-        Register(AirName, isOpaque: false);
+        Register(AirName, isOpaque: false, isSolid: false);
     }
 
-    public BlockDefinition Register(string name, bool isOpaque)
+    /// <param name="isSolid">Тела в него упираются. По умолчанию да: таких блоков большинство.</param>
+    public BlockDefinition Register(string name, bool isOpaque, bool isSolid = true)
     {
         if (IsFrozen)
             throw new InvalidOperationException($"Реестр заморожен, блок '{name}' зарегистрировать нельзя.");
@@ -37,7 +38,7 @@ public sealed partial class BlockRegistry
         if (_byId.Count > ushort.MaxValue)
             throw new InvalidOperationException($"Превышено число типов блоков ({ushort.MaxValue + 1}).");
 
-        var definition = new BlockDefinition(new BlockId((ushort)_byId.Count), name, isOpaque);
+        var definition = new BlockDefinition(new BlockId((ushort)_byId.Count), name, isOpaque, isSolid);
         _byId.Add(definition);
         _byName.Add(name, definition);
         return definition;
@@ -50,6 +51,12 @@ public sealed partial class BlockRegistry
 
     public BlockDefinition Get(string name) =>
         _byName.TryGetValue(name, out var definition) ? definition : throw new KeyNotFoundException($"Блок '{name}' не зарегистрирован.");
+
+    /// <summary>
+    /// Упираются ли тела в блок. Id не из реестра считается твёрдым: такой id может прийти только
+    /// из испорченных данных, и лучше упереться в него, чем провалиться.
+    /// </summary>
+    public bool IsSolid(BlockId id) => id.Value >= _byId.Count || _byId[id.Value].IsSolid;
 
     public bool TryGet(string name, out BlockDefinition definition) => _byName.TryGetValue(name, out definition!);
 
