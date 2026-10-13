@@ -4,6 +4,7 @@
 
     . D:\Projects\test\tools\playtest.ps1
     $game = Start-Game                       # Debug-сборка; -Configuration Release для замеров; -Arguments '--seed 2'
+                                             # мир 'playtest', каждый раз новый; -KeepWorld — загрузить сохранённый
     Enter-Game $game                         # клик в центр окна: захват мыши
     Hold-Key $game 0x57 1000                 # W одну секунду (коды: https://learn.microsoft.com/windows/win32/inputdev/virtual-key-codes)
     Move-Mouse $game 0 10 30                 # 30 шагов по 10 px вниз
@@ -31,12 +32,20 @@ public static class PlaytestNative {
 
 $PlaytestRoot = Split-Path -Parent $PSScriptRoot
 
-function Start-Game([string]$Configuration = 'Debug', [int]$WaitSeconds = 3, [string]$Arguments = '') {
+# Мир: по умолчанию отдельный 'playtest', а не мир игрока. Перед запуском он удаляется (чистый мир с сидом из
+# -Arguments или 1), с -KeepWorld — загружается сохранённый (проверка сохранений).
+function Start-Game([string]$Configuration = 'Debug', [int]$WaitSeconds = 3, [string]$Arguments = '',
+        [string]$World = 'playtest', [switch]$KeepWorld) {
     $exe = Join-Path $PlaytestRoot "src\Client\bin\$Configuration\net10.0\Sandbox.exe"
     if (-not (Test-Path $exe)) {
         # Имя exe берётся из GameName в Directory.Build.props; если его переименовали — ищем любой exe клиента.
         $exe = Get-ChildItem (Join-Path $PlaytestRoot "src\Client\bin\$Configuration\net10.0") -Filter *.exe | Select-Object -First 1 -ExpandProperty FullName
     }
+    # Сохранения лежат в %LOCALAPPDATA%\<название игры>\Saves\<мир>; название игры — имя exe.
+    $worldDir = Join-Path $env:LOCALAPPDATA "$([IO.Path]::GetFileNameWithoutExtension($exe))\Saves\$World"
+    if (-not $KeepWorld -and (Test-Path $worldDir)) { Remove-Item -Recurse -Force $worldDir }
+    if ($Arguments -notmatch '--seed') { $Arguments = "--seed 1 $Arguments" }
+    $Arguments = "--world $World $Arguments"
     $log = Join-Path $env:TEMP "playtest-$PID"
     New-Item -ItemType Directory -Force $log | Out-Null
     $extra = @{}
@@ -97,7 +106,8 @@ function Get-GameTitle($game) {
 
 function Stop-Game($game) {
     $alive = -not $game.Process.HasExited
-    if ($alive) { $game.Process.CloseMainWindow() | Out-Null; Start-Sleep -Seconds 1 }
+    # При выходе игра дописывает сохранение: ждём завершения, а не фиксированную секунду.
+    if ($alive) { $game.Process.CloseMainWindow() | Out-Null; $game.Process.WaitForExit(15000) | Out-Null }
     "alive до закрытия: $alive; завершилась: $($game.Process.HasExited)"
     '--- stdout ---'; Get-Content "$($game.Log)\out.txt" -Encoding UTF8
     '--- stderr ---'; Get-Content "$($game.Log)\err.txt" -Encoding UTF8

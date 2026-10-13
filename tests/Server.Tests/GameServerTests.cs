@@ -62,7 +62,7 @@ public sealed class GameServerTests : IDisposable
 
         var clientChunks = new HashSet<ChunkPos>();
         Apply(clientChunks, messages);
-        var view = ViewAt(accepted.SpawnPosition);
+        var view = ViewAt(accepted.StartPosition);
         Assert.Equal(TestServers.AreaSize(), clientChunks.Count);
         Assert.All(clientChunks, p => Assert.True(view.LoadArea.Contains(view.Center, p), $"{p} вне области загрузки"));
     }
@@ -97,7 +97,7 @@ public sealed class GameServerTests : IDisposable
         var client = TestServers.JoinAndLoad(server, messages);
         var clientChunks = new HashSet<ChunkPos>();
         Apply(clientChunks, messages);
-        var spawn = Assert.IsType<JoinAccepted>(messages[0]).SpawnPosition;
+        var spawn = Assert.IsType<JoinAccepted>(messages[0]).StartPosition;
 
         var target = spawn + new Vector3(10 * ChunkMath.Size, 0, 0);
         client.Send(new PlayerMove(target));
@@ -120,7 +120,7 @@ public sealed class GameServerTests : IDisposable
         var server = Create();
         var messages = new List<ServerMessage>();
         var client = TestServers.JoinAndLoad(server, messages);
-        var spawn = Assert.IsType<JoinAccepted>(messages[0]).SpawnPosition;
+        var spawn = Assert.IsType<JoinAccepted>(messages[0]).StartPosition;
         var unloads = 0;
 
         for (var i = 0; i < 6; i++)
@@ -143,7 +143,7 @@ public sealed class GameServerTests : IDisposable
         var server = Create();
         var messages = new List<ServerMessage>();
         var client = TestServers.JoinAndLoad(server, messages);
-        var spawn = Assert.IsType<JoinAccepted>(messages[0]).SpawnPosition;
+        var spawn = Assert.IsType<JoinAccepted>(messages[0]).StartPosition;
         var spawnChunk = ChunkOf(spawn);
 
         var target = spawn + new Vector3(20 * ChunkMath.Size, 0, 0);
@@ -180,7 +180,7 @@ public sealed class GameServerTests : IDisposable
         var server = Create();
         var messages = new List<ServerMessage>();
         var near = TestServers.JoinAndLoad(server, messages);
-        var spawn = Assert.IsType<JoinAccepted>(messages[0]).SpawnPosition;
+        var spawn = Assert.IsType<JoinAccepted>(messages[0]).StartPosition;
         var surface = TestServers.TopBlock(server.World, 0, 0);
 
         // Второй игрок улетает далеко, и чанк с блоком у него выгружается.

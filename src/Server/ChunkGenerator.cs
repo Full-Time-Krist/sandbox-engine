@@ -4,7 +4,8 @@ using Shared.Voxels;
 namespace Server;
 
 /// <summary>
-/// Генерирует чанки в фоновых потоках. Поток сервера ставит позиции в очередь (<see cref="Request"/>)
+/// Готовит чанки в фоновых потоках: читает из сохранения или генерирует (что именно — решает функция
+/// <c>produce</c>, её даёт <see cref="World"/>). Поток сервера ставит позиции в очередь (<see cref="Request"/>)
 /// и в своём тике забирает готовые чанки (<see cref="TryTakeCompleted"/>).
 /// </summary>
 /// <remarks>
@@ -15,17 +16,18 @@ namespace Server;
 /// </remarks>
 internal sealed class ChunkGenerator : IDisposable
 {
-    private readonly TerrainGenerator _terrain;
+    private readonly Func<ChunkPos, Chunk> _produce;
     private readonly BlockingCollection<ChunkPos> _requests = new(new ConcurrentQueue<ChunkPos>());
     private readonly ConcurrentQueue<Chunk> _completed = new();
     private readonly Thread[] _workers;
     private volatile Exception? _fault;
     private int _pending;
 
-    public ChunkGenerator(TerrainGenerator terrain, int workerCount)
+    /// <param name="produce">Готовит чанк по позиции. Вызывается из нескольких фоновых потоков сразу.</param>
+    public ChunkGenerator(Func<ChunkPos, Chunk> produce, int workerCount)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(workerCount);
-        _terrain = terrain;
+        _produce = produce;
         _workers = new Thread[workerCount];
         for (var i = 0; i < workerCount; i++)
         {
@@ -66,7 +68,7 @@ internal sealed class ChunkGenerator : IDisposable
         {
             // Цикл завершается, когда Dispose закрывает очередь (CompleteAdding).
             foreach (var position in _requests.GetConsumingEnumerable())
-                _completed.Enqueue(_terrain.Generate(position));
+                _completed.Enqueue(_produce(position));
         }
         catch (Exception e)
         {

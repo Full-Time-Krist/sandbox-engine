@@ -33,7 +33,7 @@ public class ChunkGeneratorTests
     [Fact]
     public void EveryRequest_IsCompletedOnce_SameAsDirectGeneration()
     {
-        using var generator = new ChunkGenerator(_terrain, workerCount: 4);
+        using var generator = new ChunkGenerator(_terrain.Generate, workerCount: 4);
         var positions = new List<ChunkPos>();
         for (var x = -3; x < 3; x++)
         for (var y = -1; y < 3; y++)
@@ -56,7 +56,7 @@ public class ChunkGeneratorTests
     [Fact]
     public void Pending_CountsUntilTaken()
     {
-        using var generator = new ChunkGenerator(_terrain, workerCount: 1);
+        using var generator = new ChunkGenerator(_terrain.Generate, workerCount: 1);
 
         generator.Request(new ChunkPos(0, 0, 0));
         generator.Request(new ChunkPos(1, 0, 0));
@@ -69,7 +69,7 @@ public class ChunkGeneratorTests
     [Fact]
     public void Dispose_DropsQueuedRequests_AndReturnsQuickly()
     {
-        var generator = new ChunkGenerator(_terrain, workerCount: 1);
+        var generator = new ChunkGenerator(_terrain.Generate, workerCount: 1);
         // Тысячи чанков у поверхности — это секунды работы. Dispose не должен их дожидаться.
         for (var i = 0; i < 5000; i++)
             generator.Request(new ChunkPos(i, 0, 0));
@@ -85,7 +85,7 @@ public class ChunkGeneratorTests
     {
         // Нужен любой сбой внутри Generate в фоновом потоке: генератор без набора блоков
         // падает с NullReferenceException на первом же блоке.
-        using var generator = new ChunkGenerator(new TerrainGenerator(null!, seed: 1), workerCount: 1);
+        using var generator = new ChunkGenerator(new TerrainGenerator(null!, seed: 1).Generate, workerCount: 1);
         generator.Request(new ChunkPos(0, 0, 0));
 
         var clock = Stopwatch.StartNew();

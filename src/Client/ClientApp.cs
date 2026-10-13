@@ -159,7 +159,7 @@ internal sealed class ClientApp(
             {
                 case JoinAccepted accepted:
                     VerifyBlockTable(accepted.BlockNames);
-                    _controller.Teleport(accepted.SpawnPosition);
+                    _controller.Teleport(accepted.StartPosition);
                     _joined = true;
                     Console.WriteLine($"[Client] Подключён к серверу, id игрока {accepted.PlayerId}");
                     break;

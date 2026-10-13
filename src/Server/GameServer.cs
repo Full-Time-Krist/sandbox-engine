@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Numerics;
 using Server.Items;
+using Server.Storage;
 using Shared;
 using Shared.Blocks;
 using Shared.Items;
@@ -43,6 +44,9 @@ public sealed class GameServer : IDisposable
     /// <summary>Как часто сервер выгружает чанки, рядом с которыми нет игроков: раз в секунду.</summary>
     private const int UnloadIntervalTicks = GameTime.TicksPerSecond;
 
+    /// <summary>Автосохранение раз в минуту: при сбое теряется не больше минуты игры.</summary>
+    public const int AutosaveIntervalTicks = 60 * GameTime.TicksPerSecond;
+
     /// <summary>Дальность прорисовки по умолчанию, в чанках: 6 — 192 блока по горизонтали, 4 — 128 блоков вверх и вниз.</summary>
     public const int DefaultViewDistance = 6;
     public const int DefaultVerticalDistance = 4;
@@ -50,6 +54,7 @@ public sealed class GameServer : IDisposable
     /// <summary>Мир по int тянется до ±2 миллиардов блоков; берём с запасом, чтобы радиусы вокруг игрока не переполнились.</summary>
     private const double MaxCoordinate = 1_000_000_000;
 
+    private readonly WorldSave? _save;
     private readonly int _viewDistance;
     private readonly int _verticalDistance;
     private int _nextPlayerId = 1;
@@ -58,14 +63,19 @@ public sealed class GameServer : IDisposable
 
     public World World { get; }
 
-    /// <param name="seed">Сид мира: одинаковый сид — одинаковый мир.</param>
+    /// <summary>Сохранение мира или null, если мир только в памяти. Для тестов: дождаться записи на диск.</summary>
+    internal WorldSave? Save => _save;
+
+    /// <param name="seed">Сид нового мира: одинаковый сид — одинаковый мир; null — случайный.
+    /// У мира из сохранения сид свой, аргумент не действует.</param>
     /// <param name="generatorThreads">Сколько фоновых потоков генерирует чанки; null — по числу ядер.</param>
     /// <param name="viewDistance">Дальность прорисовки по горизонтали, в чанках. Тесты берут маленькую, чтобы не ждать генерации.</param>
     /// <param name="verticalDistance">Дальность прорисовки вверх и вниз, в чанках.</param>
-    /// <param name="spawnColumn">Столбец точки появления; по умолчанию (0, 0).</param>
-    public GameServer(int seed, int? generatorThreads = null,
+    /// <param name="spawnColumn">Столбец точки появления нового мира; null — (0, 0).</param>
+    /// <param name="savePath">Файл сохранения: есть — мир загружается, нет — создаётся. null — мир только в памяти (тесты).</param>
+    public GameServer(int? seed, int? generatorThreads = null,
         int viewDistance = DefaultViewDistance, int verticalDistance = DefaultVerticalDistance,
-        (int X, int Z) spawnColumn = default)
+        (int X, int Z)? spawnColumn = null, string? savePath = null)
     {
         _viewDistance = viewDistance;
         _verticalDistance = verticalDistance;
@@ -73,10 +83,41 @@ public sealed class GameServer : IDisposable
         var registry = new BlockRegistry();
         _blocks = BaseBlocks.Register(registry);
         registry.Freeze();
-
         _blockNames = [.. registry.All.Select(b => b.Name)];
-        World = new World(_blocks, seed, generatorThreads ?? ChunkGenerator.DefaultWorkerCount, spawnColumn);
+
+        if (savePath != null)
+            _save = WorldSave.Open(savePath, registry);
+        try
+        {
+            var isNew = _save?.Info == null;
+            World = new World(_blocks, seed ?? Random.Shared.Next(), generatorThreads ?? ChunkGenerator.DefaultWorkerCount,
+                spawnColumn ?? default, _save);
+            if (_save != null)
+                LogOpened(isNew, seed, spawnColumn);
+        }
+        catch
+        {
+            _save?.Dispose();
+            throw;
+        }
+
         _editor = new WorldEditor(this);
+    }
+
+    private void LogOpened(bool isNew, int? seed, (int X, int Z)? spawnColumn)
+    {
+        Console.WriteLine(isNew
+            ? $"[Server] Создан новый мир (сид {World.Seed}): {_save!.Path}"
+            : $"[Server] Загружен мир (сид {World.Seed}): {_save!.Path}");
+        if (isNew)
+            return;
+
+        if (seed != null && seed != World.Seed)
+            Console.WriteLine($"[Server] Сид {seed} не применён: у мира уже есть свой");
+        if (spawnColumn != null)
+            Console.WriteLine("[Server] Точка появления не применена: у мира уже есть своя");
+        foreach (var name in _save!.BlockIds.UnknownNames)
+            Console.WriteLine($"[Server] Блок '{name}' из сохранения неизвестен, вместо него будет воздух");
     }
 
     /// <summary>
@@ -105,6 +146,29 @@ public sealed class GameServer : IDisposable
 
         if (++_tick % UnloadIntervalTicks == 0)
             UnloadUnusedChunks();
+        if (_tick % AutosaveIntervalTicks == 0)
+            Autosave();
+    }
+
+    /// <summary>Ставит в очередь записи изменённые чанки и позиции игроков. Возвращает число чанков.</summary>
+    private int SaveAll()
+    {
+        if (_save == null)
+            return 0;
+
+        foreach (var session in _sessions)
+        {
+            if (session.IsJoined)
+                _save.SavePlayer(session.PlayerName, session.PlayerPosition);
+        }
+        return World.SaveDirty();
+    }
+
+    private void Autosave()
+    {
+        var chunks = SaveAll();
+        if (chunks > 0)
+            Console.WriteLine($"[Server] Автосохранение: изменённых чанков {chunks}");
     }
 
     /// <summary>
@@ -147,26 +211,50 @@ public sealed class GameServer : IDisposable
         // Сводка раз в 10 секунд, а не каждую выгрузку: в полёте выгрузка идёт каждую секунду.
         if (_tick % (UnloadIntervalTicks * 10) == 0 && _unloadedSinceLog > 0)
         {
-            Console.WriteLine($"[Server] За 10 с выгружено {_unloadedSinceLog} чанков, в памяти {World.Chunks.Count}");
+            Console.WriteLine($"[Server] За 10 с выгружено {_unloadedSinceLog} чанков, в памяти {World.Chunks.Count}; " +
+                $"с запуска загружено из сохранения {World.LoadedCount}, сгенерировано {World.GeneratedCount}");
             _unloadedSinceLog = 0;
         }
     }
 
-    /// <summary>Останавливает фоновые потоки генерации. Вызывать после остановки потока сервера.</summary>
-    public void Dispose() => World.Dispose();
+    /// <summary>
+    /// Останавливает фоновые потоки генерации и сохраняет мир. Вызывать после остановки потока сервера:
+    /// состояние сервера принадлежит ему.
+    /// </summary>
+    public void Dispose()
+    {
+        World.Dispose();
+        if (_save == null)
+            return;
+
+        // Генерация остановлена: в очередь записи больше никто не пишет, и после Dispose всё будет на диске.
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        int chunks;
+        try
+        {
+            chunks = SaveAll();
+        }
+        finally
+        {
+            // Даже если поставить в очередь не вышло (упал поток записи), файл нужно закрыть.
+            _save.Dispose();
+        }
+        Console.WriteLine($"[Server] Мир сохранён (изменённых чанков {chunks}) за {clock.ElapsedMilliseconds} мс");
+    }
 
     private void Handle(ClientSession session, ClientMessage message)
     {
         switch (message)
         {
             case JoinRequest join when !session.IsJoined:
-                var spawnChunk = BlockPos.Containing(World.SpawnPosition).Chunk;
+                // Игрок, который уже был в этом мире, продолжает с того места, где вышел.
+                var start = _save?.LoadPlayer(join.PlayerName) is { } saved && IsValidPosition(saved) ? saved : World.SpawnPosition;
                 session.Join(_nextPlayerId++, join.PlayerName, Hotbar.CreateDefault(_blocks),
-                    new PlayerChunkView(_viewDistance, _verticalDistance, spawnChunk));
-                // До первого PlayerMove игрок стоит в точке появления, иначе его действия сочлись бы «издалека».
-                session.PlayerPosition = World.SpawnPosition;
+                    new PlayerChunkView(_viewDistance, _verticalDistance, BlockPos.Containing(start).Chunk));
+                // До первого PlayerMove игрок стоит в начальной точке, иначе его действия сочлись бы «издалека».
+                session.PlayerPosition = start;
                 // Чанки придут в следующих тиках (StreamChunks), начиная с ближайших.
-                session.Connection.Send(new JoinAccepted(session.PlayerId, World.SpawnPosition, _blockNames));
+                session.Connection.Send(new JoinAccepted(session.PlayerId, start, _blockNames));
                 Console.WriteLine($"[Server] {session.PlayerName} подключился (id {session.PlayerId})");
                 break;
 
@@ -233,7 +321,7 @@ public sealed class GameServer : IDisposable
 
         public bool TrySetBlock(BlockPos pos, BlockId block)
         {
-            if (!server.World.Chunks.TrySetBlock(pos, block))
+            if (!server.World.TrySetBlock(pos, block))
                 return false;
 
             server.BroadcastBlockChange(new BlockChanged(pos, block));

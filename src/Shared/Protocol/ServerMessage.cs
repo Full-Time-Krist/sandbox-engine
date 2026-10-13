@@ -9,12 +9,12 @@ namespace Shared.Protocol;
 /// <summary>Сообщение от сервера клиенту.</summary>
 public abstract record ServerMessage;
 
-/// <param name="SpawnPosition">Где появляется игрок.</param>
+/// <param name="StartPosition">Где игрок начинает: там, где он был при прошлом выходе, или в точке появления мира.</param>
 /// <param name="BlockNames">
 /// Имена блоков по порядку числовых id. Клиент сверяет их со своим реестром: при расхождении
 /// одинаковые числа означали бы разные блоки. В мультиплеере клиент будет строить таблицу по этому списку.
 /// </param>
-public sealed record JoinAccepted(int PlayerId, Vector3d SpawnPosition, ImmutableArray<string> BlockNames) : ServerMessage;
+public sealed record JoinAccepted(int PlayerId, Vector3d StartPosition, ImmutableArray<string> BlockNames) : ServerMessage;
 
 /// <summary>Содержимое чанка, сжатое <see cref="ChunkCodec"/>.</summary>
 /// <param name="Data">
