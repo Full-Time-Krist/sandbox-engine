@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Numerics;
 using Shared.Items;
 
@@ -34,6 +35,12 @@ public sealed record SelectHotbarSlot(int Slot) : ClientMessage;
 /// (<see cref="Inventory.Click"/>) и присылает изменённые слоты (<see cref="InventoryChanged"/>).
 /// </summary>
 public sealed record InventoryClick(int Slot, InventoryClickKind Kind) : ClientMessage;
+
+/// <summary>
+/// Результат перетаскивания стопки по нескольким слотам. Сервер проверяет все номера и сам применяет
+/// распределение к авторитетному инвентарю.
+/// </summary>
+public sealed record InventoryDragDistribute(ImmutableArray<int> TargetSlots, bool OnePerSlot) : ClientMessage;
 
 /// <summary>Закрытие экрана: сервер возвращает предмет с курсора в инвентарь.</summary>
 public sealed record ReturnInventoryCursor : ClientMessage;
