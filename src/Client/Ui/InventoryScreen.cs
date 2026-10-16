@@ -53,6 +53,7 @@ internal sealed class InventoryScreen : IDisposable
             Rebuild(scale);
 
         _canvas.Clear();
+        _canvas.FillRect(0, 0, screen.X, screen.Y, new UiColor(0, 0, 0, 105));
         var grid = GridBounds(screen, scale);
         var rows = creative ? 7 : 4;
         var panel = new PixelRect(grid.X - 8 * scale, grid.Y - 25 * scale,
