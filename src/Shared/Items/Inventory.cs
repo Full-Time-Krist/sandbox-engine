@@ -248,6 +248,83 @@ public sealed class Inventory
         return left;
     }
 
+    /// <summary>
+    /// Распределяет стопку с курсора по выбранным слотам перетаскиванием.
+    /// ЛКМ делит стопку максимально равномерно; ПКМ кладёт по одной штуке в каждый подходящий слот.
+    /// Несовместимые и полные слоты пропускаются, остаток остаётся на курсоре.
+    /// </summary>
+    public bool DistributeCursor(IReadOnlyList<int> targetSlots, bool onePerSlot)
+    {
+        ArgumentNullException.ThrowIfNull(targetSlots);
+        if (targetSlots.Count > Size)
+            return false;
+
+        var seen = new HashSet<int>();
+        foreach (var slot in targetSlots)
+        {
+            if ((uint)slot >= Size || !seen.Add(slot))
+                return false;
+        }
+
+        var held = Cursor;
+        if (held.IsEmpty || targetSlots.Count == 0)
+            return true;
+
+        var max = MaxStack(held.Item);
+        var targets = targetSlots
+            .Where(slot => (_slots[slot].IsEmpty || _slots[slot].Item == held.Item)
+                           && _slots[slot].Count < max)
+            .ToArray();
+        var remaining = held.Count;
+
+        if (onePerSlot)
+        {
+            foreach (var slot in targets)
+            {
+                if (remaining == 0)
+                    break;
+                Put(slot, new ItemStack(held.Item, _slots[slot].Count + 1));
+                remaining--;
+            }
+        }
+        else
+        {
+            // Делим поровну между всеми слотами, перераспределяя остаток, если один из них заполнится.
+            var active = targets.ToList();
+            while (remaining > 0 && active.Count > 0)
+            {
+                var quotient = remaining / active.Count;
+                var extra = remaining % active.Count;
+                var movedThisPass = 0;
+
+                for (var i = 0; i < active.Count && remaining > 0; i++)
+                {
+                    var slot = active[i];
+                    var current = _slots[slot];
+                    var capacity = max - current.Count;
+                    var desired = quotient + (i < extra ? 1 : 0);
+                    if (desired == 0)
+                        continue;
+
+                    var moved = Math.Min(Math.Min(desired, capacity), remaining);
+                    if (moved == 0)
+                        continue;
+
+                    Put(slot, new ItemStack(held.Item, current.Count + moved));
+                    remaining -= moved;
+                    movedThisPass += moved;
+                }
+
+                active.RemoveAll(slot => _slots[slot].Count >= max);
+                if (movedThisPass == 0)
+                    break;
+            }
+        }
+
+        Put(CursorSlot, new ItemStack(held.Item, remaining));
+        return true;
+    }
+
     private int MaxStack(ItemId item) => _items.Get(item).MaxStackSize;
 
     /// <summary>Единственное место, где меняются слоты: запоминает изменённые для <see cref="TakeChanges"/>.</summary>
