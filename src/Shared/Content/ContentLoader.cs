@@ -40,15 +40,17 @@ public static class ContentLoader
     {
         ArgumentNullException.ThrowIfNull(files);
 
+        var orderedFiles = files.ToArray();
+        if (orderedFiles.Any(file => file is null))
+            throw new ArgumentException("Список файлов контента содержит null.", nameof(files));
+
         var blocks = new List<BlockJson>();
         var items = new List<ItemJson>();
         var blockNames = new HashSet<string>(StringComparer.Ordinal);
         var itemNames = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var file in files.OrderBy(file => file.Path, StringComparer.Ordinal))
+        foreach (var file in orderedFiles.OrderBy(file => file.Path, StringComparer.Ordinal))
         {
-            if (file is null)
-                throw new ArgumentException("Список файлов контента содержит null.", nameof(files));
             if (string.IsNullOrWhiteSpace(file.Path))
                 throw new ArgumentException("У файла контента должен быть указан путь.", nameof(files));
 
