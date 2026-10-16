@@ -353,8 +353,9 @@ internal sealed class ClientApp(
                 return false;
             }
 
-            _inventoryScreen.HandleClick(MouseFramebufferPosition, _framebufferSize,
+            _inventoryScreen.HandlePointer(MouseFramebufferPosition, _framebufferSize,
                 Input.WasMousePressed(MouseButton.Left), Input.WasMousePressed(MouseButton.Right),
+                Input.IsMouseDown(MouseButton.Left), Input.IsMouseDown(MouseButton.Right),
                 Input.IsKeyDown(Key.ShiftLeft) || Input.IsKeyDown(Key.ShiftRight), _inventory,
                 _mode == GameMode.Creative, connection.Send);
             return false;
