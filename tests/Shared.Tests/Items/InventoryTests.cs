@@ -411,6 +411,88 @@ public class InventoryTests
         }
     }
 
+    // --- Перетаскивание и распределение стопки ---
+
+    [Fact]
+    public void DragDistribution_Primary_SplitsStackEvenlyAcrossTargets()
+    {
+        _inventory.Set(Cursor, Stone(10));
+
+        Assert.True(_inventory.DistributeCursor([1, 2, 3], onePerSlot: false));
+
+        Assert.Equal(new() { [1] = Stone(4), [2] = Stone(3), [3] = Stone(3) }, Contents());
+    }
+
+    [Fact]
+    public void DragDistribution_Secondary_PlacesOneItemPerTarget()
+    {
+        _inventory.Set(Cursor, Stone(5));
+
+        Assert.True(_inventory.DistributeCursor([1, 2, 3], onePerSlot: true));
+
+        Assert.Equal(new() { [1] = Stone(1), [2] = Stone(1), [3] = Stone(1), [Cursor] = Stone(2) }, Contents());
+    }
+
+    [Fact]
+    public void DragDistribution_MergesAndSkipsIncompatibleOrFullTargets()
+    {
+        _inventory.Set(1, Stone(63));
+        _inventory.Set(2, Dirt(10));
+        _inventory.Set(3, Stone(64));
+        _inventory.Set(Cursor, Stone(5));
+
+        Assert.True(_inventory.DistributeCursor([1, 2, 3, 4], onePerSlot: true));
+
+        Assert.Equal(new()
+        {
+            [1] = Stone(64), [2] = Dirt(10), [3] = Stone(64), [4] = Stone(1), [Cursor] = Stone(3)
+        }, Contents());
+    }
+
+    [Fact]
+    public void DragDistribution_InvalidTargetsAreRejectedWithoutChanges()
+    {
+        _inventory.Set(0, Stone(10));
+        _inventory.Set(Cursor, Dirt(3));
+        _inventory.TakeChanges();
+
+        Assert.False(_inventory.DistributeCursor([1, Inventory.CursorSlot], onePerSlot: false));
+        Assert.False(_inventory.DistributeCursor([1, 1], onePerSlot: true));
+
+        Assert.Equal(new() { [0] = Stone(10), [Cursor] = Dirt(3) }, Contents());
+        Assert.Empty(_inventory.TakeChanges());
+    }
+
+    [Fact]
+    public void RandomDragDistribution_ConservesItemsAndRespectsStackLimits()
+    {
+        var random = new Random(54321);
+        ItemId[] kinds = [_stone, _dirt, _pearl];
+        for (var slot = 0; slot < Inventory.Size; slot++)
+        {
+            if (random.Next(4) != 0)
+                continue;
+            var item = kinds[random.Next(kinds.Length)];
+            _inventory.Set(slot, new ItemStack(item, random.Next(1, _items.Get(item).MaxStackSize + 1)));
+        }
+        _inventory.Set(Cursor, Stone(37));
+        var expected = Totals();
+
+        for (var i = 0; i < 500; i++)
+        {
+            var targets = Enumerable.Range(0, Inventory.Size).OrderBy(_ => random.Next()).Take(random.Next(0, 12)).ToArray();
+            Assert.True(_inventory.DistributeCursor(targets, onePerSlot: random.Next(2) == 0));
+
+            Assert.Equal(expected, Totals());
+            for (var slot = 0; slot < Inventory.SlotCount; slot++)
+            {
+                var stack = _inventory[slot];
+                Assert.True(stack.IsEmpty || stack.Count <= _items.Get(stack.Item).MaxStackSize,
+                    $"Слот {slot}: {stack} после распределения по [{string.Join(", ", targets)}]");
+            }
+        }
+    }
+
     private Dictionary<ItemId, int> Totals()
     {
         var totals = new Dictionary<ItemId, int>();
