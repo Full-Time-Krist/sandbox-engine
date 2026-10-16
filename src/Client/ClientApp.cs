@@ -55,6 +55,8 @@ internal sealed class ClientApp(
     private ShaderProgram _lineShader = null!;
     private ColorMesh _selectionBox = null!;
     private Hud _hud = null!;
+    private InventoryScreen _inventoryScreen = null!;
+    private bool _inventoryOpen;
     private TextureArray _blockTextures = null!;
     private ChunkRenderer _chunkRenderer = null!;
 
@@ -108,6 +110,8 @@ internal sealed class ClientApp(
         _selectionBox = LineGeometry.CreateBoxOutline(Gl, new Vector3(0.05f));
         _hud = new Hud(Gl, Path.Combine(AppContext.BaseDirectory, "Assets", "Fonts", "ui.ttf"), Window.FramebufferSize,
             _blockTextures, visuals, _items);
+        _inventoryScreen = new InventoryScreen(Gl, Path.Combine(AppContext.BaseDirectory, "Assets", "Fonts", "ui.ttf"),
+            Window.FramebufferSize, _blockTextures, visuals, _items);
 
         // Позицию задаст сервер в JoinAccepted. До неё чанков нет, и тело стоит на месте.
         _controller = new PlayerController(_camera, _world.Chunks, _registry);
@@ -289,7 +293,9 @@ internal sealed class ClientApp(
         _drawnChunks = _chunkRenderer.Draw(_chunkShader, eye, Frustum.FromMatrix(viewProjection));
 
         DrawSelection(eye);
-        _hud.Draw(_framebufferSize, _inventory, deltaTime);
+        _hud.Draw(_framebufferSize, _inventory, deltaTime, _inventoryOpen);
+        if (_inventoryOpen)
+            _inventoryScreen.Draw(_framebufferSize, _inventory, _mode == GameMode.Creative, Input.MousePosition);
     }
 
     private void DrawSelection(Vector3d eye)
@@ -326,6 +332,23 @@ internal sealed class ClientApp(
     /// <summary>Захват курсора, взгляд мышью и выбор слота. Возвращает, можно ли в этом кадре применять предмет.</summary>
     private bool HandleFrameInput()
     {
+        if (_inventoryOpen)
+        {
+            if (Input.WasKeyPressed(Key.Escape) || Input.WasKeyPressed(Key.E))
+            {
+                _inventoryOpen = false;
+                connection.Send(new ReturnInventoryCursor());
+                Input.CaptureCursor();
+                return false;
+            }
+
+            _inventoryScreen.HandleClick(Input.MousePosition, _framebufferSize,
+                Input.WasMousePressed(MouseButton.Left), Input.WasMousePressed(MouseButton.Right),
+                Input.IsKeyDown(Key.ShiftLeft) || Input.IsKeyDown(Key.ShiftRight), _inventory,
+                _mode == GameMode.Creative, connection.Send);
+            return false;
+        }
+
         if (!Input.IsCursorCaptured)
         {
             // Клик, захвативший курсор, не должен заодно сломать блок: действия — только со следующего кадра.
@@ -336,6 +359,13 @@ internal sealed class ClientApp(
 
         if (Input.WasKeyPressed(Key.Escape))
         {
+            Input.ReleaseCursor();
+            return false;
+        }
+
+        if (Input.WasKeyPressed(Key.E) && _inventoryReceived)
+        {
+            _inventoryOpen = true;
             Input.ReleaseCursor();
             return false;
         }
@@ -414,6 +444,7 @@ internal sealed class ClientApp(
     {
         _chunkRenderer.Dispose();
         _blockTextures.Dispose();
+        _inventoryScreen.Dispose();
         _hud.Dispose();
         _selectionBox.Dispose();
         _lineShader.Dispose();
