@@ -65,9 +65,9 @@ internal sealed class Hud : IDisposable
 
     /// <param name="screen">Размер кадра в пикселях.</param>
     /// <param name="deltaTime">Время с прошлого кадра: по нему гаснет название предмета.</param>
-    public void Draw(Vector2D<int> screen, Inventory inventory, double deltaTime)
+    public void Draw(Vector2D<int> screen, Inventory inventory, double deltaTime, bool inventoryOpen = false)
     {
-        if (screen.X <= 0 || screen.Y <= 0)
+        if (screen.X <= 0 || screen.Y <= 0 || inventoryOpen)
             return;
 
         var scale = UiScale.For(screen.X, screen.Y);
