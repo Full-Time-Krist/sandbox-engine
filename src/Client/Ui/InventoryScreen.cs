@@ -136,6 +136,8 @@ internal sealed class InventoryScreen : IDisposable
                 return true;
             }
 
+            // Учесть последний слот, если мышь отпустили сразу после входа в него.
+            AddDragTarget(HitSlot(mouse, screen, scale));
             if (_dragTargets.Count > 0)
             {
                 send(new InventoryDragDistribute(ImmutableArray.CreateRange(_dragTargets), _dragOnePerSlot));
