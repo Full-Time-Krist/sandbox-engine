@@ -39,6 +39,9 @@ public sealed class InputState : IDisposable
     /// <summary>Прокрутка колеса за кадр (положительная — от себя).</summary>
     public float ScrollDelta { get; private set; }
 
+    /// <summary>Положение курсора в координатах окна, с началом в левом верхнем углу.</summary>
+    public Vector2 MousePosition { get; private set; }
+
     public bool IsCursorCaptured => _mouse.Cursor.CursorMode != CursorMode.Normal;
 
     internal InputState(IWindow window)
@@ -107,6 +110,7 @@ public sealed class InputState : IDisposable
             _pendingMouseDelta += position - _lastMousePosition;
 
         _lastMousePosition = position;
+        MousePosition = position;
         _hasLastMousePosition = true;
     }
 
