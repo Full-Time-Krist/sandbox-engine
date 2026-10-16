@@ -140,7 +140,7 @@ internal sealed class InventoryScreen : IDisposable
             var col = (int)((mouse.X - grid.X) / (SlotSize * scale));
             var row = (int)((mouse.Y - paletteY) / (SlotSize * scale));
             var items = _items.All.Where(item => !item.Id.IsAir).ToArray();
-            if (col >= 0 && col < Columns && row >= 0 && row * Columns + col < items.Length &&
+            if (mouse.X >= grid.X && mouse.X < grid.X + grid.Width && col >= 0 && col < Columns && row >= 0 && row * Columns + col < items.Length &&
                 mouse.Y >= paletteY && mouse.Y < paletteY + ((items.Length + Columns - 1) / Columns) * SlotSize * scale)
             {
                 send(new CreativeGiveItem(items[row * Columns + col].Id));
@@ -172,7 +172,7 @@ internal sealed class InventoryScreen : IDisposable
         var rowIndex = (int)((mouse.Y - paletteY) / (SlotSize * scale));
         var items = _items.All.Where(item => !item.Id.IsAir).ToArray();
         var indexInPalette = rowIndex * Columns + colIndex;
-        if (colIndex >= 0 && colIndex < Columns && rowIndex >= 0 && indexInPalette < items.Length &&
+        if (mouse.X >= grid.X && mouse.X < grid.X + grid.Width && colIndex >= 0 && colIndex < Columns && rowIndex >= 0 && indexInPalette < items.Length &&
             mouse.Y >= paletteY && mouse.Y < paletteY + ((items.Length + Columns - 1) / Columns) * SlotSize * scale)
             return items[indexInPalette];
         return null;
