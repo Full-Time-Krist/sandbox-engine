@@ -9,7 +9,9 @@
     Hold-Key $game 0x57 1000                 # W одну секунду; Hold-Keys $game @(0x57, 0x20) 1500 — W и Space вместе (коды: https://learn.microsoft.com/windows/win32/inputdev/virtual-key-codes)
     Move-Mouse $game 0 10 30                 # 30 шагов по 10 px вниз
     Scroll-Mouse $game -1                    # колесо на одно деление: +1 — от себя, -1 — на себя
+    Resize-Game $game 800 600                # размер кадра (без рамки и заголовка), например для масштаба интерфейса
     Save-Screenshot $game "$env:TEMP\shot.png" -Half
+    Save-ClientScreenshot $game "$env:TEMP\frame.png"  # только кадр, пиксель в пиксель: проверять чёткость интерфейса
     Get-GameTitle $game                      # заголовок: FPS, TPS, строка состояния
     Stop-Game $game                          # закрыть окно и вывести лог (stdout/stderr, UTF-8)
 
@@ -23,6 +25,10 @@ using System; using System.Runtime.InteropServices;
 public static class PlaytestNative {
     [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r);
+    [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out Rect r);
+    [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
+    [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref Point p);
+    [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr h, int x, int y, int w, int height, bool repaint);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] public static extern void mouse_event(uint flags, int dx, int dy, uint data, IntPtr extra);
@@ -103,6 +109,31 @@ function Scroll-Mouse($game, [int]$Notches) {
     # Деление колеса — 120 единиц; mouse_event принимает их как uint, поэтому отрицательное число передаётся его битами.
     $data = [BitConverter]::ToUInt32([BitConverter]::GetBytes([int](120 * $Notches)), 0)
     [PlaytestNative]::mouse_event(0x800, 0, 0, $data, [IntPtr]::Zero); Start-Sleep -Milliseconds 300
+}
+
+# Задаёт размер кадра: рамку и заголовок окна добавляет сама, левый верхний угол окна остаётся на месте.
+function Resize-Game($game, [int]$Width, [int]$Height) {
+    $handle = $game.Process.MainWindowHandle
+    $outer = Get-WindowRect $game
+    $client = New-Object PlaytestNative+Rect
+    [PlaytestNative]::GetClientRect($handle, [ref]$client) | Out-Null
+    $frameWidth = ($outer.Right - $outer.Left) - $client.Right
+    $frameHeight = ($outer.Bottom - $outer.Top) - $client.Bottom
+    [PlaytestNative]::MoveWindow($handle, $outer.Left, $outer.Top, $Width + $frameWidth, $Height + $frameHeight, $true) | Out-Null
+    Start-Sleep -Milliseconds 700
+}
+
+# Кадр без рамки окна: клиентская область в координатах экрана (в рамку Windows 10 входят невидимые края).
+function Save-ClientScreenshot($game, [string]$Path) {
+    $handle = $game.Process.MainWindowHandle
+    $client = New-Object PlaytestNative+Rect
+    [PlaytestNative]::GetClientRect($handle, [ref]$client) | Out-Null
+    $origin = New-Object PlaytestNative+Point
+    [PlaytestNative]::ClientToScreen($handle, [ref]$origin) | Out-Null
+    $bitmap = New-Object System.Drawing.Bitmap $client.Right, $client.Bottom
+    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+    $graphics.CopyFromScreen($origin.X, $origin.Y, 0, 0, $bitmap.Size)
+    $bitmap.Save($Path)
 }
 
 function Save-Screenshot($game, [string]$Path, [switch]$Half) {

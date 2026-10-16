@@ -55,6 +55,16 @@ public sealed unsafe class VertexArrayObject : IDisposable
         _gl.DrawRangeElements(primitive, 0, (uint)Math.Max(0, _vertexCount - 1), (uint)_indexCount, DrawElementsType.UnsignedInt, null);
     }
 
+    /// <summary>
+    /// Рисует первые <paramref name="indexCount"/> индексов, которые ссылаются только на первые
+    /// <paramref name="vertexCount"/> вершин: для буферов, заполненных не до конца (интерфейс за кадр).
+    /// </summary>
+    public void DrawIndexed(int indexCount, int vertexCount, PrimitiveType primitive = PrimitiveType.Triangles)
+    {
+        _gl.BindVertexArray(Handle);
+        _gl.DrawRangeElements(primitive, 0, (uint)Math.Max(0, vertexCount - 1), (uint)indexCount, DrawElementsType.UnsignedInt, null);
+    }
+
     /// <summary>Рисует вершины подряд, без буфера индексов.</summary>
     public void DrawArrays(PrimitiveType primitive, int vertexCount, int first = 0)
     {

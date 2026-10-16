@@ -5,10 +5,16 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Шейдеры интерфейса встроены в сборку: движок не зависит от папки ассетов игры. -->
+    <EmbeddedResource Include="Ui\Shaders\*.vert;Ui\Shaders\*.frag" LogicalName="Engine.Ui.Shaders.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Silk.NET.Input" />
     <PackageReference Include="Silk.NET.OpenGL" />
     <PackageReference Include="Silk.NET.Windowing" />
     <PackageReference Include="StbImageSharp" />
+    <PackageReference Include="StbTrueTypeSharp" />
   </ItemGroup>
 
 </Project>

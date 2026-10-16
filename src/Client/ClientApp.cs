@@ -1,5 +1,6 @@
 using System.Numerics;
 using Client.Rendering;
+using Client.Ui;
 using Engine;
 using Engine.Graphics;
 using Engine.Windowing;
@@ -53,7 +54,7 @@ internal sealed class ClientApp(
     private ShaderProgram _chunkShader = null!;
     private ShaderProgram _lineShader = null!;
     private ColorMesh _selectionBox = null!;
-    private ColorMesh _crosshair = null!;
+    private Hud _hud = null!;
     private TextureArray _blockTextures = null!;
     private ChunkRenderer _chunkRenderer = null!;
 
@@ -105,7 +106,8 @@ internal sealed class ClientApp(
         _chunkShader.SetUniform("u_Textures", 0); // сэмплер читает текстурный блок 0
         _lineShader = ShaderProgram.FromFiles(Gl, Path.Combine(shaders, "basic"));
         _selectionBox = LineGeometry.CreateBoxOutline(Gl, new Vector3(0.05f));
-        _crosshair = LineGeometry.CreateCrosshair(Gl);
+        _hud = new Hud(Gl, Path.Combine(AppContext.BaseDirectory, "Assets", "Fonts", "ui.ttf"), Window.FramebufferSize,
+            _blockTextures, visuals, _items);
 
         // Позицию задаст сервер в JoinAccepted. До неё чанков нет, и тело стоит на месте.
         _controller = new PlayerController(_camera, _world.Chunks, _registry);
@@ -287,7 +289,7 @@ internal sealed class ClientApp(
         _drawnChunks = _chunkRenderer.Draw(_chunkShader, eye, Frustum.FromMatrix(viewProjection));
 
         DrawSelection(eye);
-        DrawCrosshair();
+        _hud.Draw(_framebufferSize, _inventory, deltaTime);
     }
 
     private void DrawSelection(Vector3d eye)
@@ -306,26 +308,6 @@ internal sealed class ClientApp(
         _lineShader.SetUniform("u_ViewProjection", _camera.ViewProjection);
         _lineShader.SetUniform("u_Model", model);
         _selectionBox.Draw();
-    }
-
-    private void DrawCrosshair()
-    {
-        if (_framebufferSize.X <= 0 || _framebufferSize.Y <= 0)
-            return;
-
-        // Перекрестие рисуется прямо в координатах экрана (NDC от −1 до 1), поэтому камера не нужна.
-        // Меш задан в пикселях; масштаб переводит их в NDC отдельно по X и Y, чтобы крест не растягивался с окном.
-        _lineShader.Use();
-        _lineShader.SetUniform("u_ViewProjection", Matrix4x4.Identity);
-        _lineShader.SetUniform("u_Model", Matrix4x4.CreateScale(2f / _framebufferSize.X, 2f / _framebufferSize.Y, 1f));
-
-        // Белый цвет со смешиванием «1 − цвет под крестом» инвертирует фон: крест виден и на небе, и на траве.
-        Gl.Disable(EnableCap.DepthTest);
-        Gl.Enable(EnableCap.Blend);
-        Gl.BlendFunc(BlendingFactor.OneMinusDstColor, BlendingFactor.Zero);
-        _crosshair.Draw();
-        Gl.Disable(EnableCap.Blend);
-        Gl.Enable(EnableCap.DepthTest);
     }
 
     protected override void OnResize(Vector2D<int> framebufferSize) => UpdateAspectRatio(framebufferSize);
@@ -432,7 +414,7 @@ internal sealed class ClientApp(
     {
         _chunkRenderer.Dispose();
         _blockTextures.Dispose();
-        _crosshair.Dispose();
+        _hud.Dispose();
         _selectionBox.Dispose();
         _lineShader.Dispose();
         _chunkShader.Dispose();
