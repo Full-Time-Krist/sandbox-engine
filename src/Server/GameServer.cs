@@ -34,8 +34,10 @@ public sealed class GameServer : IDisposable
     /// <summary>Подключения, которые ещё не приняты в тике. Пополняются из любого потока.</summary>
     private readonly ConcurrentQueue<IConnection<ServerMessage, ClientMessage>> _pendingConnections = new();
     private readonly ImmutableArray<string> _blockNames;
+    private readonly ImmutableArray<string> _itemNames;
     private readonly BlockRegistry _registry;
     private readonly BaseBlocks _blocks;
+    private readonly ItemRegistry _items;
     private readonly WorldEditor _editor;
     /// <summary>
     /// Сколько чанков отправлять одному игроку за тик. Иначе при входе клиент получил бы сотни чанков разом:
@@ -75,9 +77,10 @@ public sealed class GameServer : IDisposable
     /// <param name="verticalDistance">Дальность прорисовки вверх и вниз, в чанках.</param>
     /// <param name="spawnColumn">Столбец точки появления нового мира; null — (0, 0).</param>
     /// <param name="savePath">Файл сохранения: есть — мир загружается, нет — создаётся. null — мир только в памяти (тесты).</param>
+    /// <param name="defaultMode">Режим нового игрока в новом мире; null — выживание. У мира из сохранения режим свой.</param>
     public GameServer(int? seed, int? generatorThreads = null,
         int viewDistance = DefaultViewDistance, int verticalDistance = DefaultVerticalDistance,
-        (int X, int Z)? spawnColumn = null, string? savePath = null)
+        (int X, int Z)? spawnColumn = null, string? savePath = null, GameMode? defaultMode = null)
     {
         _viewDistance = viewDistance;
         _verticalDistance = verticalDistance;
@@ -87,15 +90,20 @@ public sealed class GameServer : IDisposable
         registry.Freeze();
         _blockNames = [.. registry.All.Select(b => b.Name)];
 
+        _items = new ItemRegistry();
+        _items.RegisterBlockItems(registry);
+        _items.Freeze();
+        _itemNames = [.. _items.All.Select(i => i.Name)];
+
         if (savePath != null)
-            _save = WorldSave.Open(savePath, registry);
+            _save = WorldSave.Open(savePath, registry, _items);
         try
         {
             var isNew = _save?.Info == null;
             World = new World(_blocks, seed ?? Random.Shared.Next(), generatorThreads ?? ChunkGenerator.DefaultWorkerCount,
-                spawnColumn ?? default, _save);
+                spawnColumn ?? default, _save, defaultMode ?? GameMode.Survival);
             if (_save != null)
-                LogOpened(isNew, seed, spawnColumn);
+                LogOpened(isNew, seed, spawnColumn, defaultMode);
         }
         catch
         {
@@ -106,20 +114,27 @@ public sealed class GameServer : IDisposable
         _editor = new WorldEditor(this);
     }
 
-    private void LogOpened(bool isNew, int? seed, (int X, int Z)? spawnColumn)
+    private void LogOpened(bool isNew, int? seed, (int X, int Z)? spawnColumn, GameMode? defaultMode)
     {
+        var mode = World.DefaultMode.ToName();
         Console.WriteLine(isNew
-            ? $"[Server] Создан новый мир (сид {World.Seed}): {_save!.Path}"
-            : $"[Server] Загружен мир (сид {World.Seed}): {_save!.Path}");
+            ? $"[Server] Создан новый мир (сид {World.Seed}, режим {mode}): {_save!.Path}"
+            : $"[Server] Загружен мир (сид {World.Seed}, режим {mode}): {_save!.Path}");
         if (isNew)
             return;
 
+        if (_save.UpgradedFrom is { } from)
+            Console.WriteLine($"[Server] Сохранение обновлено с формата {from} до {WorldSave.FormatVersion}");
         if (seed != null && seed != World.Seed)
             Console.WriteLine($"[Server] Сид {seed} не применён: у мира уже есть свой");
         if (spawnColumn != null)
             Console.WriteLine("[Server] Точка появления не применена: у мира уже есть своя");
-        foreach (var name in _save!.BlockIds.UnknownNames)
+        if (defaultMode != null && defaultMode != World.DefaultMode)
+            Console.WriteLine($"[Server] Режим {defaultMode.Value.ToName()} не применён: у мира уже есть свой");
+        foreach (var name in _save.BlockIds.UnknownNames)
             Console.WriteLine($"[Server] Блок '{name}' из сохранения неизвестен, вместо него будет воздух");
+        foreach (var name in _save.ItemIds.UnknownNames)
+            Console.WriteLine($"[Server] Предмет '{name}' из сохранения неизвестен, он пропадёт из инвентарей");
     }
 
     /// <summary>
@@ -152,6 +167,13 @@ public sealed class GameServer : IDisposable
             UnloadUnusedChunks();
         if (_tick % AutosaveIntervalTicks == 0)
             Autosave();
+
+        // Изменения инвентаря за тик — одним сообщением, в конце: что бы ни меняло инвентарь в этом тике, оно уже учтено.
+        foreach (var session in _sessions)
+        {
+            if (session.IsJoined && session.Inventory.TakeChanges() is { IsEmpty: false } changes)
+                session.Connection.Send(new InventoryChanged(changes));
+        }
     }
 
     /// <summary>Ставит в очередь записи изменённые чанки и позиции игроков. Возвращает число чанков.</summary>
@@ -163,7 +185,10 @@ public sealed class GameServer : IDisposable
         foreach (var session in _sessions)
         {
             if (session.IsJoined)
-                _save.SavePlayer(session.PlayerName, session.PlayerPosition);
+            {
+                _save.SavePlayer(session.PlayerName, new SavedPlayer(session.PlayerPosition, session.Look, session.Mode,
+                    session.Inventory.SelectedSlot, session.Inventory.CopySlots()));
+            }
         }
         return World.SaveDirty();
     }
@@ -251,15 +276,7 @@ public sealed class GameServer : IDisposable
         switch (message)
         {
             case JoinRequest join when !session.IsJoined:
-                // Игрок, который уже был в этом мире, продолжает с того места, где вышел.
-                var start = _save?.LoadPlayer(join.PlayerName) is { } saved && IsValidPosition(saved) ? saved : World.SpawnPosition;
-                session.Join(_nextPlayerId++, join.PlayerName, Hotbar.CreateDefault(_blocks),
-                    new PlayerChunkView(_viewDistance, _verticalDistance, BlockPos.Containing(start).Chunk));
-                // До первого PlayerMove игрок стоит в начальной точке, иначе его действия сочлись бы «издалека».
-                session.PlayerPosition = start;
-                // Чанки придут в следующих тиках (StreamChunks), начиная с ближайших.
-                session.Connection.Send(new JoinAccepted(session.PlayerId, start, _blockNames));
-                Console.WriteLine($"[Server] {session.PlayerName} подключился (id {session.PlayerId})");
+                HandleJoin(session, join);
                 break;
 
             case PlayerMove move when session.IsJoined:
@@ -267,8 +284,21 @@ public sealed class GameServer : IDisposable
                 break;
 
             case SelectHotbarSlot select when session.IsJoined:
-                if (!session.Hotbar.TrySelect(select.Slot))
+                if (!session.Inventory.TrySelect(select.Slot))
                     Console.WriteLine($"[Server] {session.PlayerName}: неверный слот {select.Slot}");
+                break;
+
+            case SetGameMode setMode when session.IsJoined:
+                // Прав доступа пока нет, а игра одиночная: сменить режим может любой игрок.
+                if (setMode.Mode.IsDefined())
+                    ChangeMode(session, setMode.Mode);
+                else
+                    Console.WriteLine($"[Server] {session.PlayerName}: неизвестный режим {(int)setMode.Mode}");
+                break;
+
+            case InventoryClick click when session.IsJoined:
+                if (!session.Inventory.Click(click.Slot, click.Kind))
+                    Console.WriteLine($"[Server] {session.PlayerName}: неверный клик по инвентарю ({click.Slot}, {click.Kind})");
                 break;
 
             case UseItem use when session.IsJoined:
@@ -282,11 +312,73 @@ public sealed class GameServer : IDisposable
         }
     }
 
+    /// <summary>
+    /// Игрок, который уже был в этом мире, продолжает с того места, где вышел: с тем же взглядом, режимом и инвентарём.
+    /// Новый появляется в точке появления, в режиме мира и с пустым инвентарём.
+    /// </summary>
+    private void HandleJoin(ClientSession session, JoinRequest join)
+    {
+        var saved = _save?.LoadPlayer(join.PlayerName);
+        var start = saved != null && IsValidPosition(saved.Position) ? saved.Position : World.SpawnPosition;
+        var mode = saved?.Mode ?? World.DefaultMode;
+        var inventory = new Inventory(_items);
+        if (saved != null)
+            RestoreInventory(inventory, saved);
+
+        session.Join(_nextPlayerId++, join.PlayerName, mode, inventory,
+            new PlayerChunkView(_viewDistance, _verticalDistance, BlockPos.Containing(start).Chunk));
+        // До первого PlayerMove игрок стоит в начальной точке, иначе его действия сочлись бы «издалека».
+        session.PlayerPosition = start;
+        session.Look = saved?.Look ?? default;
+        // Чанки придут в следующих тиках (StreamChunks), начиная с ближайших.
+        session.Connection.Send(new JoinAccepted(session.PlayerId, start, session.Look, mode, _blockNames, _itemNames));
+        // Инвентарь уходит целиком, поэтому изменения от его заполнения отправлять не нужно.
+        session.Connection.Send(new InventoryContents(inventory.CopySlots(), inventory.SelectedSlot));
+        inventory.TakeChanges();
+        Console.WriteLine($"[Server] {session.PlayerName} подключился (id {session.PlayerId}, режим {mode.ToName()})");
+    }
+
+    /// <summary>
+    /// Кладёт сохранённые стопки в инвентарь. Предмет, который при выходе был на курсоре, возвращается в слоты:
+    /// экран инвентаря при входе закрыт, и на курсоре его не было бы видно.
+    /// </summary>
+    private static void RestoreInventory(Inventory inventory, SavedPlayer saved)
+    {
+        for (var slot = 0; slot < Inventory.SlotCount; slot++)
+            inventory.Set(slot, saved.Slots[slot]);
+        inventory.ReturnCursor();
+        inventory.TrySelect(saved.SelectedSlot);
+    }
+
+    /// <summary>
+    /// Меняет режим игрока и сообщает клиенту. При переходе в выживание пределы движения становятся строже,
+    /// а клиент ещё тик-другой летит по-творчески: его уже отправленные перемещения сервер отклонил бы.
+    /// Телепорт на месте делает их устаревшими (старый номер) и гасит скорость у клиента.
+    /// </summary>
+    private static void ChangeMode(ClientSession session, GameMode mode)
+    {
+        if (session.Mode == mode)
+            return;
+
+        session.SetMode(mode);
+        session.Connection.Send(new GameModeChanged(mode));
+        if (mode == GameMode.Survival)
+            SendTeleport(session);
+        Console.WriteLine($"[Server] {session.PlayerName}: режим {mode.ToName()}");
+    }
+
+    /// <summary>Меняет режим игрока, как по его запросу. Для тестов (позже — для команд).</summary>
+    internal void SetGameMode(int playerId, GameMode mode) => ChangeMode(_sessions.Single(s => s.IsJoined && s.PlayerId == playerId), mode);
+
     private void HandleMove(ClientSession session, PlayerMove move)
     {
         // Отправлено до последнего телепорта и посчитано от старой позиции.
         if (move.TeleportId != session.Movement.TeleportId)
             return;
+
+        // Взгляд не проверяется (он нужен только для сохранения), но NaN и огромные углы в сохранение не пускаем.
+        if (move.Look.IsFinite)
+            session.Look = move.Look.Normalized();
 
         // От позиции зависит, какие чанки грузить: NaN или координаты за пределами int сломали бы расчёт.
         var problem = IsValidPosition(move.Position)
@@ -319,6 +411,9 @@ public sealed class GameServer : IDisposable
     /// <summary>Последняя принятая позиция игрока (точка ног). Для тестов.</summary>
     internal Vector3d PlayerPosition(int playerId) => _sessions.Single(s => s.IsJoined && s.PlayerId == playerId).PlayerPosition;
 
+    /// <summary>Инвентарь игрока на сервере. Для тестов: менять его можно только между тиками, из потока теста.</summary>
+    internal Inventory PlayerInventory(int playerId) => _sessions.Single(s => s.IsJoined && s.PlayerId == playerId).Inventory;
+
     private static void SendTeleport(ClientSession session) =>
         session.Connection.Send(new PlayerTeleport(session.PlayerPosition, session.Movement.NextTeleport()));
 
@@ -337,8 +432,9 @@ public sealed class GameServer : IDisposable
 
         // Сервер сам повторяет луч по своей копии мира: клиент не может указать произвольный блок.
         var target = VoxelRaycast.Cast(World.Chunks, use.EyePosition, use.LookDirection, GameRules.BlockReach);
-        var item = session.Hotbar.SelectedItem;
-        ItemBehaviors.For(item).Use(use.Action, new ItemUseContext(_editor, item, target, use.EyePosition));
+        var held = _items.Get(session.Inventory.Selected.Item);
+        ItemBehaviors.For(held).Use(use.Action,
+            new ItemUseContext(_editor, _items, session.Inventory, session.Mode, target, use.EyePosition));
     }
 
     private static bool IsValidPosition(Vector3d position) =>

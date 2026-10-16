@@ -1,5 +1,3 @@
-using System.Text.RegularExpressions;
-
 namespace Shared.Blocks;
 
 /// <summary>
@@ -9,7 +7,7 @@ namespace Shared.Blocks;
 /// Блоки регистрируются при запуске, затем реестр замораживается (<see cref="Freeze"/>).
 /// Числовые id раздаются по порядку регистрации, поэтому для сохранений и сети годятся только строковые имена.
 /// </remarks>
-public sealed partial class BlockRegistry
+public sealed class BlockRegistry
 {
     public const string AirName = "base:air";
 
@@ -31,7 +29,7 @@ public sealed partial class BlockRegistry
     {
         if (IsFrozen)
             throw new InvalidOperationException($"Реестр заморожен, блок '{name}' зарегистрировать нельзя.");
-        if (!NamePattern().IsMatch(name))
+        if (!ContentNames.IsValid(name))
             throw new ArgumentException($"Имя блока '{name}' должно иметь вид 'namespace:name' (a–z, 0–9, _).", nameof(name));
         if (_byName.ContainsKey(name))
             throw new InvalidOperationException($"Блок '{name}' уже зарегистрирован.");
@@ -59,7 +57,4 @@ public sealed partial class BlockRegistry
     public bool IsSolid(BlockId id) => id.Value >= _byId.Count || _byId[id.Value].IsSolid;
 
     public bool TryGet(string name, out BlockDefinition definition) => _byName.TryGetValue(name, out definition!);
-
-    [GeneratedRegex("^[a-z0-9_]+:[a-z0-9_]+$")]
-    private static partial Regex NamePattern();
 }

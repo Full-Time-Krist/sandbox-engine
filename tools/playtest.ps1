@@ -8,6 +8,7 @@
     Enter-Game $game                         # клик в центр окна: захват мыши
     Hold-Key $game 0x57 1000                 # W одну секунду; Hold-Keys $game @(0x57, 0x20) 1500 — W и Space вместе (коды: https://learn.microsoft.com/windows/win32/inputdev/virtual-key-codes)
     Move-Mouse $game 0 10 30                 # 30 шагов по 10 px вниз
+    Scroll-Mouse $game -1                    # колесо на одно деление: +1 — от себя, -1 — на себя
     Save-Screenshot $game "$env:TEMP\shot.png" -Half
     Get-GameTitle $game                      # заголовок: FPS, TPS, строка состояния
     Stop-Game $game                          # закрыть окно и вывести лог (stdout/stderr, UTF-8)
@@ -96,6 +97,12 @@ function Hold-Keys($game, [byte[]]$VirtualKeys, [int]$Milliseconds = 50) {
 function Move-Mouse($game, [int]$Dx, [int]$Dy, [int]$Steps = 1) {
     for ($i = 0; $i -lt $Steps; $i++) { [PlaytestNative]::mouse_event(0x1, $Dx, $Dy, 0, [IntPtr]::Zero); Start-Sleep -Milliseconds 15 }
     Start-Sleep -Milliseconds 300
+}
+
+function Scroll-Mouse($game, [int]$Notches) {
+    # Деление колеса — 120 единиц; mouse_event принимает их как uint, поэтому отрицательное число передаётся его битами.
+    $data = [BitConverter]::ToUInt32([BitConverter]::GetBytes([int](120 * $Notches)), 0)
+    [PlaytestNative]::mouse_event(0x800, 0, 0, $data, [IntPtr]::Zero); Start-Sleep -Milliseconds 300
 }
 
 function Save-Screenshot($game, [string]$Path, [switch]$Half) {

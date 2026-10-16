@@ -113,8 +113,74 @@ public sealed class SaveLoadTests : IDisposable
         var registry = new BlockRegistry();
         BaseBlocks.Register(registry);
         registry.Freeze();
-        using var reader = WorldSave.Open(_directory.SaveFile, registry);
+        using var reader = WorldSave.Open(_directory.SaveFile, registry, WorldSaveTests.ItemsFor(registry));
         Assert.True(reader.TryLoadChunk(surface.Chunk, out var saved));
         Assert.True(saved.Get(surface.Local).IsAir);
+    }
+
+    /// <summary>Номер последнего телепорта, который получил клиент: с ним клиент шлёт PlayerMove.</summary>
+    private static int LastTeleportId(TestServers.TestClient client)
+    {
+        var id = 0;
+        while (client.TryReceive(out var message))
+        {
+            if (message is PlayerTeleport teleport)
+                id = teleport.TeleportId;
+        }
+        return id;
+    }
+
+    [Fact]
+    public void PlayerState_SurvivesRestart_CursorReturnsToInventory()
+    {
+        var look = new LookAngles(1.25f, -0.5f);
+        ItemStack mined;
+        using (var server = Create())
+        {
+            // Всё — сообщениями, как настоящий клиент: добыча, выбор слота, взгляд, клик по инвентарю, смена режима.
+            var client = TestServers.JoinAndLoad(server);
+            var surface = BreakSurface(server, client);
+            var inventory = server.PlayerInventory(client.PlayerId);
+            mined = inventory[0];
+            Assert.False(mined.IsEmpty);
+            inventory.Set(10, new ItemStack(mined.Item, 7));
+
+            client.Send(new SelectHotbarSlot(4));
+            client.Send(new PlayerMove(server.PlayerPosition(client.PlayerId), look, LastTeleportId(client)));
+            client.Send(new InventoryClick(0, InventoryClickKind.Primary)); // стопка из слота 0 — на курсор
+            client.Send(new SetGameMode(GameMode.Creative));
+            server.Tick();
+            Assert.Equal(mined, inventory.Cursor);
+            Assert.True(server.World.Chunks.GetBlock(surface).IsAir);
+        }
+
+        using var restarted = Create();
+        var messages = new List<ServerMessage>();
+        TestServers.JoinAndLoad(restarted, messages);
+
+        var accepted = Assert.IsType<JoinAccepted>(messages[0]);
+        Assert.Equal(look, accepted.StartLook);
+        Assert.Equal(GameMode.Creative, accepted.Mode);
+        var contents = Assert.IsType<InventoryContents>(messages[1]);
+        Assert.Equal(4, contents.SelectedSlot);
+        // Предмет с курсора вернулся в слоты: доложен в стопку того же предмета в слоте 10.
+        Assert.True(contents.Slots[Inventory.CursorSlot].IsEmpty);
+        Assert.Equal(new ItemStack(mined.Item, 7 + mined.Count), contents.Slots[10]);
+        Assert.Equal(1, contents.Slots.Count(s => !s.IsEmpty));
+    }
+
+    [Fact]
+    public void NewPlayer_GetsWorldDefaultMode_ExistingWorldKeepsIts()
+    {
+        using (var server = TestServers.Create(savePath: _directory.SaveFile, defaultMode: GameMode.Creative))
+        {
+            var messages = new List<ServerMessage>();
+            TestServers.JoinAndLoad(server, messages);
+            Assert.Equal(GameMode.Creative, Assert.IsType<JoinAccepted>(messages[0]).Mode);
+        }
+
+        // Режим задаётся только при создании мира: у уже созданного он свой.
+        using var restarted = TestServers.Create(savePath: _directory.SaveFile, defaultMode: GameMode.Survival);
+        Assert.Equal(GameMode.Creative, restarted.World.DefaultMode);
     }
 }

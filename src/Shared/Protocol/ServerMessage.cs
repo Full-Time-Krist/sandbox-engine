@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Shared.Blocks;
+using Shared.Items;
 using Shared.Voxels;
 
 namespace Shared.Protocol;
@@ -10,11 +11,31 @@ namespace Shared.Protocol;
 public abstract record ServerMessage;
 
 /// <param name="StartPosition">Где игрок начинает: там, где он был при прошлом выходе, или в точке появления мира.</param>
+/// <param name="StartLook">Куда игрок смотрел при прошлом выходе; новый игрок смотрит вдаль, вдоль −Z.</param>
+/// <param name="Mode">Режим игрока: сохранённый или, у нового игрока, режим мира по умолчанию.</param>
 /// <param name="BlockNames">
 /// Имена блоков по порядку числовых id. Клиент сверяет их со своим реестром: при расхождении
 /// одинаковые числа означали бы разные блоки. В мультиплеере клиент будет строить таблицу по этому списку.
 /// </param>
-public sealed record JoinAccepted(int PlayerId, Vector3d StartPosition, ImmutableArray<string> BlockNames) : ServerMessage;
+/// <param name="ItemNames">Имена предметов по порядку числовых id: сверяются так же, как блоки.</param>
+public sealed record JoinAccepted(int PlayerId, Vector3d StartPosition, LookAngles StartLook, GameMode Mode,
+    ImmutableArray<string> BlockNames, ImmutableArray<string> ItemNames) : ServerMessage;
+
+/// <summary>
+/// Режим игрока сменился. При переходе в выживание следом приходит <see cref="PlayerTeleport"/> на текущее место:
+/// перемещения, посчитанные клиентом ещё по-творчески (в полёте), сервер по новым пределам отклонил бы.
+/// </summary>
+public sealed record GameModeChanged(GameMode Mode) : ServerMessage;
+
+/// <summary>Весь инвентарь игрока: приходит при входе сразу за <see cref="JoinAccepted"/>, дальше — только изменения.</summary>
+/// <param name="Slots">Все слоты по номерам <see cref="Inventory"/>, последний — предмет на курсоре (<see cref="Inventory.SlotCount"/> штук).</param>
+public sealed record InventoryContents(ImmutableArray<ItemStack> Slots, int SelectedSlot) : ServerMessage;
+
+/// <summary>
+/// Изменённые слоты инвентаря (добыча, установка блока, клики). Сервер собирает их за тик и шлёт одним сообщением в конце тика.
+/// Выбор слота сюда не входит: его меняет сам клиент и сообщает серверу.
+/// </summary>
+public sealed record InventoryChanged(ImmutableArray<InventorySlot> Slots) : ServerMessage;
 
 /// <summary>Содержимое чанка, сжатое <see cref="ChunkCodec"/>.</summary>
 /// <param name="Data">

@@ -43,6 +43,9 @@ public sealed class World : IDisposable
     /// <summary>Точка появления — ноги игрока на поверхности (по умолчанию над началом координат).</summary>
     public Vector3d SpawnPosition { get; }
 
+    /// <summary>Режим нового игрока в этом мире.</summary>
+    public GameMode DefaultMode { get; }
+
     /// <summary>Сколько чанков сейчас генерируется.</summary>
     public int GeneratingCount => _generating.Count;
 
@@ -58,7 +61,9 @@ public sealed class World : IDisposable
     /// <param name="seed">Сид нового мира. Если мир уже есть в сохранении, сид и точка появления берутся оттуда.</param>
     /// <param name="spawnColumn">Столбец, над которым появляется игрок. Для проверок вдали от центра мира.</param>
     /// <param name="save">Сохранение; null — мир живёт только в памяти (тесты).</param>
-    internal World(BaseBlocks blocks, int seed, int generatorThreads, (int X, int Z) spawnColumn = default, WorldSave? save = null)
+    /// <param name="defaultMode">Режим нового игрока в новом мире; у мира из сохранения он свой.</param>
+    internal World(BaseBlocks blocks, int seed, int generatorThreads, (int X, int Z) spawnColumn = default, WorldSave? save = null,
+        GameMode defaultMode = GameMode.Survival)
     {
         _save = save;
         if (save?.Info is { } info)
@@ -66,6 +71,7 @@ public sealed class World : IDisposable
             Seed = info.Seed;
             _terrain = new TerrainGenerator(blocks, Seed);
             SpawnPosition = info.SpawnPosition;
+            DefaultMode = info.DefaultMode;
         }
         else
         {
@@ -75,7 +81,8 @@ public sealed class World : IDisposable
             // Позиция игрока — точка ног: стоит на верхнем блоке столбца. Тело (0,6) в середине столбца
             // не задевает соседние, даже если они выше.
             SpawnPosition = new Vector3d(sx + 0.5, _terrain.SurfaceHeight(sx, sz), sz + 0.5);
-            save?.Initialize(new WorldInfo(Seed, SpawnPosition));
+            DefaultMode = defaultMode;
+            save?.Initialize(new WorldInfo(Seed, SpawnPosition, DefaultMode));
         }
 
         _generator = new ChunkGenerator(Produce, generatorThreads);

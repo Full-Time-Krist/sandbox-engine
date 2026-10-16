@@ -1,5 +1,6 @@
 using System.Numerics;
 using Shared;
+using Shared.Items;
 using Shared.Networking;
 using Shared.Protocol;
 using Shared.Voxels;
@@ -65,6 +66,28 @@ public sealed class GameServerTests : IDisposable
         var view = ViewAt(accepted.StartPosition);
         Assert.Equal(TestServers.AreaSize(), clientChunks.Count);
         Assert.All(clientChunks, p => Assert.True(view.LoadArea.Contains(view.Center, p), $"{p} вне области загрузки"));
+    }
+
+    [Fact]
+    public void Join_SendsItemTable_AndWholeInventoryRightAfterAccepted()
+    {
+        var server = Create();
+        var messages = new List<ServerMessage>();
+
+        TestServers.JoinAndLoad(server, messages);
+
+        var accepted = Assert.IsType<JoinAccepted>(messages[0]);
+        Assert.Equal("base:air", accepted.ItemNames[0]);
+        Assert.Contains("base:stone", accepted.ItemNames);
+
+        // Новый игрок — в режиме мира (по умолчанию выживание), смотрит вдаль, инвентарь пустой.
+        Assert.Equal(GameMode.Survival, accepted.Mode);
+        Assert.Equal(default, accepted.StartLook);
+        var contents = Assert.IsType<InventoryContents>(messages[1]);
+        Assert.Equal(Inventory.SlotCount, contents.Slots.Length);
+        Assert.Equal(0, contents.SelectedSlot);
+        Assert.All(contents.Slots, s => Assert.True(s.IsEmpty));
+        Assert.DoesNotContain(messages, m => m is InventoryChanged);
     }
 
     [Fact]
@@ -167,8 +190,8 @@ public sealed class GameServerTests : IDisposable
         var client = TestServers.JoinAndLoad(server, messages);
         var spawn = Assert.IsType<JoinAccepted>(messages[0]).StartPosition;
 
-        client.Send(new PlayerMove(new Vector3(float.NaN, 0, 0), TeleportId: 0));
-        client.Send(new PlayerMove(new Vector3(0, 0, 3e9f), TeleportId: 0));
+        client.Send(new PlayerMove(new Vector3(float.NaN, 0, 0), default, TeleportId: 0));
+        client.Send(new PlayerMove(new Vector3(0, 0, 3e9f), default, TeleportId: 0));
         for (var t = 0; t < 5; t++)
             server.Tick();
 
@@ -209,7 +232,7 @@ public sealed class GameServerTests : IDisposable
         var (client, serverSide) = LocalConnection.CreatePair<ClientMessage, ServerMessage>();
         server.Connect(serverSide);
 
-        client.Send(new PlayerMove(default, TeleportId: 0));
+        client.Send(new PlayerMove(default, default, TeleportId: 0));
         server.Tick();
 
         Assert.Empty(Drain(client));

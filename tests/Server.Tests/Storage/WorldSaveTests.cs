@@ -1,7 +1,9 @@
+using System.Collections.Immutable;
 using Microsoft.Data.Sqlite;
 using Server.Storage;
 using Shared;
 using Shared.Blocks;
+using Shared.Items;
 using Shared.Voxels;
 
 namespace Server.Tests.Storage;
@@ -15,8 +17,17 @@ public sealed class WorldSaveTests : IDisposable
 
     public void Dispose() => _directory.Dispose();
 
-    private WorldSave Open(BlockRegistry? registry = null, bool startWriter = true) =>
-        WorldSave.Open(_directory.SaveFile, registry ?? _registry, startWriter);
+    /// <summary>Предметы — по одному на блок, как в игре.</summary>
+    internal static ItemRegistry ItemsFor(BlockRegistry blocks)
+    {
+        var items = new ItemRegistry();
+        items.RegisterBlockItems(blocks);
+        items.Freeze();
+        return items;
+    }
+
+    private WorldSave Open(BlockRegistry? registry = null, bool startWriter = true, ItemRegistry? items = null) =>
+        WorldSave.Open(_directory.SaveFile, registry ?? _registry, items ?? ItemsFor(registry ?? _registry), startWriter);
 
     /// <summary>Чанк, где каждый блок зависит от позиции: перепутанный или потерянный блок не пройдёт незамеченным.</summary>
     private static Chunk MixedChunk(ChunkPos position, BlockRegistry registry, params string[] names)
@@ -125,21 +136,137 @@ public sealed class WorldSaveTests : IDisposable
         Assert.True(expected.SequenceEqual(withGlass.Blocks.ToArray()));
     }
 
-    [Fact]
-    public void Player_SurvivesReopen()
+    /// <summary>Инвентарь из пар «слот — стопка», остальные слоты пустые.</summary>
+    private static ImmutableArray<ItemStack> Slots(params (int Slot, ItemStack Stack)[] stacks)
     {
-        var position = new Vector3d(1_000_000.25, 70.5, -3.75);
+        var slots = new ItemStack[Inventory.SlotCount];
+        foreach (var (slot, stack) in stacks)
+            slots[slot] = stack;
+        return [.. slots];
+    }
+
+    private static void AssertPlayer(SavedPlayer expected, SavedPlayer? actual)
+    {
+        Assert.NotNull(actual);
+        Assert.Equal(expected.Position, actual.Position);
+        Assert.Equal(expected.Look, actual.Look);
+        Assert.Equal(expected.Mode, actual.Mode);
+        Assert.Equal(expected.SelectedSlot, actual.SelectedSlot);
+        Assert.Equal(expected.Slots.ToArray(), actual.Slots.ToArray());
+    }
+
+    private ItemStack Stack(string name, int count, ItemRegistry? items = null) =>
+        new((items ?? ItemsFor(_registry)).Get(name).Id, count);
+
+    [Fact]
+    public void Player_SurvivesReopen_WithLookModeSlotAndInventory()
+    {
+        var player = new SavedPlayer(new Vector3d(1_000_000.25, 70.5, -3.75), new LookAngles(2.5f, -0.75f), GameMode.Creative, 7,
+            Slots((0, Stack("base:stone", 64)), (35, Stack("base:sand", 1)), (Inventory.CursorSlot, Stack("base:dirt", 5))));
         using (var save = Open())
         {
             Assert.Null(save.LoadPlayer("Player"));
-            save.SavePlayer("Player", new Vector3d(1, 2, 3));
-            save.SavePlayer("Player", position);
-            Assert.Equal(position, save.LoadPlayer("Player"));
+            save.SavePlayer("Player", player with { Position = new Vector3d(1, 2, 3), Slots = Slots() });
+            save.SavePlayer("Player", player);
+            AssertPlayer(player, save.LoadPlayer("Player")); // из очереди записи
         }
 
         using var reopened = Open();
-        Assert.Equal(position, reopened.LoadPlayer("Player"));
+        AssertPlayer(player, reopened.LoadPlayer("Player")); // с диска
         Assert.Null(reopened.LoadPlayer("Other"));
+    }
+
+    [Fact]
+    public void DefaultMode_IsSavedWithWorld()
+    {
+        using (var save = Open())
+            save.Initialize(Info with { DefaultMode = GameMode.Creative });
+
+        using var reopened = Open();
+        Assert.Equal(GameMode.Creative, reopened.Info!.DefaultMode);
+    }
+
+    [Fact]
+    public void InventoryItems_AreSavedByName_UnknownItemDisappears()
+    {
+        // Сохранено одним набором предметов, загружается другим: те же имена с другими номерами, земли больше нет.
+        var oldBlocks = BlockIdMapTests.Registry("base:stone", "base:dirt", "base:sand");
+        var oldItems = ItemsFor(oldBlocks);
+        var newBlocks = BlockIdMapTests.Registry("base:glass", "base:sand", "base:stone");
+        var newItems = ItemsFor(newBlocks);
+        Assert.NotEqual(oldItems.Get("base:stone").Id, newItems.Get("base:stone").Id);
+        using (var save = Open(oldBlocks, items: oldItems))
+        {
+            save.SavePlayer("Player", new SavedPlayer(default, default, GameMode.Survival, 0, Slots(
+                (0, Stack("base:stone", 10, oldItems)), (1, Stack("base:dirt", 20, oldItems)), (2, Stack("base:sand", 30, oldItems)))));
+        }
+
+        using var reopened = Open(newBlocks, items: newItems);
+
+        Assert.Equal(["base:dirt"], reopened.ItemIds.UnknownNames);
+        var slots = reopened.LoadPlayer("Player")!.Slots;
+        Assert.Equal(Stack("base:stone", 10, newItems), slots[0]);
+        Assert.True(slots[1].IsEmpty);
+        Assert.Equal(Stack("base:sand", 30, newItems), slots[2]);
+    }
+
+    [Fact]
+    public void Version1Save_IsUpgraded_KeepsChunksAndPlayerPosition()
+    {
+        // Файл в точности такой, каким его создавала версия 1 (этап 2): без item_names и без новых столбцов игрока.
+        var chunk = MixedChunk(new ChunkPos(1, 2, 3), _registry, "base:stone", "base:dirt", "base:sand");
+        Execute("""
+            PRAGMA journal_mode = WAL;
+            CREATE TABLE meta (key TEXT PRIMARY KEY, value);
+            CREATE TABLE block_names (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE);
+            CREATE TABLE chunks (
+                x INTEGER NOT NULL, y INTEGER NOT NULL, z INTEGER NOT NULL, data BLOB NOT NULL,
+                PRIMARY KEY (x, y, z)) WITHOUT ROWID;
+            CREATE TABLE players (name TEXT PRIMARY KEY, x REAL NOT NULL, y REAL NOT NULL, z REAL NOT NULL);
+            INSERT INTO meta VALUES ('format_version', 1), ('seed', 42), ('spawn_x', 0.5), ('spawn_y', 80.0), ('spawn_z', -3.5);
+            INSERT INTO block_names VALUES (0, 'base:air'), (1, 'base:stone'), (2, 'base:dirt'), (3, 'base:sand');
+            INSERT INTO players VALUES ('Player', 10.5, 64.0, -20.5);
+            """);
+        Execute("INSERT INTO chunks VALUES (1, 2, 3, $data)", ("$data", ChunkCodec.Encode(chunk)));
+
+        var position = new Vector3d(10.5, 64, -20.5);
+        using (var save = Open())
+        {
+            Assert.Equal(1, save.UpgradedFrom);
+            Assert.Equal(Info, save.Info); // режима в версии 1 нет — выживание
+            Assert.True(chunk.Blocks.SequenceEqual(Load(save, chunk.Position).Blocks));
+            // Новых данных у игрока нет: взгляд вдаль, режим мира, первый слот, пустой инвентарь.
+            AssertPlayer(new SavedPlayer(position, default, null, 0, Slots()), save.LoadPlayer("Player"));
+
+            save.SavePlayer("Player", new SavedPlayer(position, new LookAngles(1, 0.5f), GameMode.Creative, 2,
+                Slots((4, Stack("base:sand", 9)))));
+        }
+        Assert.Equal(2L, Execute("SELECT value FROM meta WHERE key = 'format_version'"));
+
+        using var reopened = Open();
+        Assert.Null(reopened.UpgradedFrom);
+        AssertPlayer(new SavedPlayer(position, new LookAngles(1, 0.5f), GameMode.Creative, 2, Slots((4, Stack("base:sand", 9)))),
+            reopened.LoadPlayer("Player"));
+    }
+
+    [Fact]
+    public void CorruptPlayerData_FallsBackToDefaults_PositionKept()
+    {
+        var position = new Vector3d(1, 2, 3);
+        using (var save = Open())
+            save.SavePlayer("Player", new SavedPlayer(position, default, GameMode.Creative, 3, Slots((0, Stack("base:stone", 5)))));
+        Overwrite("UPDATE players SET inventory = x'01FF', mode = 'flying', selected_slot = 99, yaw = 1e30, pitch = 5");
+
+        using var reopened = Open();
+        var player = reopened.LoadPlayer("Player");
+
+        Assert.NotNull(player);
+        Assert.Equal(position, player.Position);
+        Assert.Null(player.Mode);
+        Assert.Equal(0, player.SelectedSlot);
+        Assert.All(player.Slots, s => Assert.True(s.IsEmpty));
+        Assert.InRange(player.Look.Yaw, -MathF.PI, MathF.PI);
+        Assert.Equal(MathF.PI / 2, player.Look.Pitch);
     }
 
     [Fact]
@@ -172,5 +299,17 @@ public sealed class WorldSaveTests : IDisposable
         using var command = connection.CreateCommand();
         command.CommandText = sql;
         Assert.True(command.ExecuteNonQuery() > 0);
+    }
+
+    /// <summary>Выполняет SQL напрямую, в обход WorldSave (файла может ещё не быть). Возвращает первое значение результата.</summary>
+    private object? Execute(string sql, params (string Name, object Value)[] parameters)
+    {
+        using var connection = new SqliteConnection($"Data Source={_directory.SaveFile};Pooling=False");
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        foreach (var (name, value) in parameters)
+            command.Parameters.AddWithValue(name, value);
+        return command.ExecuteScalar();
     }
 }

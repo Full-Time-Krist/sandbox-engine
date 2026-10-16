@@ -19,9 +19,17 @@ internal interface IBlockEditor
 }
 
 /// <summary>Всё, что поведению предмета нужно знать о применении.</summary>
-/// <param name="HeldItem">Предмет в руке. Пока это блок; позже — стопка предметов.</param>
+/// <param name="Inventory">Инвентарь игрока: предмет в руке — его выбранный слот, добыча кладётся сюда же.</param>
+/// <param name="Mode">Режим игрока: в творческом предметы бесконечные — добыча не нужна, трата не нужна.</param>
 /// <param name="Target">Блок под прицелом по лучу, повторённому сервером, или null, если в пределах дальности пусто.</param>
-internal readonly record struct ItemUseContext(IBlockEditor World, BlockId HeldItem, BlockHit? Target, Vector3d EyePosition);
+internal readonly record struct ItemUseContext(IBlockEditor World, ItemRegistry Items, Inventory Inventory, GameMode Mode,
+    BlockHit? Target, Vector3d EyePosition)
+{
+    public ItemStack HeldItem => Inventory.Selected;
+
+    /// <summary>Творческий режим: ломание ничего не даёт, установка ничего не тратит.</summary>
+    public bool InfiniteItems => Mode == GameMode.Creative;
+}
 
 /// <summary>
 /// Что делает предмет при основном и дополнительном действии. Новый вид предмета (инструмент, еда, оружие)

@@ -23,26 +23,20 @@ namespace Server;
 /// он не дольше <see cref="BudgetTicks"/> тиков, чтобы после стояния на месте нельзя было прыгнуть далеко.
 /// </para>
 /// <para>
-/// Пределы пока одни для всех: самый быстрый способ двигаться — быстрый полёт. С режимами (шаг 3.5)
-/// пределы будут зависеть от режима игрока.
+/// Пределы зависят от режима (<see cref="MovementLimits"/>): в выживании — бег и прыжок, в творческом — быстрый полёт.
+/// Гравитацию сервер не проверяет: нечестный клиент в выживании может висеть в воздухе и подниматься со скоростью прыжка.
 /// </para>
 /// </remarks>
-internal sealed class MovementCheck
+internal sealed class MovementCheck(GameMode mode)
 {
     /// <summary>На сколько тиков вперёд копится запас пути.</summary>
     public const int BudgetTicks = 10;
 
-    /// <summary>Запас на округление: скорость физики не превышает предела, но сравнение не должно быть впритык.</summary>
-    private const double Slack = 1.05;
+    public MovementLimits Limits { get; private set; } = MovementLimits.For(mode);
 
-    // Наибольшее перемещение за тик: по горизонтали и вверх — быстрый полёт, вниз — падение с предельной скоростью.
-    internal const double MaxHorizontalPerTick = PlayerPhysics.FlySprintSpeed * GameTime.TickDuration * Slack;
-    internal const double MaxUpPerTick = PlayerPhysics.FlySprintSpeed * GameTime.TickDuration * Slack;
-    internal const double MaxDownPerTick = PlayerPhysics.TerminalVelocity * GameTime.TickDuration * Slack;
-
-    private double _horizontal = MaxHorizontalPerTick * BudgetTicks;
-    private double _up = MaxUpPerTick * BudgetTicks;
-    private double _down = MaxDownPerTick * BudgetTicks;
+    private double _horizontal = MovementLimits.For(mode).Horizontal * BudgetTicks;
+    private double _up = MovementLimits.For(mode).Up * BudgetTicks;
+    private double _down = MovementLimits.For(mode).Down * BudgetTicks;
 
     /// <summary>Номер последнего телепорта этого игрока (см. <see cref="Shared.Protocol.PlayerTeleport"/>).</summary>
     public int TeleportId { get; private set; }
@@ -50,12 +44,20 @@ internal sealed class MovementCheck
     /// <summary>Новый номер телепорта: сообщения клиента со старым номером дальше игнорируются.</summary>
     public int NextTeleport() => ++TeleportId;
 
+    /// <summary>
+    /// Меняет пределы под новый режим. Запас, накопленный по старым пределам, урезает первое же пополнение
+    /// (<see cref="Refill"/> не даёт ему превысить новый предел). До него, в том же тике, перемещений по новым
+    /// пределам не бывает: при переходе в выживание сервер телепортирует игрока, и всё, что клиент успел
+    /// отправить, приходит со старым номером телепорта.
+    /// </summary>
+    public void SetMode(GameMode mode) => Limits = MovementLimits.For(mode);
+
     /// <summary>Пополняет запас пути. Вызывается раз в тик сервера.</summary>
     public void Refill()
     {
-        _horizontal = Math.Min(_horizontal + MaxHorizontalPerTick, MaxHorizontalPerTick * BudgetTicks);
-        _up = Math.Min(_up + MaxUpPerTick, MaxUpPerTick * BudgetTicks);
-        _down = Math.Min(_down + MaxDownPerTick, MaxDownPerTick * BudgetTicks);
+        _horizontal = Math.Min(_horizontal + Limits.Horizontal, Limits.Horizontal * BudgetTicks);
+        _up = Math.Min(_up + Limits.Up, Limits.Up * BudgetTicks);
+        _down = Math.Min(_down + Limits.Down, Limits.Down * BudgetTicks);
     }
 
     /// <summary>
@@ -85,4 +87,27 @@ internal sealed class MovementCheck
         _down -= down;
         return null;
     }
+}
+
+/// <summary>Наибольшее перемещение игрока за тик, в блоках: по горизонтали, вверх и вниз.</summary>
+internal readonly record struct MovementLimits(double Horizontal, double Up, double Down)
+{
+    /// <summary>Запас на округление: скорость физики не превышает предела, но сравнение не должно быть впритык.</summary>
+    private const double Slack = 1.05;
+
+    private const double Tick = GameTime.TickDuration * Slack;
+
+    /// <summary>
+    /// Выживание: по горизонтали — бег, вверх — начало прыжка (дальше гравитация только замедляет), вниз — падение
+    /// с предельной скоростью. Быстрее честный игрок в выживании не двигается: при переходе в него сервер
+    /// телепортирует игрока на месте, и скорость полёта гаснет.
+    /// </summary>
+    public static readonly MovementLimits Survival =
+        new(PlayerPhysics.SprintSpeed * Tick, PlayerPhysics.JumpVelocity * Tick, PlayerPhysics.TerminalVelocity * Tick);
+
+    /// <summary>Творческий: по горизонтали и вверх — быстрый полёт, вниз — падение (оно быстрее полёта вниз).</summary>
+    public static readonly MovementLimits Creative =
+        new(PlayerPhysics.FlySprintSpeed * Tick, PlayerPhysics.FlySprintSpeed * Tick, PlayerPhysics.TerminalVelocity * Tick);
+
+    public static MovementLimits For(GameMode mode) => mode == GameMode.Creative ? Creative : Survival;
 }

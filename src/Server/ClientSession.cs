@@ -16,8 +16,14 @@ internal sealed class ClientSession(IConnection<ServerMessage, ClientMessage> co
     public string PlayerName { get; private set; } = "";
     public Vector3d PlayerPosition { get; set; }
 
-    /// <summary>Хотбар игрока. Появляется при подключении (<see cref="Join"/>).</summary>
-    public Hotbar Hotbar { get; private set; } = null!;
+    /// <summary>Направление взгляда из последнего <see cref="PlayerMove"/>. Нужно только для сохранения.</summary>
+    public LookAngles Look { get; set; }
+
+    /// <summary>Режим игрока. Меняется только через <see cref="SetMode"/>: вместе с ним меняются пределы движения.</summary>
+    public GameMode Mode { get; private set; }
+
+    /// <summary>Инвентарь игрока (с хотбаром и выбранным слотом). Появляется при подключении (<see cref="Join"/>).</summary>
+    public Inventory Inventory { get; private set; } = null!;
 
     /// <summary>Проверка движения и номер телепорта. Появляется при подключении.</summary>
     public MovementCheck Movement { get; private set; } = null!;
@@ -25,13 +31,20 @@ internal sealed class ClientSession(IConnection<ServerMessage, ClientMessage> co
     /// <summary>Какие чанки нужны игроку и какие уже у его клиента. Появляется при подключении.</summary>
     public PlayerChunkView View { get; private set; } = null!;
 
-    public void Join(int playerId, string playerName, Hotbar hotbar, PlayerChunkView view)
+    public void Join(int playerId, string playerName, GameMode mode, Inventory inventory, PlayerChunkView view)
     {
         View = view;
-        Movement = new MovementCheck();
+        Mode = mode;
+        Movement = new MovementCheck(mode);
         IsJoined = true;
         PlayerId = playerId;
         PlayerName = playerName;
-        Hotbar = hotbar;
+        Inventory = inventory;
+    }
+
+    public void SetMode(GameMode mode)
+    {
+        Mode = mode;
+        Movement.SetMode(mode);
     }
 }

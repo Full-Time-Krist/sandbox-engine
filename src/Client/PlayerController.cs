@@ -25,7 +25,12 @@ internal sealed class PlayerController(Camera camera, ChunkMap world, BlockRegis
     /// <summary>Точка ног на последнем тике (не интерполированная). Её клиент шлёт серверу.</summary>
     public Vector3d Position => _state.Position;
 
-    public bool IsFlying => _state.Flying;
+    /// <summary>Полёт. Скорость при переключении сохраняется: выключив полёт в воздухе, игрок падает.</summary>
+    public bool IsFlying
+    {
+        get => _state.Flying;
+        set => _state = _state with { Flying = value };
+    }
 
     /// <summary>Позиция глаза в текущем кадре, между двумя последними тиками (см. <see cref="UpdateEye"/>).</summary>
     public Vector3d EyePosition { get; private set; }
@@ -38,8 +43,12 @@ internal sealed class PlayerController(Camera camera, ChunkMap world, BlockRegis
         EyePosition = Eye(feet);
     }
 
-    /// <summary>Включает или выключает полёт. Скорость сохраняется: выключив полёт в воздухе, игрок падает.</summary>
-    public void ToggleFlying() => _state = _state with { Flying = !_state.Flying };
+    /// <summary>Направление взгляда (углы камеры): его клиент шлёт серверу для сохранения.</summary>
+    public LookAngles LookAngles
+    {
+        get => new(camera.Yaw, camera.Pitch);
+        set => (camera.Yaw, camera.Pitch) = (value.Yaw, value.Pitch);
+    }
 
     /// <summary>Вызывается каждый кадр, пока курсор захвачен.</summary>
     public void Look(Vector2 mouseDelta)

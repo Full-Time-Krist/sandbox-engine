@@ -20,8 +20,8 @@ internal static class TestServers
     public const int VerticalDistance = 1;
 
     public static GameServer Create(int viewDistance = ViewDistance, int verticalDistance = VerticalDistance,
-        string? savePath = null, int? seed = Seed) =>
-        new(seed, generatorThreads: 2, viewDistance, verticalDistance, savePath: savePath);
+        string? savePath = null, int? seed = Seed, GameMode? defaultMode = null) =>
+        new(seed, generatorThreads: 2, viewDistance, verticalDistance, savePath: savePath, defaultMode: defaultMode);
 
     /// <summary>Сколько чанков получает игрок при дальности по умолчанию для тестов.</summary>
     public static int AreaSize(int viewDistance = ViewDistance, int verticalDistance = VerticalDistance) =>

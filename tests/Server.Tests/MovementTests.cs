@@ -38,7 +38,7 @@ public sealed class MovementTests : IDisposable
     private List<PlayerTeleport> Send(params Vector3d[] positions)
     {
         foreach (var position in positions)
-            _client.Send(new PlayerMove(position, _teleportId));
+            _client.Send(new PlayerMove(position, default, _teleportId));
         _server.Tick();
         return ReceiveTeleports();
     }
@@ -67,34 +67,130 @@ public sealed class MovementTests : IDisposable
     /// <summary>Игрок висит в воздухе в 10 блоках над точкой появления: путь по горизонтали свободен.</summary>
     private Vector3d InAir => _spawn + new Vector3d(0, 10, 0);
 
-    [Fact]
-    public void HonestClient_WalkJumpFlyFall_IsNeverCorrected()
+    /// <summary>
+    /// Честный клиент: считает движение той же физикой по тем же чанкам и шлёт позицию каждый тик, как настоящий.
+    /// Возвращает телепорты, которыми сервер его поправил (их быть не должно).
+    /// </summary>
+    private sealed class HonestClient(MovementTests test, PlayerState state)
     {
-        // Клиент считает движение той же физикой по тем же чанкам и шлёт позицию каждый тик, как настоящий.
-        var state = new PlayerState(_spawn);
-        var teleports = new List<PlayerTeleport>();
+        public PlayerState State = state;
+        public List<PlayerTeleport> Teleports { get; } = [];
 
-        void Run(PlayerInput input, int ticks)
+        public void Run(PlayerInput input, int ticks)
         {
             for (var i = 0; i < ticks; i++)
             {
-                var next = PlayerPhysics.Step(state, input, _server.World.Chunks, _registry);
-                teleports.AddRange(next.Position != state.Position ? Send(next.Position) : Send());
-                state = next;
+                var next = PlayerPhysics.Step(State, input, test._server.World.Chunks, test._registry);
+                Teleports.AddRange(next.Position != State.Position ? test.Send(next.Position) : test.Send());
+                State = next;
             }
         }
+    }
 
-        Run(new PlayerInput(Vector2.UnitX, Jump: true, Sprint: true), 40);  // разбег с прыжками по рельефу
-        Run(new PlayerInput(-Vector2.UnitX), 20);
-        state = state with { Flying = true };
-        Run(new PlayerInput(Vector2.UnitY, Jump: true, Sprint: true), 30); // быстрый полёт вверх и вбок
-        Run(new PlayerInput(Vector2.Zero, Sprint: true), 10);
-        state = state with { Flying = false };
-        Run(new PlayerInput(Vector2.Zero), 60);                             // падение до земли
+    [Fact]
+    public void HonestClient_Survival_WalkSprintJumpFall_IsNeverCorrected()
+    {
+        var client = new HonestClient(this, new PlayerState(_spawn));
 
-        Assert.Empty(teleports);
-        Assert.True(state.OnGround, "тест должен закончиться падением на землю");
-        Assert.Equal(state.Position, ServerPosition);
+        client.Run(new PlayerInput(Vector2.UnitX, Jump: true, Sprint: true), 40);  // разбег с прыжками по рельефу
+        client.Run(new PlayerInput(-Vector2.UnitX), 20);
+        Teleport(InAir);
+        client.State = new PlayerState(InAir);
+        client.Run(new PlayerInput(Vector2.Zero), 60);                              // падение с 10 блоков до земли
+
+        Assert.Empty(client.Teleports);
+        Assert.True(client.State.OnGround, "тест должен закончиться падением на землю");
+        Assert.Equal(client.State.Position, ServerPosition);
+    }
+
+    [Fact]
+    public void HonestClient_Creative_FastFlightAndFall_IsNeverCorrected()
+    {
+        _server.SetGameMode(_client.PlayerId, GameMode.Creative);
+        var client = new HonestClient(this, new PlayerState(_spawn));
+
+        client.Run(new PlayerInput(Vector2.UnitX, Jump: true, Sprint: true), 20);
+        client.State = client.State with { Flying = true };
+        client.Run(new PlayerInput(Vector2.UnitY, Jump: true, Sprint: true), 30); // быстрый полёт вверх и вбок
+        client.Run(new PlayerInput(Vector2.Zero, Sprint: true), 10);
+        client.State = client.State with { Flying = false };
+        client.Run(new PlayerInput(Vector2.Zero), 60);                             // падение до земли
+
+        Assert.Empty(client.Teleports);
+        Assert.True(client.State.OnGround, "тест должен закончиться падением на землю");
+        Assert.Equal(client.State.Position, ServerPosition);
+    }
+
+    [Fact]
+    public void FlightSpeed_IsRejectedInSurvival_AcceptedInCreative()
+    {
+        // Шаг быстрого полёта: в выживании так быстро не бегают.
+        var step = new Vector3d(PlayerPhysics.FlySprintSpeed * GameTime.TickDuration, 0, 0);
+        Teleport(InAir);
+        // Запас пути копится 10 тиков: шагов больше, чем он покрывает в выживании, но меньше, чем в творческом.
+        var steps = (int)(MovementLimits.Survival.Horizontal * MovementCheck.BudgetTicks / step.X) + 2;
+        Assert.True(step.X * steps < MovementLimits.Creative.Horizontal * MovementCheck.BudgetTicks);
+        var moves = Enumerable.Range(1, steps).Select(i => InAir + step * i).ToArray();
+        Assert.All(moves, m => Assert.False(PlayerPhysics.Collides(m, _server.World.Chunks, _registry), "путь должен быть свободен"));
+
+        Assert.Single(Send(moves));
+        Assert.True(ServerPosition.X < InAir.X + MovementLimits.Survival.Horizontal * MovementCheck.BudgetTicks + 1e-9);
+
+        _server.SetGameMode(_client.PlayerId, GameMode.Creative);
+        Teleport(InAir);
+        RefillBudget();
+        Assert.Empty(Send(moves));
+        Assert.Equal(moves[^1], ServerPosition);
+    }
+
+    [Fact]
+    public void FastClimb_IsRejectedInSurvival_AcceptedInCreative()
+    {
+        // Подъём со скоростью быстрого полёта тик за тиком: в выживании выше прыжка не подняться, запас кончится.
+        List<PlayerTeleport> Climb()
+        {
+            Teleport(InAir);
+            RefillBudget();
+            var position = InAir;
+            var teleports = new List<PlayerTeleport>();
+            for (var i = 0; i < 20 && teleports.Count == 0; i++)
+            {
+                position += new Vector3d(0, PlayerPhysics.FlySprintSpeed * GameTime.TickDuration, 0);
+                teleports.AddRange(Send(position));
+            }
+            return teleports;
+        }
+
+        Assert.Single(Climb());
+
+        _server.SetGameMode(_client.PlayerId, GameMode.Creative);
+        Assert.Empty(Climb());
+    }
+
+    [Fact]
+    public void SwitchToSurvival_CutsBudgetSavedUpInCreative()
+    {
+        // Запас, накопленный в творческом (~11,5 блока), не должен дать пробежать столько же в выживании (~3 блока).
+        _server.SetGameMode(_client.PlayerId, GameMode.Creative);
+        Teleport(InAir);
+        RefillBudget();
+        _server.SetGameMode(_client.PlayerId, GameMode.Survival);
+        ReceiveTeleports();
+        var steps = Enumerable.Range(1, 8).Select(i => InAir + new Vector3d(i * 0.5, 0, 0)).ToArray();
+        Assert.All(steps, m => Assert.False(PlayerPhysics.Collides(m, _server.World.Chunks, _registry), "путь должен быть свободен"));
+
+        var teleports = Send(steps);
+
+        Assert.Single(teleports);
+        Assert.True(ServerPosition.X - InAir.X <= MovementLimits.Survival.Horizontal * MovementCheck.BudgetTicks + 1e-9);
+    }
+
+    /// <summary>Тики без движения: запас пути пополняется до предела.</summary>
+    private void RefillBudget()
+    {
+        for (var i = 0; i < MovementCheck.BudgetTicks; i++)
+            _server.Tick();
+        ReceiveTeleports();
     }
 
     [Fact]
@@ -145,7 +241,7 @@ public sealed class MovementTests : IDisposable
     [Fact]
     public void ManyMovesInOneTick_RunOutOfBudget()
     {
-        // 20 шагов по блоку за один тик сервера: запаса на 10 тиков быстрого полёта (~11,5 блока) не хватит.
+        // 20 шагов по блоку за один тик сервера: запаса на 10 тиков бега в выживании (~3 блока) не хватит.
         Teleport(InAir);
         var moves = Enumerable.Range(1, 20).Select(i => InAir + new Vector3d(i, 0, 0)).ToArray();
 
@@ -154,8 +250,8 @@ public sealed class MovementTests : IDisposable
         // Первый отклонённый шаг возвращает назад; остальные отправлены до телепорта и игнорируются.
         var teleport = Assert.Single(teleports);
         var accepted = teleport.Position.X - InAir.X;
-        Assert.InRange(accepted, MovementCheck.BudgetTicks * PlayerPhysics.FlySprintSpeed * GameTime.TickDuration - 1,
-            MovementCheck.MaxHorizontalPerTick * MovementCheck.BudgetTicks);
+        Assert.InRange(accepted, MovementCheck.BudgetTicks * PlayerPhysics.SprintSpeed * GameTime.TickDuration - 1,
+            MovementLimits.Survival.Horizontal * MovementCheck.BudgetTicks);
     }
 
     [Fact]
@@ -163,6 +259,7 @@ public sealed class MovementTests : IDisposable
     {
         // Быстрый полёт 3 секунды, каждый тик ровно предельная скорость: запас пополняется, и длинный полёт
         // в него не упирается. Летаем туда-обратно над точкой появления, чтобы не задеть рельеф.
+        _server.SetGameMode(_client.PlayerId, GameMode.Creative);
         Teleport(InAir);
         var perTick = PlayerPhysics.FlySprintSpeed * GameTime.TickDuration;
         for (var x = 0; x <= 6; x++)
@@ -185,7 +282,7 @@ public sealed class MovementTests : IDisposable
         Teleport(InAir + new Vector3d(0, 1, 0));
 
         // Честное по величине перемещение, но посчитанное от позиции до телепорта.
-        _client.Send(new PlayerMove(InAir + new Vector3d(0.2, 0, 0), staleId));
+        _client.Send(new PlayerMove(InAir + new Vector3d(0.2, 0, 0), default, staleId));
         _server.Tick();
 
         Assert.Empty(ReceiveTeleports());

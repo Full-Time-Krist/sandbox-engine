@@ -27,17 +27,29 @@ internal sealed class ClientApp(
     ServerHost? integratedServer)
     : Application(settings, GameTime.TicksPerSecond)
 {
-    private readonly Camera _camera = new() { Pitch = -0.4f };
+    /// <summary>Камера в глазах игрока. Направление взгляда при входе задаёт сервер (<see cref="JoinAccepted.StartLook"/>).</summary>
+    private readonly Camera _camera = new();
     private readonly ClientWorld _world = new();
     private PlayerController _controller = null!;
 
     private BlockRegistry _registry = null!;
+    private ItemRegistry _items = null!;
 
     /// <summary>
-    /// Копия хотбара для отображения. Авторитетная живёт на сервере: клиент только сообщает выбор слота,
-    /// а что делает предмет при нажатии, решает сервер.
+    /// Копия инвентаря для отображения. Авторитетная живёт на сервере: клиент меняет только выбор слота
+    /// и сообщает его, а содержимое слотов присылает сервер. Что делает предмет при нажатии, тоже решает сервер.
     /// </summary>
-    private Hotbar _hotbar = null!;
+    private Inventory _inventory = null!;
+
+    /// <summary>
+    /// Сервер прислал инвентарь (<see cref="InventoryContents"/>). До этого слот не выбирается: выбор ушёл бы серверу
+    /// после входа, а пришедший следом инвентарь вернул бы клиенту прежний слот — в руке на сервере было бы другое.
+    /// </summary>
+    private bool _inventoryReceived;
+
+    /// <summary>Накопленная прокрутка колеса: тачпад шлёт доли деления, слот меняется на каждое целое.</summary>
+    private float _scroll;
+
     private ShaderProgram _chunkShader = null!;
     private ShaderProgram _lineShader = null!;
     private ColorMesh _selectionBox = null!;
@@ -46,6 +58,10 @@ internal sealed class ClientApp(
     private ChunkRenderer _chunkRenderer = null!;
 
     private Vector3d _lastSentPosition = new(double.NaN, double.NaN, double.NaN);
+    private LookAngles _lastSentLook;
+
+    /// <summary>Режим игрока. Его меняет только сервер (<see cref="GameModeChanged"/>); клиент по G лишь просит.</summary>
+    private GameMode _mode;
 
     /// <summary>Номер последнего телепорта от сервера: идёт в каждом PlayerMove (см. <see cref="PlayerTeleport"/>).</summary>
     private int _teleportId;
@@ -70,10 +86,14 @@ internal sealed class ClientApp(
     {
         Gl.ClearColor(0.53f, 0.81f, 0.92f, 1f);
 
-        // Клиент собирает свой реестр и сверяет его с таблицей сервера при подключении (см. JoinAccepted).
+        // Клиент собирает свои реестры и сверяет их с таблицами сервера при подключении (см. JoinAccepted).
         _registry = new BlockRegistry();
-        _hotbar = Hotbar.CreateDefault(BaseBlocks.Register(_registry));
+        BaseBlocks.Register(_registry);
         _registry.Freeze();
+        _items = new ItemRegistry();
+        _items.RegisterBlockItems(_registry);
+        _items.Freeze();
+        _inventory = new Inventory(_items);
         UpdateStatusText();
 
         var visuals = new BlockVisuals(_registry, BlockVisuals.BaseAppearances);
@@ -145,12 +165,14 @@ internal sealed class ClientApp(
             _frameTimes = default;
         }
 
-        // Шлём позицию, только если она изменилась. NaN в начальном значении гарантирует первую отправку.
+        // Шлём позицию и взгляд, только если они изменились. NaN в начальной позиции гарантирует первую отправку.
         // До JoinAccepted позиция ещё не настоящая (начало координат): сервер начал бы грузить чанки вокруг неё.
-        if (_joined && _controller.Position != _lastSentPosition)
+        var look = _controller.LookAngles;
+        if (_joined && (_controller.Position != _lastSentPosition || look != _lastSentLook))
         {
-            connection.Send(new PlayerMove(_controller.Position, _teleportId));
+            connection.Send(new PlayerMove(_controller.Position, look, _teleportId));
             _lastSentPosition = _controller.Position;
+            _lastSentLook = look;
         }
     }
 
@@ -161,10 +183,23 @@ internal sealed class ClientApp(
             switch (message)
             {
                 case JoinAccepted accepted:
-                    VerifyBlockTable(accepted.BlockNames);
+                    VerifyNames("блоков", accepted.BlockNames, _registry.All.Select(b => b.Name));
+                    VerifyNames("предметов", accepted.ItemNames, _items.All.Select(i => i.Name));
                     _controller.Teleport(accepted.StartPosition);
+                    _controller.LookAngles = accepted.StartLook;
+                    _mode = accepted.Mode;
                     _joined = true;
-                    Console.WriteLine($"[Client] Подключён к серверу, id игрока {accepted.PlayerId}");
+                    UpdateStatusText();
+                    Console.WriteLine($"[Client] Подключён к серверу, id игрока {accepted.PlayerId}, режим {_mode.ToName()}");
+                    break;
+
+                case GameModeChanged changedMode:
+                    _mode = changedMode.Mode;
+                    // Летать можно только в творческом. Скорость полёта погасит телепорт, который сервер шлёт следом.
+                    if (_mode != GameMode.Creative)
+                        _controller.IsFlying = false;
+                    UpdateStatusText();
+                    Console.WriteLine($"[Client] Режим {_mode.ToName()}");
                     break;
 
                 case PlayerTeleport teleport:
@@ -186,6 +221,22 @@ internal sealed class ClientApp(
                     _world.SetBlock(changed.Position, changed.Block);
                     break;
 
+                case InventoryContents contents:
+                    if (contents.Slots.Length != Inventory.SlotCount)
+                        throw new InvalidDataException($"Инвентарь от сервера: {contents.Slots.Length} слотов вместо {Inventory.SlotCount}");
+                    for (var slot = 0; slot < Inventory.SlotCount; slot++)
+                        _inventory.Set(slot, contents.Slots[slot]);
+                    _inventory.TrySelect(contents.SelectedSlot);
+                    _inventoryReceived = true;
+                    UpdateStatusText();
+                    break;
+
+                case InventoryChanged changed:
+                    foreach (var (slot, stack) in changed.Slots)
+                        _inventory.Set(slot, stack);
+                    UpdateStatusText();
+                    break;
+
                 default:
                     Console.WriteLine($"[Client] Неизвестное сообщение {message.GetType().Name}");
                     break;
@@ -194,16 +245,16 @@ internal sealed class ClientApp(
     }
 
     /// <summary>
-    /// Числовые id блоков у клиента и сервера должны означать одно и то же. Если таблицы разошлись
-    /// (разные версии или моды), продолжать нельзя: мир молча отрисовался бы не теми блоками.
+    /// Числовые id блоков и предметов у клиента и сервера должны означать одно и то же. Если таблицы разошлись
+    /// (разные версии или моды), продолжать нельзя: мир отрисовался бы не теми блоками, а в слотах были бы не те предметы.
     /// </summary>
-    private void VerifyBlockTable(IReadOnlyList<string> serverNames)
+    private static void VerifyNames(string what, IReadOnlyList<string> serverNames, IEnumerable<string> clientNames)
     {
-        var clientNames = _registry.All.Select(b => b.Name).ToArray();
-        if (!clientNames.SequenceEqual(serverNames))
+        var client = clientNames.ToArray();
+        if (!client.SequenceEqual(serverNames))
         {
             throw new InvalidOperationException(
-                $"Таблица блоков сервера не совпадает с клиентской.\nСервер: {string.Join(", ", serverNames)}\nКлиент: {string.Join(", ", clientNames)}");
+                $"Таблица {what} сервера не совпадает с клиентской.\nСервер: {string.Join(", ", serverNames)}\nКлиент: {string.Join(", ", client)}");
         }
     }
 
@@ -287,7 +338,8 @@ internal sealed class ClientApp(
             _camera.AspectRatio = (float)size.X / size.Y;
     }
 
-    private static readonly Key[] HotbarKeys = [Key.Number1, Key.Number2, Key.Number3, Key.Number4, Key.Number5, Key.Number6];
+    private static readonly Key[] HotbarKeys =
+        [Key.Number1, Key.Number2, Key.Number3, Key.Number4, Key.Number5, Key.Number6, Key.Number7, Key.Number8, Key.Number9];
 
     /// <summary>Захват курсора, взгляд мышью и выбор слота. Возвращает, можно ли в этом кадре применять предмет.</summary>
     private bool HandleFrameInput()
@@ -308,23 +360,47 @@ internal sealed class ClientApp(
 
         _controller.Look(Input.MouseDelta);
 
-        // Полёт пока доступен всегда; на шаге 3.5 — только в творческом режиме.
-        if (Input.WasKeyPressed(Key.F))
+        // Полёт — только в творческом режиме.
+        if (Input.WasKeyPressed(Key.F) && _mode == GameMode.Creative)
         {
-            _controller.ToggleFlying();
+            _controller.IsFlying = !_controller.IsFlying;
             UpdateStatusText();
         }
 
-        for (var slot = 0; slot < HotbarKeys.Length; slot++)
-        {
-            if (Input.WasKeyPressed(HotbarKeys[slot]) && _hotbar.TrySelect(slot))
-            {
-                connection.Send(new SelectHotbarSlot(slot));
-                UpdateStatusText();
-            }
-        }
+        // Смену режима решает сервер: клиент переключится, когда придёт GameModeChanged.
+        // Временно, до команд и прав доступа (сейчас сервер разрешает её всем).
+        if (Input.WasKeyPressed(Key.G) && _joined)
+            connection.Send(new SetGameMode(_mode == GameMode.Creative ? GameMode.Survival : GameMode.Creative));
+
+        if (_inventoryReceived)
+            HandleSlotSelection();
 
         return true;
+    }
+
+    /// <summary>Клавиши 1–9 и колесо мыши. Слот выбирает сам клиент и сообщает серверу.</summary>
+    private void HandleSlotSelection()
+    {
+        for (var slot = 0; slot < HotbarKeys.Length; slot++)
+        {
+            if (Input.WasKeyPressed(HotbarKeys[slot]))
+                SelectSlot(slot);
+        }
+
+        // Колесо от себя — слот левее, на себя — правее; за краем хотбара выбор переходит на другой край.
+        _scroll += Input.ScrollDelta;
+        var steps = (int)_scroll;
+        _scroll -= steps;
+        if (steps != 0)
+            SelectSlot(((_inventory.SelectedSlot - steps) % Inventory.HotbarSize + Inventory.HotbarSize) % Inventory.HotbarSize);
+    }
+
+    private void SelectSlot(int slot)
+    {
+        if (slot == _inventory.SelectedSlot || !_inventory.TrySelect(slot))
+            return;
+        connection.Send(new SelectHotbarSlot(slot));
+        UpdateStatusText();
     }
 
     /// <summary>
@@ -342,10 +418,14 @@ internal sealed class ClientApp(
 
     private void UpdateStatusText()
     {
-        var name = _registry.Get(_hotbar.SelectedItem).Name;
-        // Позиция ног и полёт — для проверок скриптом: по заголовку видно, стоит игрок, падает или упёрся.
+        // Предмет в руке — до хотбара на экране (шаг 3.6) он виден только здесь.
+        var held = _inventory.Selected;
+        var item = held.IsEmpty ? "пусто" : $"{_items.Get(held.Item).Name} ×{held.Count}";
+        // Позиция ног, полёт и режим — для проверок скриптом: по заголовку видно, стоит игрок, падает или упёрся.
         var player = _controller is null ? "" : $"{_controller.Position}{(_controller.IsFlying ? " полёт" : "")} | ";
-        StatusText = $"{player}слот {_hotbar.SelectedSlot + 1}: {name} | чанков {_world.Chunks.Count}, мешей {_chunkRenderer?.MeshCount ?? 0}, нарисовано {_drawnChunks}";
+        var mode = _mode == GameMode.Creative ? "творческий" : "выживание";
+        StatusText = $"{player}{mode} | слот {_inventory.SelectedSlot + 1}: {item} | " +
+                     $"чанков {_world.Chunks.Count}, мешей {_chunkRenderer?.MeshCount ?? 0}, нарисовано {_drawnChunks}";
     }
 
     protected override void OnUnload()

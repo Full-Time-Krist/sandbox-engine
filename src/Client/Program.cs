@@ -3,6 +3,7 @@ using System.Text;
 using Client;
 using Engine.Windowing;
 using Server;
+using Shared;
 using Shared.Networking;
 using Shared.Protocol;
 
@@ -25,9 +26,18 @@ var savePath = Path.Combine(
 var seed = IntArgument("--seed", 0);
 (int, int)? spawnColumn = IntArgument("--spawn", 0) is { } sx ? (sx, IntArgument("--spawn", 1) ?? 0) : null;
 
+// Режим новых игроков: --mode survival (по умолчанию) или --mode creative. Тоже только при создании мира.
+GameMode? defaultMode = null;
+if (StringArgument("--mode") is { } modeName)
+{
+    defaultMode = GameModes.TryParse(modeName, out var mode)
+        ? mode
+        : throw new ArgumentException($"Неизвестный режим: '{modeName}' (survival или creative)");
+}
+
 // Одиночная игра: встроенный сервер в том же процессе, в своём потоке, связь через очереди в памяти.
 // Для мультиплеера здесь будет сетевое соединение вместо LocalConnection и null вместо сервера.
-using var server = new GameServer(seed, spawnColumn: spawnColumn, savePath: savePath);
+using var server = new GameServer(seed, spawnColumn: spawnColumn, savePath: savePath, defaultMode: defaultMode);
 var (clientConnection, serverConnection) = LocalConnection.CreatePair<ClientMessage, ServerMessage>();
 server.Connect(serverConnection);
 

@@ -1,27 +1,24 @@
-using Shared.Blocks;
 using Shared.Items;
 using Shared.Voxels;
 
 namespace Server.Items;
 
-/// <summary>Поведение блока в руке: основное действие ломает блок под прицелом, дополнительное ставит блок рядом.</summary>
+/// <summary>Предмет-блок в руке: основное действие ломает блок под прицелом (как рукой), дополнительное ставит этот блок рядом.</summary>
 internal sealed class BlockItemBehavior : IItemBehavior
 {
     public static readonly BlockItemBehavior Instance = new();
 
     public void Use(ItemAction action, in ItemUseContext context)
     {
-        if (context.Target is not { } target)
-            return;
-
         switch (action)
         {
             case ItemAction.Primary:
-                context.World.TrySetBlock(target.Block, BlockId.Air);
+                HandBehavior.BreakTarget(context);
                 break;
 
             case ItemAction.Secondary:
-                TryPlace(context, target);
+                if (context.Target is { } target)
+                    TryPlace(context, target);
                 break;
         }
     }
@@ -29,7 +26,7 @@ internal sealed class BlockItemBehavior : IItemBehavior
     private static void TryPlace(in ItemUseContext context, BlockHit target)
     {
         // Нулевая нормаль: луч начался внутри блока, грани, к которой можно приставить блок, нет.
-        if (target.Normal == default || context.HeldItem.IsAir)
+        if (target.Normal == default || context.HeldItem.IsEmpty || context.Items.Get(context.HeldItem.Item).Block is not { } block)
             return;
 
         var position = target.Block + target.Normal;
@@ -37,9 +34,11 @@ internal sealed class BlockItemBehavior : IItemBehavior
             return;
 
         // Твёрдый блок в теле игрока (своём или чужом) застрял бы в нём.
-        if (context.World.IsBlockedByPlayer(position, context.HeldItem))
+        if (context.World.IsBlockedByPlayer(position, block))
             return;
 
-        context.World.TrySetBlock(position, context.HeldItem);
+        // В выживании поставленный блок тратит одну штуку; последняя освобождает слот.
+        if (context.World.TrySetBlock(position, block) && !context.InfiniteItems)
+            context.Inventory.Remove(context.Inventory.SelectedSlot, 1);
     }
 }

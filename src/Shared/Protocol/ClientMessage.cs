@@ -10,17 +10,30 @@ public abstract record ClientMessage;
 public sealed record JoinRequest(string PlayerName) : ClientMessage;
 
 /// <summary>
-/// Позиция игрока (точка ног) после тика клиента. Движение считает клиент, а сервер проверяет его тем же кодом
-/// физики; неправдоподобное отклоняет и возвращает игрока назад (<see cref="PlayerTeleport"/>).
+/// Позиция игрока (точка ног) и направление взгляда после тика клиента. Движение считает клиент, а сервер
+/// проверяет его тем же кодом физики; неправдоподобное отклоняет и возвращает игрока назад (<see cref="PlayerTeleport"/>).
+/// Взгляд сервер не проверяет: он нужен только для сохранения.
 /// </summary>
 /// <param name="TeleportId">
 /// Номер последнего телепорта, который клиент применил. Сообщения со старым номером отправлены до телепорта
 /// и посчитаны от старой позиции: сервер их игнорирует.
 /// </param>
-public sealed record PlayerMove(Vector3d Position, int TeleportId) : ClientMessage;
+public sealed record PlayerMove(Vector3d Position, LookAngles Look, int TeleportId) : ClientMessage;
 
-/// <summary>Игрок выбрал слот хотбара (клавиши 1–6).</summary>
+/// <summary>
+/// Игрок просит сменить режим (клавиша G). Ответ — <see cref="GameModeChanged"/>. Пока команд и прав доступа нет,
+/// сервер разрешает смену всем: игра только одиночная.
+/// </summary>
+public sealed record SetGameMode(GameMode Mode) : ClientMessage;
+
+/// <summary>Игрок выбрал слот хотбара (клавиши 1–9 или колесо мыши).</summary>
 public sealed record SelectHotbarSlot(int Slot) : ClientMessage;
+
+/// <summary>
+/// Клик по слоту на экране инвентаря. Клиент шлёт только намерение: сервер применяет его к своей копии тем же кодом
+/// (<see cref="Inventory.Click"/>) и присылает изменённые слоты (<see cref="InventoryChanged"/>).
+/// </summary>
+public sealed record InventoryClick(int Slot, InventoryClickKind Kind) : ClientMessage;
 
 /// <summary>
 /// Игрок применил предмет в руке. Клиент не сообщает, какой блок менять: сервер сам повторяет луч
