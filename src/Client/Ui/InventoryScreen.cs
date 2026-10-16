@@ -47,6 +47,7 @@ internal sealed class InventoryScreen : IDisposable
     {
         if (screen.X <= 0 || screen.Y <= 0)
             return;
+        _lastInventory = inventory;
         var scale = UiScale.For(screen.X, screen.Y);
         if (scale != _scale)
             Rebuild(scale);
