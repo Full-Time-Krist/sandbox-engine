@@ -295,7 +295,7 @@ internal sealed class ClientApp(
         DrawSelection(eye);
         _hud.Draw(_framebufferSize, _inventory, deltaTime, _inventoryOpen);
         if (_inventoryOpen)
-            _inventoryScreen.Draw(_framebufferSize, _inventory, _mode == GameMode.Creative, Input.MousePosition);
+            _inventoryScreen.Draw(_framebufferSize, _inventory, _mode == GameMode.Creative, MouseFramebufferPosition);
     }
 
     private void DrawSelection(Vector3d eye)
@@ -317,6 +317,17 @@ internal sealed class ClientApp(
     }
 
     protected override void OnResize(Vector2D<int> framebufferSize) => UpdateAspectRatio(framebufferSize);
+
+    private Vector2 MouseFramebufferPosition
+    {
+        get
+        {
+            var windowSize = Window.Size;
+            return new Vector2(
+                Input.MousePosition.X * _framebufferSize.X / Math.Max(1, windowSize.X),
+                Input.MousePosition.Y * _framebufferSize.Y / Math.Max(1, windowSize.Y));
+        }
+    }
 
     private void UpdateAspectRatio(Vector2D<int> size)
     {
@@ -342,7 +353,7 @@ internal sealed class ClientApp(
                 return false;
             }
 
-            _inventoryScreen.HandleClick(Input.MousePosition, _framebufferSize,
+            _inventoryScreen.HandleClick(MouseFramebufferPosition, _framebufferSize,
                 Input.WasMousePressed(MouseButton.Left), Input.WasMousePressed(MouseButton.Right),
                 Input.IsKeyDown(Key.ShiftLeft) || Input.IsKeyDown(Key.ShiftRight), _inventory,
                 _mode == GameMode.Creative, connection.Send);
