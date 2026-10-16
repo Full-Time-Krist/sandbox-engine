@@ -301,6 +301,18 @@ public sealed class GameServer : IDisposable
                     Console.WriteLine($"[Server] {session.PlayerName}: неверный клик по инвентарю ({click.Slot}, {click.Kind})");
                 break;
 
+            case ReturnInventoryCursor when session.IsJoined:
+                session.Inventory.ReturnCursor();
+                break;
+
+            case CreativeGiveItem give when session.IsJoined && session.Mode == GameMode.Creative:
+                if (_items.Contains(give.Item) && !give.Item.IsAir)
+                {
+                    var definition = _items.Get(give.Item);
+                    session.Inventory.Add(new ItemStack(give.Item, definition.MaxStackSize));
+                }
+                break;
+
             case UseItem use when session.IsJoined:
                 HandleUseItem(session, use);
                 break;
