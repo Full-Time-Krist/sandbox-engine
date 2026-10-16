@@ -68,6 +68,8 @@ public static class ContentLoader
             {
                 case "block":
                     CheckProperties(root, file, "type", "name", "isOpaque", "isSolid");
+                    if (name == BlockRegistry.AirName)
+                        throw Error(file, $"имя '{name}' зарезервировано для воздуха и не должно объявляться в JSON.");
                     if (!blockNames.Add(name))
                         throw Error(file, $"блок '{name}' объявлен более одного раза.");
                     blocks.Add(new BlockJson(file.Path, name,
@@ -77,11 +79,13 @@ public static class ContentLoader
 
                 case "item":
                     CheckProperties(root, file, "type", "name", "maxStackSize", "placesBlock");
+                    if (name == ItemRegistry.AirName)
+                        throw Error(file, $"имя '{name}' зарезервировано для пустого предмета и не должно объявляться в JSON.");
                     if (!itemNames.Add(name))
                         throw Error(file, $"предмет '{name}' объявлен более одного раза.");
                     var maxStackSize = RequiredInt32(root, "maxStackSize", file);
-                    if (maxStackSize is < 1 or > 65535)
-                        throw Error(file, $"maxStackSize должен быть в диапазоне 1–65535, получено {maxStackSize}.");
+                    if (maxStackSize < 1)
+                        throw Error(file, $"maxStackSize должен быть положительным числом, получено {maxStackSize}.");
                     var placesBlock = OptionalString(root, "placesBlock", file);
                     if (placesBlock is not null && !ContentNames.IsValid(placesBlock))
                         throw Error(file, $"placesBlock '{placesBlock}' должен иметь вид 'namespace:name'.");
