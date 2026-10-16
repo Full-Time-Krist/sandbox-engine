@@ -35,6 +35,12 @@ public sealed record SelectHotbarSlot(int Slot) : ClientMessage;
 /// </summary>
 public sealed record InventoryClick(int Slot, InventoryClickKind Kind) : ClientMessage;
 
+/// <summary>Закрытие экрана: сервер возвращает предмет с курсора в инвентарь.</summary>
+public sealed record ReturnInventoryCursor : ClientMessage;
+
+/// <summary>Запрос предмета из палитры творческого режима. Сервер проверяет режим игрока.</summary>
+public sealed record CreativeGiveItem(ItemId Item) : ClientMessage;
+
 /// <summary>
 /// Игрок применил предмет в руке. Клиент не сообщает, какой блок менять: сервер сам повторяет луч
 /// от <paramref name="EyePosition"/> по <paramref name="LookDirection"/> и решает, что делает предмет.
