@@ -305,6 +305,11 @@ public sealed class GameServer : IDisposable
                 session.Inventory.ReturnCursor();
                 break;
 
+            case InventoryDragDistribute drag when session.IsJoined:
+                if (!session.Inventory.DistributeCursor(drag.TargetSlots, drag.OnePerSlot))
+                    Console.WriteLine($"[Server] {session.PlayerName}: неверные цели перетаскивания инвентаря");
+                break;
+
             case CreativeGiveItem give when session.IsJoined && session.Mode == GameMode.Creative:
                 if (_items.Contains(give.Item) && !give.Item.IsAir)
                 {
