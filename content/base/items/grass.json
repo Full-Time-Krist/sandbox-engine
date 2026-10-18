@@ -2,5 +2,6 @@
   "type": "item",
   "name": "base:grass",
   "maxStackSize": 64,
-  "placesBlock": "base:grass"
+  "placesBlock": "base:grass",
+  "displayName": "Дёрн"
 }

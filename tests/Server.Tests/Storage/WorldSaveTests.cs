@@ -219,6 +219,24 @@ public sealed class WorldSaveTests : IDisposable
     }
 
     [Fact]
+    public void ModList_EmptyForNewWorld_SurvivesReopen_LastWriteWins()
+    {
+        using (var save = Open())
+        {
+            Assert.Empty(save.LoadModList());
+            save.SaveModList(new Dictionary<string, string> { ["example_mod"] = "1.0.0", ["other_mod"] = "2.1" });
+        }
+        using (var save = Open())
+        {
+            Assert.Equal(new Dictionary<string, string> { ["example_mod"] = "1.0.0", ["other_mod"] = "2.1" }, save.LoadModList());
+            save.SaveModList(new Dictionary<string, string>());
+        }
+
+        using var reopened = Open();
+        Assert.Empty(reopened.LoadModList());
+    }
+
+    [Fact]
     public void InventoryItems_AreSavedByName_UnknownItemDisappears()
     {
         // Сохранено одним набором предметов, загружается другим: те же имена с другими номерами, земли больше нет.

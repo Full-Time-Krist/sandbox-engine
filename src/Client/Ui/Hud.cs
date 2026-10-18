@@ -33,6 +33,7 @@ internal sealed class Hud : IDisposable
     private readonly TextureArray _blockTextures;
     private readonly BlockVisuals _visuals;
     private readonly ItemRegistry _items;
+    private readonly ItemNames _names;
     private readonly GL _gl;
 
     private UiAtlas _atlas = null!;
@@ -49,7 +50,8 @@ internal sealed class Hud : IDisposable
     /// <param name="fontPath">TTF-шрифт интерфейса; растеризуется при запуске и при смене масштаба.</param>
     /// <param name="screen">Размер кадра при запуске: атлас под него строится сразу.</param>
     /// <param name="blockTextures">Массив текстур блоков: из него рисуются иконки. Им владеет вызывающий.</param>
-    public Hud(GL gl, string fontPath, Vector2D<int> screen, TextureArray blockTextures, BlockVisuals visuals, ItemRegistry items)
+    public Hud(GL gl, string fontPath, Vector2D<int> screen, TextureArray blockTextures, BlockVisuals visuals, ItemRegistry items,
+        ItemNames names)
     {
         _gl = gl;
         _font = TrueTypeFont.Load(fontPath);
@@ -57,6 +59,7 @@ internal sealed class Hud : IDisposable
         _blockTextures = blockTextures;
         _visuals = visuals;
         _items = items;
+        _names = names;
 
         // Атлас — при загрузке, а не в первом кадре: первое построение с компиляцией кода растеризации длится
         // десятки миллисекунд (замер: 22 мс против 3–8 мс у повторных при смене размера окна).
@@ -146,7 +149,7 @@ internal sealed class Hud : IDisposable
         if (_nameTimeLeft <= 0 || held.IsEmpty)
             return;
 
-        var name = ItemNames.For(_items.Get(held.Item));
+        var name = _names.For(_items.Get(held.Item));
         var alpha = (float)Math.Min(1, _nameTimeLeft / NameFadeSeconds);
         var hotbar = HudLayout.Hotbar(screen.X, screen.Y, scale);
         var x = (screen.X - _canvas.MeasureText(name)) / 2;

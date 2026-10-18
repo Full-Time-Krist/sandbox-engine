@@ -9,6 +9,7 @@ using Shared;
 using Shared.Blocks;
 using Shared.Content;
 using Shared.Items;
+using Shared.Modding;
 using Shared.Networking;
 using Shared.Protocol;
 using Shared.Voxels;
@@ -26,7 +27,8 @@ namespace Client;
 internal sealed class ClientApp(
     WindowSettings settings,
     IConnection<ClientMessage, ServerMessage> connection,
-    ServerHost? integratedServer)
+    ServerHost? integratedServer,
+    IReadOnlyList<ModInfo> mods)
     : Application(settings, GameTime.TicksPerSecond)
 {
     /// <summary>Камера в глазах игрока. Направление взгляда при входе задаёт сервер (<see cref="JoinAccepted.StartLook"/>).</summary>
@@ -91,14 +93,15 @@ internal sealed class ClientApp(
         Gl.ClearColor(0.53f, 0.81f, 0.92f, 1f);
 
         // Клиент грузит тот же контент, что и сервер, и сверяет реестры с его таблицами при подключении (см. JoinAccepted).
-        var content = GameContent.Load();
+        var content = GameContent.Load(mods);
         _registry = content.Blocks;
         _items = content.Items;
         _inventory = new Inventory(_items);
         UpdateStatusText();
 
         var visuals = new BlockVisuals(_registry, BlockVisuals.AppearancesFrom(content.BlockTextures));
-        _blockTextures = LoadBlockTextures(visuals.TextureNames);
+        _blockTextures = LoadBlockTextures(visuals.TextureNames, new BlockTextureFiles(mods));
+        var names = new ItemNames(content.ItemDisplayNames);
         _chunkRenderer = new ChunkRenderer(Gl, new ChunkMesher(visuals), MeshBuildQueue.DefaultWorkerCount);
 
         var shaders = Path.Combine(AppContext.BaseDirectory, "Assets", "Shaders");
@@ -107,9 +110,9 @@ internal sealed class ClientApp(
         _lineShader = ShaderProgram.FromFiles(Gl, Path.Combine(shaders, "basic"));
         _selectionBox = LineGeometry.CreateBoxOutline(Gl, new Vector3(0.05f));
         _hud = new Hud(Gl, Path.Combine(AppContext.BaseDirectory, "Assets", "Fonts", "ui.ttf"), Window.FramebufferSize,
-            _blockTextures, visuals, _items);
+            _blockTextures, visuals, _items, names);
         _inventoryScreen = new InventoryScreen(Gl, Path.Combine(AppContext.BaseDirectory, "Assets", "Fonts", "ui.ttf"),
-            Window.FramebufferSize, _blockTextures, visuals, _items);
+            Window.FramebufferSize, _blockTextures, visuals, _items, names);
 
         // Позицию задаст сервер в JoinAccepted. До неё чанков нет, и тело стоит на месте.
         _controller = new PlayerController(_camera, _world.Chunks, _registry);
@@ -118,27 +121,25 @@ internal sealed class ClientApp(
         connection.Send(new JoinRequest("Player"));
     }
 
-    private TextureArray LoadBlockTextures(IReadOnlyList<string> names)
+    private TextureArray LoadBlockTextures(IReadOnlyList<string> names, BlockTextureFiles files)
     {
         const int MissingSize = 16;
-        var directory = Path.Combine(AppContext.BaseDirectory, "Assets", "Textures", "Blocks");
         var images = new List<Image>(names.Count);
 
         foreach (var name in names)
         {
-            var path = Path.Combine(directory, name + ".png");
             if (name == BlockVisuals.MissingTexture)
             {
                 images.Add(Image.CreateMissing(MissingSize, MissingSize));
             }
-            else if (File.Exists(path))
+            else if (files.PathFor(name) is var path && File.Exists(path))
             {
                 images.Add(Image.Load(path));
             }
             else
             {
                 // Нет файла — не повод падать: блок будет в шахматку, а в логе видно, чего не хватает.
-                Console.WriteLine($"[Client] Нет текстуры {path}");
+                Console.WriteLine($"[Client] Нет текстуры {name}: {files.PathFor(name)}");
                 images.Add(Image.CreateMissing(MissingSize, MissingSize));
             }
         }

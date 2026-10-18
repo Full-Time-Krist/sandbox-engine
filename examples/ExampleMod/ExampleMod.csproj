@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Пример мода. Сборка даёт готовую папку мода: bin/<Конфигурация>/example_mod/ (mod.json, content/, textures/, ExampleMod.dll).
+    Её можно скопировать в папку модов игры или указать игре папку bin/<Конфигурация> аргументом mods (см. docs/modding.md).
+  -->
+  <PropertyGroup>
+    <ModId>example_mod</ModId>
+    <AssemblyName>ExampleMod</AssemblyName>
+    <RootNamespace>ExampleMod</RootNamespace>
+    <OutputPath>bin\$(Configuration)\$(ModId)\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <!-- Сборка-плагин: собственные зависимости мода (NuGet) копируются к нему и описываются в .deps.json. -->
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <!-- Файлы, которые проекты игры копируют к себе (контент игры из Shared), моду не нужны. -->
+    <_GetChildProjectCopyToOutputDirectoryItems>false</_GetChildProjectCopyToOutputDirectoryItems>
+  </PropertyGroup>
+
+  <!-- API и Shared берутся из игры: в папку мода их не копируем (Private=false, без runtime-ассетов). -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Api\Api.csproj" Private="false" ExcludeAssets="runtime" />
+    <ProjectReference Include="..\..\src\Shared\Shared.csproj" Private="false" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <!--
+    Данные мода — в его папку после сборки. Своей задачей, а не CopyToOutputDirectory: такие элементы MSBuild
+    передаёт и проектам, ссылающимся на мод (тестам), а там content/ мода смешался бы с Content/ игры.
+  -->
+  <ItemGroup>
+    <ModFile Include="mod.json;content\**\*.json;textures\**\*.png" />
+  </ItemGroup>
+  <Target Name="CopyModFiles" AfterTargets="Build">
+    <Copy SourceFiles="@(ModFile)" DestinationFiles="@(ModFile->'$(OutDir)%(RelativeDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

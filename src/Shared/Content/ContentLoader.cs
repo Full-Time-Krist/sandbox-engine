@@ -13,15 +13,22 @@ namespace Shared.Content;
 /// </param>
 public sealed record ContentJsonFile(string Path, string Json);
 
+/// <summary>Пакет контента: имя (оно же пространство имён его определений) и папка с его JSON-файлами.</summary>
+public sealed record ContentPack(string Name, string Directory);
+
 /// <summary>Реестры, построенные из одного набора определений.</summary>
 /// <param name="BlockTextures">
 /// Текстуры граней по имени блока. Логике мира они не нужны (реестр блоков их не хранит), их берёт только клиент.
 /// Блока без поля <c>textures</c> здесь нет.
 /// </param>
+/// <param name="ItemDisplayNames">Названия предметов для игрока (поле <c>displayName</c>); предмета без названия здесь нет.</param>
 public sealed record ContentRegistries(BlockRegistry Blocks, ItemRegistry Items,
-    ImmutableDictionary<string, BlockTextures> BlockTextures);
+    ImmutableDictionary<string, BlockTextures> BlockTextures, ImmutableDictionary<string, string> ItemDisplayNames);
 
-/// <summary>Имена текстур граней блока: файлы <c>Textures/Blocks/{имя}.png</c> клиента.</summary>
+/// <summary>
+/// Текстуры граней блока — полные имена <c>пакет:имя</c>. В JSON можно писать коротко (<c>"stone"</c>): имя дополняется
+/// пакетом, где описан блок. Файл ищет клиент по пакету (ванильные — в своих ассетах, мода — в папке мода).
+/// </summary>
 public sealed record BlockTextures(string Top, string Side, string Bottom);
 
 /// <summary>Ошибка описания контента. Сообщение всегда содержит путь к исходному файлу.</summary>
@@ -48,35 +55,48 @@ public static partial class ContentLoader
 
     public static ContentRegistries LoadDirectory(string directory) => LoadDirectories([directory]);
 
-    /// <summary>
-    /// Загружает пакеты из нескольких корней контента (игра, позже — папка модов) в одни реестры.
-    /// Пакет с одним именем в двух корнях — ошибка: иначе неясно, какой из них настоящий.
-    /// </summary>
+    /// <summary>Загружает пакеты из нескольких корней контента (в корне — папки пакетов) в одни реестры.</summary>
     public static ContentRegistries LoadDirectories(IEnumerable<string> roots)
     {
         ArgumentNullException.ThrowIfNull(roots);
+        return LoadPacks(roots.SelectMany(PacksIn));
+    }
 
-        var packRoots = new Dictionary<string, string>(StringComparer.Ordinal);
+    /// <summary>Пакеты корня контента: каждая папка верхнего уровня — пакет. JSON прямо в корне — ошибка.</summary>
+    public static IEnumerable<ContentPack> PacksIn(string root)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(root);
+        if (!Directory.Exists(root))
+            throw new DirectoryNotFoundException($"Каталог контента не найден: '{root}'.");
+        if (Directory.GetFiles(root, "*.json").FirstOrDefault() is { } loose)
+            throw new ContentLoadException($"Файл '{loose}': контент должен лежать в папке пакета, а не в корне '{root}'.");
+
+        return Directory.GetDirectories(root).Order(StringComparer.Ordinal)
+            .Select(directory => new ContentPack(Path.GetFileName(directory), directory))
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Загружает пакеты (папки игры и моды) в одни реестры. Пакет с одним именем дважды — ошибка: иначе неясно,
+    /// какой из них настоящий. Папки пакета может не быть (мод без контента).
+    /// </summary>
+    public static ContentRegistries LoadPacks(IEnumerable<ContentPack> packs)
+    {
+        ArgumentNullException.ThrowIfNull(packs);
+
+        var seen = new Dictionary<string, string>(StringComparer.Ordinal);
         var files = new List<ContentJsonFile>();
-        foreach (var root in roots)
+        foreach (var pack in packs)
         {
-            ArgumentException.ThrowIfNullOrWhiteSpace(root);
-            if (!Directory.Exists(root))
-                throw new DirectoryNotFoundException($"Каталог контента не найден: '{root}'.");
+            if (!seen.TryAdd(pack.Name, pack.Directory))
+                throw new ContentLoadException($"Пакет '{pack.Name}' найден дважды: в '{seen[pack.Name]}' и в '{pack.Directory}'.");
+            if (!Directory.Exists(pack.Directory))
+                continue;
 
-            if (Directory.GetFiles(root, "*.json").FirstOrDefault() is { } loose)
-                throw new ContentLoadException($"Файл '{loose}': контент должен лежать в папке пакета, а не в корне '{root}'.");
-
-            foreach (var packDirectory in Directory.GetDirectories(root))
-            {
-                var pack = Path.GetFileName(packDirectory);
-                if (!packRoots.TryAdd(pack, root))
-                    throw new ContentLoadException($"Пакет '{pack}' найден дважды: в '{packRoots[pack]}' и в '{root}'.");
-
-                files.AddRange(Directory.GetFiles(packDirectory, "*.json", SearchOption.AllDirectories)
-                    .Select(path => new ContentJsonFile(
-                        Path.GetRelativePath(root, path).Replace(Path.DirectorySeparatorChar, '/'), File.ReadAllText(path))));
-            }
+            files.AddRange(Directory.GetFiles(pack.Directory, "*.json", SearchOption.AllDirectories)
+                .Select(path => new ContentJsonFile(
+                    pack.Name + "/" + Path.GetRelativePath(pack.Directory, path).Replace(Path.DirectorySeparatorChar, '/'),
+                    File.ReadAllText(path))));
         }
 
         return Load(files);
@@ -126,11 +146,11 @@ public static partial class ContentLoader
                     blocks.Add(new BlockJson(file.Path, name,
                         RequiredBoolean(root, "isOpaque", file),
                         OptionalBoolean(root, "isSolid", defaultValue: true, file),
-                        OptionalTextures(root, file)));
+                        OptionalTextures(root, pack, file)));
                     break;
 
                 case "item":
-                    CheckProperties(root, file, "type", "name", "maxStackSize", "placesBlock", "behavior");
+                    CheckProperties(root, file, "type", "name", "maxStackSize", "placesBlock", "behavior", "displayName");
                     if (name == ItemRegistry.AirName)
                         throw Error(file, $"имя '{name}' зарезервировано для пустого предмета и не должно объявляться в JSON.");
                     if (!itemNames.Add(name))
@@ -144,7 +164,7 @@ public static partial class ContentLoader
                     var behavior = OptionalString(root, "behavior", file);
                     if (behavior is not null && !ContentNames.IsValid(behavior))
                         throw Error(file, $"behavior '{behavior}' должен иметь вид 'namespace:name'.");
-                    items.Add(new ItemJson(file.Path, name, maxStackSize, placesBlock, behavior));
+                    items.Add(new ItemJson(file.Path, name, maxStackSize, placesBlock, behavior, OptionalString(root, "displayName", file)));
                     break;
 
                 default:
@@ -162,6 +182,7 @@ public static partial class ContentLoader
         }
 
         var itemRegistry = new ItemRegistry();
+        var displayNames = ImmutableDictionary.CreateBuilder<string, string>(StringComparer.Ordinal);
         foreach (var item in items.OrderBy(item => item.Name, StringComparer.Ordinal))
         {
             BlockId? placedBlock = null;
@@ -177,11 +198,13 @@ public static partial class ContentLoader
             }
 
             itemRegistry.Register(item.Name, item.MaxStackSize, placedBlock, item.Behavior);
+            if (item.DisplayName is not null)
+                displayNames.Add(item.Name, item.DisplayName);
         }
 
         blockRegistry.Freeze();
         itemRegistry.Freeze();
-        return new ContentRegistries(blockRegistry, itemRegistry, textures.ToImmutable());
+        return new ContentRegistries(blockRegistry, itemRegistry, textures.ToImmutable(), displayNames.ToImmutable());
     }
 
     /// <summary>Пакет файла — первая папка пути. Его имя — пространство имён, поэтому правила те же: a–z, 0–9, _.</summary>
@@ -232,16 +255,16 @@ public static partial class ContentLoader
 
     /// <summary>
     /// Поле <c>textures</c>: строка — одна текстура на все грани, объект — <c>top</c>, <c>side</c> и <c>bottom</c>
-    /// (все три обязательны).
+    /// (все три обязательны). Короткие имена дополняются пакетом <paramref name="pack"/>.
     /// </summary>
-    private static BlockTextures? OptionalTextures(JsonElement root, ContentJsonFile file)
+    private static BlockTextures? OptionalTextures(JsonElement root, string pack, ContentJsonFile file)
     {
         if (!root.TryGetProperty("textures", out var value))
             return null;
 
         if (value.ValueKind == JsonValueKind.String)
         {
-            var uniform = TextureName(value, "textures", file);
+            var uniform = TextureName(value, "textures", pack, file);
             return new BlockTextures(uniform, uniform, uniform);
         }
 
@@ -257,16 +280,19 @@ public static partial class ContentLoader
         return new BlockTextures(FaceTexture("top"), FaceTexture("side"), FaceTexture("bottom"));
 
         string FaceTexture(string face) => value.TryGetProperty(face, out var texture)
-            ? TextureName(texture, $"textures.{face}", file)
+            ? TextureName(texture, $"textures.{face}", pack, file)
             : throw Error(file, $"в 'textures' нет обязательного поля '{face}'.");
     }
 
-    private static string TextureName(JsonElement value, string property, ContentJsonFile file)
+    /// <summary>Полное имя текстуры: <c>пакет:имя</c> как есть или короткое <c>имя</c> из своего пакета.</summary>
+    private static string TextureName(JsonElement value, string property, string pack, ContentJsonFile file)
     {
         var name = value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+        if (name is not null && ContentNames.IsValid(name))
+            return name;
         if (name is null || !TextureNamePattern().IsMatch(name))
-            throw Error(file, $"поле '{property}' должно быть именем текстуры (a–z, 0–9, _).");
-        return name;
+            throw Error(file, $"поле '{property}' должно быть именем текстуры: 'имя' или 'пакет:имя' (a–z, 0–9, _).");
+        return $"{pack}:{name}";
     }
 
     private static bool RequiredBoolean(JsonElement root, string property, ContentJsonFile file)
@@ -319,5 +345,6 @@ public static partial class ContentLoader
         new($"Файл '{file.Path}': {message}");
 
     private sealed record BlockJson(string Path, string Name, bool IsOpaque, bool IsSolid, BlockTextures? Textures);
-    private sealed record ItemJson(string Path, string Name, int MaxStackSize, string? PlacesBlock, string? Behavior);
+    private sealed record ItemJson(string Path, string Name, int MaxStackSize, string? PlacesBlock, string? Behavior,
+        string? DisplayName);
 }

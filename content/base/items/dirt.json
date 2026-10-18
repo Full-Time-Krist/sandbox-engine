@@ -2,5 +2,6 @@
   "type": "item",
   "name": "base:dirt",
   "maxStackSize": 64,
-  "placesBlock": "base:dirt"
+  "placesBlock": "base:dirt",
+  "displayName": "Земля"
 }

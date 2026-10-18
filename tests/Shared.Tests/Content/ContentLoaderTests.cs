@@ -136,8 +136,8 @@ public class ContentLoaderTests
             File("base/glass.json", """{"type":"block","name":"base:glass","isOpaque":false}""")
         ]);
 
-        Assert.Equal(new BlockTextures("stone", "stone", "stone"), content.BlockTextures["base:stone"]);
-        Assert.Equal(new BlockTextures("grass_top", "grass_side", "dirt"), content.BlockTextures["base:grass"]);
+        Assert.Equal(new BlockTextures("base:stone", "base:stone", "base:stone"), content.BlockTextures["base:stone"]);
+        Assert.Equal(new BlockTextures("base:grass_top", "base:grass_side", "base:dirt"), content.BlockTextures["base:grass"]);
         Assert.False(content.BlockTextures.ContainsKey("base:glass"));
     }
 
@@ -152,6 +152,29 @@ public class ContentLoaderTests
 
         Assert.Equal(ItemRegistry.PlaceBlockBehavior, content.Items.Get("base:stone").Behavior);
         Assert.Equal("base:wand", content.Items.Get("base:wand").Behavior);
+    }
+
+    [Fact]
+    public void Load_ShortTextureName_GetsOwnPack_FullNameIsKept()
+    {
+        var content = ContentLoader.Load([
+            File("example_mod/ore.json",
+                """{"type":"block","name":"example_mod:ore","isOpaque":true,"textures":{"top":"ore","side":"base:stone","bottom":"base:stone"}}""")
+        ]);
+
+        Assert.Equal(new BlockTextures("example_mod:ore", "base:stone", "base:stone"), content.BlockTextures["example_mod:ore"]);
+    }
+
+    [Fact]
+    public void Load_DisplayName_IsOptional()
+    {
+        var content = ContentLoader.Load([
+            File("base/stick.json", """{"type":"item","name":"base:stick","maxStackSize":64,"displayName":"Палка"}"""),
+            File("base/rock.json", """{"type":"item","name":"base:rock","maxStackSize":64}""")
+        ]);
+
+        Assert.Equal("Палка", content.ItemDisplayNames["base:stick"]);
+        Assert.False(content.ItemDisplayNames.ContainsKey("base:rock"));
     }
 
     [Fact]

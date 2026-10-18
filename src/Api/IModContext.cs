@@ -25,4 +25,7 @@ public interface IModContext
 
     /// <summary>Подписка на события мира.</summary>
     IModEvents Events { get; }
+
+    /// <summary>Строка в лог игры с пометкой мода: <c>[Mod &lt;id&gt;] …</c>.</summary>
+    void Log(string message);
 }

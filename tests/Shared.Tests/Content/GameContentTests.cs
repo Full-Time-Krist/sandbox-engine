@@ -18,8 +18,8 @@ public class GameContentTests
         (string Name, bool Opaque, bool Solid, BlockTextures Textures)[] expected =
         [
             ("base:dirt", true, true, Uniform("dirt")),
-            ("base:grass", true, true, new("grass_top", "grass_side", "dirt")),
-            ("base:log", true, true, new("log_top", "log_side", "log_top")),
+            ("base:grass", true, true, new("base:grass_top", "base:grass_side", "base:dirt")),
+            ("base:log", true, true, new("base:log_top", "base:log_side", "base:log_top")),
             ("base:planks", true, true, Uniform("planks")),
             ("base:sand", true, true, Uniform("sand")),
             ("base:stone", true, true, Uniform("stone")),
@@ -67,5 +67,13 @@ public class GameContentTests
         Assert.Equal(_content.Items.All.Select(i => i.Name), other.Items.All.Select(i => i.Name));
     }
 
-    private static BlockTextures Uniform(string name) => new(name, name, name);
+    private static BlockTextures Uniform(string name) => new("base:" + name, "base:" + name, "base:" + name);
+
+    /// <summary>Названия ванильных предметов переехали из кода (ItemNames) в поле displayName.</summary>
+    [Fact]
+    public void VanillaItems_HaveDisplayNames()
+    {
+        Assert.Equal("Дёрн", _content.ItemDisplayNames["base:grass"]);
+        Assert.All(_content.Items.All.Where(i => !i.Id.IsAir), item => Assert.True(_content.ItemDisplayNames.ContainsKey(item.Name), item.Name));
+    }
 }

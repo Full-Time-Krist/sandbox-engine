@@ -1,0 +1,7 @@
+{
+  "type": "item",
+  "name": "example_mod:wand",
+  "maxStackSize": 1,
+  "behavior": "example_mod:wand",
+  "displayName": "Волшебная палочка"
+}

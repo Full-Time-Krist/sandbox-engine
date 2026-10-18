@@ -2,5 +2,6 @@
   "type": "item",
   "name": "base:sand",
   "maxStackSize": 64,
-  "placesBlock": "base:sand"
+  "placesBlock": "base:sand",
+  "displayName": "Песок"
 }

@@ -79,7 +79,7 @@ public class ItemBehaviorRegistryTests
     public void BaseMod_RegistersBehaviorsForAllVanillaItems()
     {
         var content = GameContent.Load();
-        new BaseMod().Load(new ModContext(BaseMod.Id, content, _registry, new GameEvents(_ => { })));
+        new BaseMod().Load(new ModContext(BaseMod.Id, content, _registry, new GameEvents(_ => { }), _ => { }));
 
         var bound = _registry.Bind(content.Items);
 

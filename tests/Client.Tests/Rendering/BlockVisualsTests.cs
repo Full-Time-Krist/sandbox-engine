@@ -39,9 +39,9 @@ public class BlockVisualsTests
         var visuals = new BlockVisuals(registry, Appearances);
 
         string NameOf(FaceKind kind) => visuals.TextureNames[visuals.GetLayer(blocks.Grass, FaceIndex(kind))];
-        Assert.Equal("grass_top", NameOf(FaceKind.Top));
-        Assert.Equal("grass_side", NameOf(FaceKind.Side));
-        Assert.Equal("dirt", NameOf(FaceKind.Bottom));
+        Assert.Equal("base:grass_top", NameOf(FaceKind.Top));
+        Assert.Equal("base:grass_side", NameOf(FaceKind.Side));
+        Assert.Equal("base:dirt", NameOf(FaceKind.Bottom));
     }
 
     [Fact]
@@ -89,9 +89,9 @@ public class BlockVisualsTests
     public void ContentTextures_AllHaveFiles()
     {
         // Текстура без файла рисуется шахматкой «missing» без ошибки: тест не даст опечататься в JSON блока.
-        var directory = Path.Combine(AppContext.BaseDirectory, "Assets", "Textures", "Blocks");
+        var files = new BlockTextureFiles([]);
         var textures = GameContent.Load().BlockTextures.Values.SelectMany(t => new[] { t.Top, t.Side, t.Bottom }).Distinct();
 
-        Assert.All(textures, name => Assert.True(File.Exists(Path.Combine(directory, name + ".png")), $"Нет файла текстуры '{name}'"));
+        Assert.All(textures, name => Assert.True(File.Exists(files.PathFor(name)), $"Нет файла текстуры '{name}'"));
     }
 }

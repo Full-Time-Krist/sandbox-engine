@@ -27,6 +27,7 @@ internal sealed class InventoryScreen : IDisposable
     private readonly TextureArray _textures;
     private readonly BlockVisuals _visuals;
     private readonly ItemRegistry _items;
+    private readonly ItemNames _names;
     private UiAtlas _atlas = null!;
     private Texture2D? _atlasTexture;
     private UiCanvas _canvas = null!;
@@ -38,12 +39,13 @@ internal sealed class InventoryScreen : IDisposable
     private readonly List<int> _dragTargets = [];
 
     public InventoryScreen(GL gl, string fontPath, Vector2D<int> screen, TextureArray textures,
-        BlockVisuals visuals, ItemRegistry items)
+        BlockVisuals visuals, ItemRegistry items, ItemNames names)
     {
         _gl = gl;
         _textures = textures;
         _visuals = visuals;
         _items = items;
+        _names = names;
         _font = TrueTypeFont.Load(fontPath);
         _batch = new SpriteBatch(gl);
         Rebuild(UiScale.For(Math.Max(1, screen.X), Math.Max(1, screen.Y)));
@@ -97,7 +99,7 @@ internal sealed class InventoryScreen : IDisposable
         var hovered = FindHovered(screen, scale, creative, mouse);
         if (hovered is { } item)
         {
-            var name = ItemNames.For(item);
+            var name = _names.For(item);
             var width = _canvas.MeasureText(name) + 8 * scale;
             var x = Math.Clamp((int)mouse.X + 12 * scale, 0, Math.Max(0, screen.X - width));
             var y = Math.Clamp((int)mouse.Y + 12 * scale, 0, Math.Max(0, screen.Y - 18 * scale));

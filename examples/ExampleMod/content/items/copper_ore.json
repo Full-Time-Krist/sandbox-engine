@@ -1,0 +1,7 @@
+{
+  "type": "item",
+  "name": "example_mod:copper_ore",
+  "maxStackSize": 64,
+  "placesBlock": "example_mod:copper_ore",
+  "displayName": "Медная руда"
+}

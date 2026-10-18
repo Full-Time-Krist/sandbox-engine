@@ -42,9 +42,9 @@ public sealed class ItemIconsTests : IDisposable
 
         Assert.Equal(3, _canvas.QuadCount);
         // Верх — текстура верха дёрна, яркость как у верхней грани в мире (1,0); южный бок — 0,8; восточный — 0,6.
-        Assert.Equal((Layer("grass_top"), 255), (v[0].Layer, (int)(v[0].Color & 0xFF)));
-        Assert.Equal((Layer("grass_side"), 204), (v[4].Layer, (int)(v[4].Color & 0xFF)));
-        Assert.Equal((Layer("grass_side"), 153), (v[8].Layer, (int)(v[8].Color & 0xFF)));
+        Assert.Equal((Layer("base:grass_top"), 255), (v[0].Layer, (int)(v[0].Color & 0xFF)));
+        Assert.Equal((Layer("base:grass_side"), 204), (v[4].Layer, (int)(v[4].Color & 0xFF)));
+        Assert.Equal((Layer("base:grass_side"), 153), (v[8].Layer, (int)(v[8].Color & 0xFF)));
     }
 
     [Theory]

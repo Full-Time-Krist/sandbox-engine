@@ -1,0 +1,7 @@
+{
+  "id": "example_mod",
+  "name": "Пример мода",
+  "version": "1.0.0",
+  "dependencies": { "base": "1.0" },
+  "assembly": "ExampleMod.dll"
+}

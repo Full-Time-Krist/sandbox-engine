@@ -2,5 +2,6 @@
   "type": "item",
   "name": "base:planks",
   "maxStackSize": 64,
-  "placesBlock": "base:planks"
+  "placesBlock": "base:planks",
+  "displayName": "Доски"
 }

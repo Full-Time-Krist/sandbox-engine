@@ -185,6 +185,25 @@ internal sealed class WorldSave : IDisposable
         }
     }
 
+    /// <summary>Моды (id → версия), с которыми мир открывали прошлый раз; пусто у нового мира и у мира без модов.</summary>
+    public IReadOnlyDictionary<string, string> LoadModList()
+    {
+        using var connection = OpenConnection();
+        return ReadMeta(connection, "mods") is string json
+            ? System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json) ?? []
+            : new Dictionary<string, string>();
+    }
+
+    /// <summary>Запоминает моды (id → версия), с которыми открыт мир. Как и <see cref="Initialize"/> — до игры.</summary>
+    public void SaveModList(IReadOnlyDictionary<string, string> mods)
+    {
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "INSERT OR REPLACE INTO meta (key, value) VALUES ('mods', $value)";
+        command.Parameters.AddWithValue("$value", System.Text.Json.JsonSerializer.Serialize(mods));
+        command.ExecuteNonQuery();
+    }
+
     internal void StartWriter()
     {
         _writer = new Thread(WriteLoop) { Name = "WorldSave", IsBackground = true };

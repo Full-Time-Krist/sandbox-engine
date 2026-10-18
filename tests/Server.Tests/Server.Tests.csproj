@@ -18,6 +18,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Server\Server.csproj" />
+    <!-- Пример мода: только чтобы он собирался раньше тестов. Его DLL тесты грузят из его папки, как игра. -->
+    <ProjectReference Include="..\..\examples\ExampleMod\ExampleMod.csproj" ReferenceOutputAssembly="false" Private="false" />
   </ItemGroup>
 
 </Project>

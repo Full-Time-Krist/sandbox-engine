@@ -7,6 +7,7 @@
 #   tools/playtest.sh start --release           # Release — для замеров
 #   tools/playtest.sh start --keep-world        # загрузить сохранённый мир (проверка сохранений)
 #   tools/playtest.sh start -- --seed 2 --spawn 1000000 0 --mode creative   # аргументы игры — после --
+#   tools/playtest.sh start -- --mods examples/ExampleMod/bin/Debug        # с модами (по умолчанию — пустая папка модов)
 #   tools/playtest.sh enter                     # клик в центр кадра: захват мыши
 #   tools/playtest.sh key w 1000                # W одну секунду
 #   tools/playtest.sh keys 1500 w space         # W и Space вместе (разбег с прыжком)
@@ -123,6 +124,16 @@ cmd_start() {
     local world_dir=${XDG_DATA_HOME:-$HOME/.local/share}/$GAME_NAME/Saves/$world
     ((keep)) || rm -rf "$world_dir"
     [[ " ${args[*]} " == *" --seed "* ]] || args=(--seed 1 "${args[@]}")
+    # Моды: по умолчанию пустая папка, а не общая папка модов игрока. Свою — аргументом игры: -- --mods ПАПКА.
+    # Игра запускается из $STATE, поэтому относительный путь к модам переводим в абсолютный от текущей папки.
+    local i
+    for ((i = 0; i < ${#args[@]} - 1; i++)); do
+        [[ ${args[i]} == --mods ]] && args[i + 1]=$(realpath -m "${args[i + 1]}")
+    done
+    if [[ " ${args[*]} " != *" --mods "* ]]; then
+        mkdir -p "$STATE/mods"
+        args=(--mods "$STATE/mods" "${args[@]}")
+    fi
 
     ensure_vinput
     : >"$STATE/out.txt"; : >"$STATE/err.txt"

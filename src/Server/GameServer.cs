@@ -8,6 +8,7 @@ using Shared;
 using Shared.Blocks;
 using Shared.Content;
 using Shared.Items;
+using Shared.Modding;
 using Shared.Physics;
 using Shared.Networking;
 using Shared.Protocol;
@@ -86,24 +87,29 @@ public sealed class GameServer : IDisposable
     /// <param name="spawnColumn">Столбец точки появления нового мира; null — (0, 0).</param>
     /// <param name="savePath">Файл сохранения: есть — мир загружается, нет — создаётся. null — мир только в памяти (тесты).</param>
     /// <param name="defaultMode">Режим нового игрока в новом мире; null — выживание. У мира из сохранения режим свой.</param>
+    /// <param name="mods">Моды из папки модов в порядке загрузки (<see cref="ModDiscovery.Discover"/>); null — без модов.</param>
+    /// <exception cref="ContentLoadException">Ошибка в контенте игры или модов.</exception>
+    /// <exception cref="ModLoadException">Ошибка в сборке мода или в его <see cref="IMod.Load"/>.</exception>
     public GameServer(int? seed, int? generatorThreads = null,
         int viewDistance = DefaultViewDistance, int verticalDistance = DefaultVerticalDistance,
-        (int X, int Z)? spawnColumn = null, string? savePath = null, GameMode? defaultMode = null)
-        : this(seed, generatorThreads, viewDistance, verticalDistance, spawnColumn, savePath, defaultMode, mods: [], Console.WriteLine)
+        (int X, int Z)? spawnColumn = null, string? savePath = null, GameMode? defaultMode = null,
+        IReadOnlyList<ModInfo>? mods = null)
+        : this(seed, generatorThreads, viewDistance, verticalDistance, spawnColumn, savePath, defaultMode,
+            mods ?? [], extraMods: [], Console.WriteLine)
     {
     }
 
-    /// <param name="mods">Моды кроме встроенного <c>base</c>, по порядку загрузки (пока только из тестов; папка модов — шаг 5.3).</param>
-    /// <param name="modLog">Куда писать ошибки обработчиков модов (тесты перехватывают).</param>
+    /// <param name="extraMods">Моды без папки, сразу экземплярами (тесты): загружаются после модов из <paramref name="mods"/>.</param>
+    /// <param name="modLog">Куда пишут моды и ошибки их обработчиков (тесты перехватывают).</param>
     internal GameServer(int? seed, int? generatorThreads, int viewDistance, int verticalDistance,
         (int X, int Z)? spawnColumn, string? savePath, GameMode? defaultMode,
-        IReadOnlyList<(string Id, IMod Mod)> mods, Action<string> modLog)
+        IReadOnlyList<ModInfo> mods, IReadOnlyList<(string Id, IMod Mod)> extraMods, Action<string> modLog)
     {
         _viewDistance = viewDistance;
         _verticalDistance = verticalDistance;
 
-        // Блоки и предметы — из JSON-контента (GameContent); клиент грузит те же файлы и сверяет имена при подключении.
-        var content = GameContent.Load();
+        // Блоки и предметы — из JSON-контента игры и модов; клиент грузит те же файлы и сверяет имена при подключении.
+        var content = GameContent.Load(mods);
         var registry = _registry = content.Blocks;
         _blocks = BaseBlocks.From(registry);
         _blockNames = [.. registry.All.Select(b => b.Name)];
@@ -111,7 +117,7 @@ public sealed class GameServer : IDisposable
         _items = content.Items;
         _itemNames = [.. _items.All.Select(i => i.Name)];
         _events = new GameEvents(modLog);
-        _behaviors = LoadMods(content, mods, _events);
+        _behaviors = LoadMods(content, mods, extraMods, _events, modLog);
 
         if (savePath != null)
             _save = WorldSave.Open(savePath, registry, _items);
@@ -121,7 +127,10 @@ public sealed class GameServer : IDisposable
             World = new World(_blocks, seed ?? Random.Shared.Next(), generatorThreads ?? ChunkGenerator.DefaultWorkerCount,
                 spawnColumn ?? default, _save, defaultMode ?? GameMode.Survival);
             if (_save != null)
+            {
                 LogOpened(isNew, seed, spawnColumn, defaultMode);
+                RecordMods(_save, mods);
+            }
         }
         catch
         {
@@ -136,13 +145,50 @@ public sealed class GameServer : IDisposable
     /// Подключает моды: каждый регистрирует поведения и подписки через свой <see cref="IModContext"/>. Первым — встроенный
     /// <c>base</c>, затем остальные по порядку; после этого поведения связываются с предметами, подписки закрываются.
     /// </summary>
-    private static IItemBehavior[] LoadMods(ContentRegistries content, IReadOnlyList<(string Id, IMod Mod)> mods, GameEvents events)
+    private static IItemBehavior[] LoadMods(ContentRegistries content, IReadOnlyList<ModInfo> mods,
+        IReadOnlyList<(string Id, IMod Mod)> extraMods, GameEvents events, Action<string> log)
     {
         var behaviors = new ItemBehaviorRegistry();
-        foreach (var (id, mod) in mods.Prepend((BaseMod.Id, new BaseMod())))
-            mod.Load(new ModContext(id, content, behaviors, events));
+        var loaded = new List<(string Id, IMod Mod)> { (BaseMod.Id, new BaseMod()) };
+        foreach (var info in mods)
+        {
+            // Мод только из данных (без сборки) кода не имеет: его контент уже в реестрах.
+            if (ModAssemblies.CreateMod(info) is { } mod)
+                loaded.Add((info.Id, mod));
+        }
+        loaded.AddRange(extraMods);
+
+        foreach (var (id, mod) in loaded)
+        {
+            try
+            {
+                mod.Load(new ModContext(id, content, behaviors, events, log));
+            }
+            catch (Exception exception) when (exception is not ModLoadException)
+            {
+                throw new ModLoadException($"Мод '{id}': ошибка в IMod.Load: {exception.Message}", exception);
+            }
+        }
         events.Freeze();
+
+        if (mods.Count > 0)
+            Console.WriteLine($"[Server] Моды: {string.Join(", ", mods.Select(m => m.AssemblyFile is null ? $"{m} (только данные)" : m.ToString()))}");
         return behaviors.Bind(content.Items);
+    }
+
+    /// <summary>
+    /// Сверяет моды с теми, с которыми мир открывали прошлый раз, и запоминает нынешние. Пропавший мод — повод
+    /// предупредить: его блоки станут воздухом, предметы пропадут (это уже пишет таблица имён сохранения).
+    /// </summary>
+    private static void RecordMods(WorldSave save, IReadOnlyList<ModInfo> mods)
+    {
+        var current = mods.ToDictionary(mod => mod.Id, mod => mod.Version.ToString(), StringComparer.Ordinal);
+        foreach (var (id, version) in save.LoadModList())
+        {
+            if (!current.ContainsKey(id))
+                Console.WriteLine($"[Server] Мир открывали с модом '{id}' {version}, сейчас его нет: его блоки станут воздухом, предметы пропадут");
+        }
+        save.SaveModList(current);
     }
 
     private void LogOpened(bool isNew, int? seed, (int X, int Z)? spawnColumn, GameMode? defaultMode)

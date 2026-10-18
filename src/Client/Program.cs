@@ -5,6 +5,7 @@ using Engine.Windowing;
 using Server;
 using Shared;
 using Shared.Content;
+using Shared.Modding;
 using Shared.Networking;
 using Shared.Protocol;
 
@@ -36,6 +37,13 @@ if (StringArgument("--mode") is { } modeName)
         : throw new ArgumentException($"Неизвестный режим: '{modeName}' (survival или creative)");
 }
 
+// Моды: общая папка %LOCALAPPDATA%\<название игры>\Mods\ (Linux: ~/.local/share/<название игры>/Mods/), включены во всех мирах.
+// --mods ПАПКА подменяет её: так проверки вживую не трогают моды игрока. Общую папку создаём, чтобы её было легко найти.
+var modsDirectory = StringArgument("--mods")
+    ?? Directory.CreateDirectory(Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), product, "Mods")).FullName;
+IReadOnlyList<ModInfo> mods = [];
+
 // Одиночная игра: встроенный сервер в том же процессе, в своём потоке, связь через очереди в памяти.
 // Для мультиплеера здесь будет сетевое соединение вместо LocalConnection и null вместо сервера.
 using var server = CreateServer();
@@ -49,20 +57,26 @@ server.Connect(serverConnection);
 using var host = new ServerHost(server);
 host.Start();
 
-using var app = new ClientApp(new WindowSettings { Title = product }, clientConnection, host);
+using var app = new ClientApp(new WindowSettings { Title = product }, clientConnection, host, mods);
 app.Run();
 return 0;
 
-// Сервер первым читает контент (GameContent): ошибку в JSON показываем одной строкой с файлом, а не стеком вызовов.
+// Сервер первым читает моды и контент: ошибку показываем одной строкой с модом или файлом, а не стеком вызовов.
 GameServer? CreateServer()
 {
     try
     {
-        return new GameServer(seed, spawnColumn: spawnColumn, savePath: savePath, defaultMode: defaultMode);
+        mods = ModDiscovery.Discover(modsDirectory);
+        return new GameServer(seed, spawnColumn: spawnColumn, savePath: savePath, defaultMode: defaultMode, mods: mods);
     }
     catch (ContentLoadException exception)
     {
         Console.Error.WriteLine($"[Content] Ошибка в контенте игры: {exception.Message}");
+        return null;
+    }
+    catch (ModLoadException exception)
+    {
+        Console.Error.WriteLine($"[Mods] {exception.Message}");
         return null;
     }
 }
