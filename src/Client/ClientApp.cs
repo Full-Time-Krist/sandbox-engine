@@ -348,6 +348,7 @@ internal sealed class ClientApp(
             if (Input.WasKeyPressed(Key.Escape) || Input.WasKeyPressed(Key.E))
             {
                 _inventoryOpen = false;
+                _inventoryScreen.Close();
                 connection.Send(new ReturnInventoryCursor());
                 Input.CaptureCursor();
                 return false;

@@ -58,6 +58,8 @@ public static class ContentLoader
             var root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object)
                 throw Error(file, "корень JSON должен быть объектом.");
+            // До чтения полей: иначе при повторе 'type' читается последнее значение и ошибка указывает не туда.
+            CheckNoDuplicates(root, file);
 
             var type = RequiredString(root, "type", file);
             var name = RequiredString(root, "name", file);
@@ -111,7 +113,8 @@ public static class ContentLoader
                     throw new ContentLoadException(
                         $"Файл '{item.Path}': предмет '{item.Name}' ссылается на неизвестный блок '{item.PlacesBlock}'.");
                 if (definition.Id.IsAir)
-                    throw new ContentLoadException($"Файл '{item.Path}': предмет '{item.Name}' не может ставить воздух.");
+                    throw new ContentLoadException(
+                        $"Файл '{item.Path}': предмет '{item.Name}' не может ставить воздух ('{item.PlacesBlock}').");
                 placedBlock = definition.Id;
             }
 
@@ -173,7 +176,9 @@ public static class ContentLoader
 
     private static int RequiredInt32(JsonElement root, string property, ContentJsonFile file)
     {
-        if (!root.TryGetProperty(property, out var value) || !value.TryGetInt32(out var result))
+        // TryGetInt32 у не-числа не возвращает false, а бросает InvalidOperationException.
+        if (!root.TryGetProperty(property, out var value) || value.ValueKind != JsonValueKind.Number
+            || !value.TryGetInt32(out var result))
             throw Error(file, $"обязательное поле '{property}' должно быть целым числом.");
         return result;
     }
@@ -181,13 +186,20 @@ public static class ContentLoader
     private static void CheckProperties(JsonElement root, ContentJsonFile file, params string[] allowed)
     {
         var allowedSet = allowed.ToHashSet(StringComparer.Ordinal);
+        foreach (var property in root.EnumerateObject())
+        {
+            if (!allowedSet.Contains(property.Name))
+                throw Error(file, $"неизвестное поле '{property.Name}'.");
+        }
+    }
+
+    private static void CheckNoDuplicates(JsonElement root, ContentJsonFile file)
+    {
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var property in root.EnumerateObject())
         {
             if (!seen.Add(property.Name))
                 throw Error(file, $"поле '{property.Name}' указано несколько раз.");
-            if (!allowedSet.Contains(property.Name))
-                throw Error(file, $"неизвестное поле '{property.Name}'.");
         }
     }
 

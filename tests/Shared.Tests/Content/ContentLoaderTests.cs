@@ -60,6 +60,8 @@ public class ContentLoaderTests
     [InlineData("""{"type":"item","name":"base:stick","maxStackSize":64,"placesBlock":"base:missing"}""", "stick.json")]
     [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"typo":false}""", "stone.json")]
     [InlineData("""{"type":"entity","name":"base:ghost"}""", "ghost.json")]
+    [InlineData("""{"type":"item","name":"base:stick","maxStackSize":"64"}""", "stick.json")]
+    [InlineData("""{"type":"item","name":"base:stick","maxStackSize":64.5}""", "stick.json")]
     public void Load_InvalidContent_ThrowsUsefulError(string json, string path)
     {
         var exception = Assert.Throws<ContentLoadException>(() => ContentLoader.Load([File(path, json)]));
@@ -105,6 +107,18 @@ public class ContentLoaderTests
         ]));
 
         Assert.Contains("base:air", exception.Message);
+    }
+
+    [Fact]
+    public void Load_DuplicateProperty_NamesThatProperty()
+    {
+        // Без ранней проверки читалось последнее "type", и ошибка ругалась на "isOpaque".
+        var exception = Assert.Throws<ContentLoadException>(() => ContentLoader.Load([
+            File("stone.json", """{"type":"block","name":"base:stone","isOpaque":true,"type":"item"}""")
+        ]));
+
+        Assert.Contains("'type'", exception.Message);
+        Assert.Contains("несколько раз", exception.Message);
     }
 
     private static ContentJsonFile File(string path, string json) => new(path, json);

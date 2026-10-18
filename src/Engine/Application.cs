@@ -88,6 +88,11 @@ public abstract class Application : IDisposable
         Gl.CullFace(TriangleFace.Back);
         Gl.FrontFace(FrontFaceDirection.Ccw);
 
+        // Начальная область отрисовки — размер поверхности при создании контекста. Тайловый оконный менеджер
+        // (niri, Hyprland) меняет размер окна ещё до Load, и FramebufferResize тогда не приходит: без этой строки
+        // кадр рисовался бы в угол 1280×720, а интерфейс считал бы настоящий размер.
+        Gl.Viewport(_window.FramebufferSize);
+
         OnLoad();
     }
 

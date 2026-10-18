@@ -191,6 +191,12 @@ internal sealed class InventoryScreen : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Закрытие экрана. Незаконченное перетаскивание отменяется: иначе при следующем открытии первый кадр
+    /// без нажатой кнопки «отпустил» бы его и отправил клик по слоту, с которого оно началось.
+    /// </summary>
+    public void Close() => ResetDrag();
+
     private void AddDragTarget(int? slot)
     {
         if (slot is not { } value || value == _dragStartSlot || _dragTargets.Contains(value))
