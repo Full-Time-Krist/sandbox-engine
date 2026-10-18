@@ -1,0 +1,15 @@
+{
+  "type": "quest",
+  "name": "base:copper_ingot",
+  "title": "Плавка",
+  "description": "Переплавьте у печи медную руду в 3 слитка.",
+  "goal": {
+    "type": "craft",
+    "item": "base:copper_ingot",
+    "count": 3
+  },
+  "requires": [
+    "base:copper_ore",
+    "base:furnace"
+  ]
+}

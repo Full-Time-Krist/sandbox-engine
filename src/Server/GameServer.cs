@@ -3,6 +3,7 @@ using System.Collections.Immutable;
 using System.Numerics;
 using Api;
 using Server.Modding;
+using Server.Quests;
 using Server.Storage;
 using Shared;
 using Shared.Blocks;
@@ -12,6 +13,7 @@ using Shared.Modding;
 using Shared.Physics;
 using Shared.Networking;
 using Shared.Protocol;
+using Shared.Quests;
 using Shared.Voxels;
 
 namespace Server;
@@ -42,6 +44,7 @@ public sealed class GameServer : IDisposable
     private readonly BaseBlocks _blocks;
     private readonly ItemRegistry _items;
     private readonly RecipeRegistry _recipes;
+    private readonly QuestTracker _quests;
 
     /// <summary>Поведение каждого предмета по номеру <see cref="ItemId"/>: связано с реестром предметов после загрузки модов.</summary>
     private readonly IItemBehavior[] _behaviors;
@@ -119,6 +122,7 @@ public sealed class GameServer : IDisposable
         _itemNames = [.. _items.All.Select(i => i.Name)];
         _recipes = content.Recipes;
         _events = new GameEvents(modLog);
+        _quests = new QuestTracker(content.Quests, _events);
         _behaviors = LoadMods(content, mods, extraMods, _events, modLog);
 
         if (savePath != null)
@@ -259,6 +263,14 @@ public sealed class GameServer : IDisposable
         if (_tick % AutosaveIntervalTicks == 0)
             Autosave();
 
+        // Задания «иметь предмет» — по инвентарю в конце тика: что бы его ни меняло (добыча, ремесло, клики, моды), оно уже учтено.
+        foreach (var session in _sessions)
+        {
+            if (session.IsJoined)
+                _quests.CheckObtain(session, _editor);
+        }
+        _events.Dispatch();
+
         // Изменения инвентаря за тик — одним сообщением, в конце: что бы ни меняло инвентарь в этом тике, оно уже учтено.
         foreach (var session in _sessions)
         {
@@ -278,7 +290,7 @@ public sealed class GameServer : IDisposable
             if (session.IsJoined)
             {
                 _save.SavePlayer(session.PlayerName, new SavedPlayer(session.PlayerPosition, session.Look, session.Mode,
-                    session.Inventory.SelectedSlot, session.Inventory.CopySlots()));
+                    session.Inventory.SelectedSlot, session.Inventory.CopySlots(), session.Quests));
             }
         }
         return World.SaveDirty();
@@ -441,7 +453,7 @@ public sealed class GameServer : IDisposable
         if (saved != null)
             RestoreInventory(inventory, saved);
 
-        session.Join(_nextPlayerId++, join.PlayerName, mode, inventory,
+        session.Join(_nextPlayerId++, join.PlayerName, mode, inventory, saved?.Quests ?? new QuestBook(),
             new PlayerChunkView(_viewDistance, _verticalDistance, BlockPos.Containing(start).Chunk));
         // До первого PlayerMove игрок стоит в начальной точке, иначе его действия сочлись бы «издалека».
         session.PlayerPosition = start;
@@ -451,6 +463,8 @@ public sealed class GameServer : IDisposable
         // Инвентарь уходит целиком, поэтому изменения от его заполнения отправлять не нужно.
         session.Connection.Send(new InventoryContents(inventory.CopySlots(), inventory.SelectedSlot));
         inventory.TakeChanges();
+        session.Connection.Send(new QuestBookContents([.. session.Quests.Completed],
+            [.. session.Quests.Progress.Select(entry => new QuestCount(entry.Key, entry.Value))]));
         Console.WriteLine($"[Server] {session.PlayerName} подключился (id {session.PlayerId}, режим {mode.ToName()})");
         _events.Raise(new PlayerJoined(_editor, session));
     }
@@ -531,6 +545,9 @@ public sealed class GameServer : IDisposable
     /// <summary>Инвентарь игрока на сервере. Для тестов: менять его можно только между тиками, из потока теста.</summary>
     internal Inventory PlayerInventory(int playerId) => _sessions.Single(s => s.IsJoined && s.PlayerId == playerId).Inventory;
 
+    /// <summary>Задания игрока на сервере. Для тестов: менять можно только между тиками, из потока теста.</summary>
+    internal QuestBook PlayerQuests(int playerId) => _sessions.Single(s => s.IsJoined && s.PlayerId == playerId).Quests;
+
     private static void SendTeleport(ClientSession session) =>
         session.Connection.Send(new PlayerTeleport(session.PlayerPosition, session.Movement.NextTeleport()));
 
@@ -580,7 +597,10 @@ public sealed class GameServer : IDisposable
         }
 
         if (times > 0)
+        {
+            _quests.Count(session, QuestGoalKind.Craft, goal => goal.Item == recipe.Result.Item, recipe.Result.Count * times, _editor);
             _events.Raise(new ItemCrafted(_editor, session, recipe, times));
+        }
     }
 
     /// <summary>
@@ -696,6 +716,8 @@ public sealed class GameServer : IDisposable
                 return false;
 
             server._events.Raise(new BlockBroken(this, player, pos, old));
+            if (player is ClientSession session)
+                server._quests.Count(session, QuestGoalKind.Break, goal => goal.Block == old, 1, this);
             return true;
         }
 
@@ -705,6 +727,8 @@ public sealed class GameServer : IDisposable
                 return false;
 
             server._events.Raise(new BlockPlaced(this, player, pos, block));
+            if (player is ClientSession session)
+                server._quests.Count(session, QuestGoalKind.Place, goal => goal.Block == block, 1, this);
             return true;
         }
 

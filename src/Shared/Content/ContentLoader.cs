@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Shared.Blocks;
 using Shared.Items;
+using Shared.Quests;
 
 namespace Shared.Content;
 
@@ -31,9 +32,10 @@ public sealed record ContentPack(string Name, string Directory, IReadOnlyCollect
 /// здесь нет (предмет-блок тогда рисуется кубиком).
 /// </param>
 /// <param name="Recipes">Рецепты (<c>type: "recipe"</c>); ссылки на предметы и станки уже проверены.</param>
+/// <param name="Quests">Задания (<c>type: "quest"</c>); цели и предшествующие задания проверены, циклов нет.</param>
 public sealed record ContentRegistries(BlockRegistry Blocks, ItemRegistry Items,
     ImmutableDictionary<string, BlockTextures> BlockTextures, ImmutableDictionary<string, string> ItemDisplayNames,
-    ImmutableDictionary<string, string> ItemIcons, RecipeRegistry Recipes);
+    ImmutableDictionary<string, string> ItemIcons, RecipeRegistry Recipes, QuestRegistry Quests);
 
 /// <summary>
 /// Текстуры граней блока — полные имена <c>пакет:имя</c>. В JSON можно писать коротко (<c>"stone"</c>): имя дополняется
@@ -49,7 +51,7 @@ public sealed class ContentLoadException : Exception
 }
 
 /// <summary>
-/// Загружает JSON-описания блоков, предметов и рецептов в реестры. Числовые ID назначаются по строковым именам
+/// Загружает JSON-описания блоков, предметов, рецептов и заданий в реестры. Числовые ID назначаются по строковым именам
 /// в ordinal-порядке, поэтому не зависят от порядка файлов в каталоге.
 /// </summary>
 /// <remarks>
@@ -148,6 +150,9 @@ public static partial class ContentLoader
         var blockNames = new HashSet<string>(StringComparer.Ordinal);
         var itemNames = new HashSet<string>(StringComparer.Ordinal);
         var recipeNames = new HashSet<string>(StringComparer.Ordinal);
+        var quests = new List<QuestJson>();
+        var questOverrides = new List<QuestJson>();
+        var questNames = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var file in orderedFiles.OrderBy(file => file.Path, StringComparer.Ordinal))
         {
@@ -228,14 +233,25 @@ public static partial class ContentLoader
                         IngredientsOf(root, file), station));
                     break;
 
+                case "quest":
+                    CheckProperties(root, file, "type", "name", "title", "description", "goal", "requires", "override");
+                    if (!isOverride && !questNames.Add(name))
+                        throw Error(file, $"задание '{name}' объявлено более одного раза.");
+                    (isOverride ? questOverrides : quests).Add(new QuestJson(file.Path, pack, name,
+                        RequiredString(root, "title", file), RequiredString(root, "description", file),
+                        root.TryGetProperty("goal", out var goal) ? GoalOf(goal, file) : throw Error(file, "нет обязательного поля 'goal'."),
+                        RequiresOf(root, file)));
+                    break;
+
                 default:
-                    throw Error(file, $"неизвестный type '{type}'; допустимы 'block', 'item' и 'recipe'.");
+                    throw Error(file, $"неизвестный type '{type}'; допустимы 'block', 'item', 'recipe' и 'quest'.");
             }
         }
 
-        ApplyOverrides(blocks, blockOverrides, "блок", block => block.Name, block => block.Pack, block => block.Path, packOrder, packDependencies);
-        ApplyOverrides(items, itemOverrides, "предмет", item => item.Name, item => item.Pack, item => item.Path, packOrder, packDependencies);
-        ApplyOverrides(recipes, recipeOverrides, "рецепт", recipe => recipe.Name, recipe => recipe.Pack, recipe => recipe.Path, packOrder, packDependencies);
+        ApplyOverrides(blocks, blockOverrides, ("блок", "блока"), block => block.Name, block => block.Pack, block => block.Path, packOrder, packDependencies);
+        ApplyOverrides(items, itemOverrides, ("предмет", "предмета"), item => item.Name, item => item.Pack, item => item.Path, packOrder, packDependencies);
+        ApplyOverrides(recipes, recipeOverrides, ("рецепт", "рецепта"), recipe => recipe.Name, recipe => recipe.Pack, recipe => recipe.Path, packOrder, packDependencies);
+        ApplyOverrides(quests, questOverrides, ("задание", "задания"), quest => quest.Name, quest => quest.Pack, quest => quest.Path, packOrder, packDependencies);
 
         var blockRegistry = new BlockRegistry();
         var textures = ImmutableDictionary.CreateBuilder<string, BlockTextures>(StringComparer.Ordinal);
@@ -274,7 +290,120 @@ public static partial class ContentLoader
         itemRegistry.Freeze();
         var recipeRegistry = new RecipeRegistry(recipes.Select(recipe => ResolveRecipe(recipe, blockRegistry, itemRegistry)));
         return new ContentRegistries(blockRegistry, itemRegistry, textures.ToImmutable(), displayNames.ToImmutable(), icons.ToImmutable(),
-            recipeRegistry);
+            recipeRegistry, ResolveQuests(quests, blockRegistry, itemRegistry));
+    }
+
+    /// <summary>
+    /// Проверяет задания, когда все блоки и предметы известны: цель ссылается на существующий предмет или блок,
+    /// предшествующие задания существуют, и цепочки не замыкаются в круг (иначе задания никогда не стали бы доступны).
+    /// </summary>
+    private static QuestRegistry ResolveQuests(List<QuestJson> quests, BlockRegistry blocks, ItemRegistry items)
+    {
+        var byName = quests.ToDictionary(quest => quest.Name, StringComparer.Ordinal);
+        var resolved = new List<Quest>(quests.Count);
+        foreach (var quest in quests)
+        {
+            var (kind, target, count) = quest.Goal;
+            var item = ItemId.Air;
+            var block = BlockId.Air;
+            if (kind is QuestGoalKind.Obtain or QuestGoalKind.Craft)
+            {
+                if (!items.TryGet(target, out var definition) || definition.Id.IsAir)
+                    throw QuestError(quest, $"в цели неизвестный предмет '{target}'.");
+                item = definition.Id;
+            }
+            else
+            {
+                if (!blocks.TryGet(target, out var definition) || definition.Id.IsAir)
+                    throw QuestError(quest, $"в цели неизвестный блок '{target}'.");
+                block = definition.Id;
+            }
+
+            foreach (var required in quest.Requires)
+            {
+                if (!byName.ContainsKey(required))
+                    throw QuestError(quest, $"в requires неизвестное задание '{required}'.");
+            }
+            resolved.Add(new Quest(quest.Name, quest.Title, quest.Description, new QuestGoal(kind, item, block, count), quest.Requires));
+        }
+
+        // Поиск в глубину: серый — на пути, чёрный — проверен. Встретили серый — круг.
+        var state = new Dictionary<string, bool>(StringComparer.Ordinal);
+        foreach (var quest in quests)
+            Visit(quest.Name, []);
+        return new QuestRegistry(resolved);
+
+        void Visit(string name, List<string> path)
+        {
+            if (state.TryGetValue(name, out var done))
+            {
+                if (!done)
+                    throw QuestError(byName[name], $"задания требуют друг друга по кругу: {string.Join(" → ", path.SkipWhile(n => n != name).Append(name))}.");
+                return;
+            }
+            state[name] = false;
+            path.Add(name);
+            foreach (var required in byName[name].Requires)
+                Visit(required, path);
+            path.RemoveAt(path.Count - 1);
+            state[name] = true;
+        }
+
+        static ContentLoadException QuestError(QuestJson quest, string message) =>
+            new($"Файл '{quest.Path}': задание '{quest.Name}': {message}");
+    }
+
+    /// <summary>Поле <c>goal</c> задания: <c>{"type": "obtain"|"craft", "item": …}</c> или <c>{"type": "break"|"place", "block": …}</c>, <c>count</c> по умолчанию 1.</summary>
+    private static (QuestGoalKind Kind, string Target, int Count) GoalOf(JsonElement value, ContentJsonFile file)
+    {
+        if (value.ValueKind != JsonValueKind.Object)
+            throw Error(file, "поле 'goal' должно быть объектом {\"type\", \"item\" или \"block\", \"count\"}.");
+        CheckNoDuplicates(value, file);
+        var kind = RequiredString(value, "type", file) switch
+        {
+            "obtain" => QuestGoalKind.Obtain,
+            "craft" => QuestGoalKind.Craft,
+            "break" => QuestGoalKind.Break,
+            "place" => QuestGoalKind.Place,
+            var other => throw Error(file, $"неизвестный goal.type '{other}'; допустимы obtain, craft, break и place."),
+        };
+        var targetField = kind is QuestGoalKind.Obtain or QuestGoalKind.Craft ? "item" : "block";
+        foreach (var field in value.EnumerateObject())
+        {
+            if (field.Name != "type" && field.Name != "count" && field.Name != targetField)
+                throw Error(file, $"неизвестное поле 'goal.{field.Name}'; у цели '{RequiredString(value, "type", file)}' допустимы type, {targetField} и count.");
+        }
+
+        var target = RequiredString(value, targetField, file);
+        if (!ContentNames.IsValid(target))
+            throw Error(file, $"goal.{targetField} '{target}' должен иметь вид 'namespace:name'.");
+        var count = value.TryGetProperty("count", out _) ? RequiredInt32(value, "count", file) : 1;
+        if (count < 1)
+            throw Error(file, $"goal.count должен быть положительным, получено {count}.");
+        return (kind, target, count);
+    }
+
+    /// <summary>Поле <c>requires</c>: массив имён заданий (без повторов и без себя); нет поля — пусто.</summary>
+    private static ImmutableArray<string> RequiresOf(JsonElement root, ContentJsonFile file)
+    {
+        if (!root.TryGetProperty("requires", out var value))
+            return [];
+        if (value.ValueKind != JsonValueKind.Array)
+            throw Error(file, "поле 'requires' должно быть массивом имён заданий.");
+        var names = new List<string>();
+        foreach (var element in value.EnumerateArray())
+        {
+            var name = element.ValueKind == JsonValueKind.String ? element.GetString() : null;
+            if (name is null || !ContentNames.IsValid(name))
+                throw Error(file, "в 'requires' — только имена заданий вида 'namespace:name'.");
+            if (names.Contains(name))
+                throw Error(file, $"задание '{name}' указано в 'requires' дважды.");
+            names.Add(name);
+        }
+        var self = RequiredString(root, "name", file);
+        if (names.Contains(self))
+            throw Error(file, $"задание '{self}' требует само себя.");
+        return [.. names];
     }
 
     /// <summary>
@@ -345,7 +474,8 @@ public static partial class ContentLoader
     /// Заменяет определения из <paramref name="definitions"/> последними по порядку пакетов заменами. Заменять можно только
     /// существующее определение того же типа; несколько замен одного имени должны идти по цепочке зависимостей.
     /// </summary>
-    private static void ApplyOverrides<T>(List<T> definitions, List<T> overrides, string kind, Func<T, string> nameOf,
+    /// <param name="kind">Вид определения для сообщений: именительный и родительный падеж.</param>
+    private static void ApplyOverrides<T>(List<T> definitions, List<T> overrides, (string Name, string Genitive) kind, Func<T, string> nameOf,
         Func<T, string> packOf, Func<T, string> pathOf, Dictionary<string, int> packOrder,
         Dictionary<string, IReadOnlyCollection<string>> packDependencies)
     {
@@ -355,16 +485,16 @@ public static partial class ContentLoader
                 .ThenBy(packOf, StringComparer.Ordinal).ToArray();
             var index = definitions.FindIndex(d => nameOf(d) == group.Key);
             if (index < 0)
-                throw new ContentLoadException($"Файл '{pathOf(chain[0])}': {kind} '{group.Key}' заменяется, но такого {kind}а нет.");
+                throw new ContentLoadException($"Файл '{pathOf(chain[0])}': {kind.Name} '{group.Key}' заменяется, но такого {kind.Genitive} нет.");
 
             for (var i = 1; i < chain.Length; i++)
             {
                 var (earlier, later) = (packOf(chain[i - 1]), packOf(chain[i]));
                 if (earlier == later)
-                    throw new ContentLoadException($"Файл '{pathOf(chain[i])}': пакет '{later}' заменяет {kind} '{group.Key}' дважды.");
+                    throw new ContentLoadException($"Файл '{pathOf(chain[i])}': пакет '{later}' заменяет {kind.Name} '{group.Key}' дважды.");
                 if (!packDependencies.GetValueOrDefault(later, []).Contains(earlier))
                     throw new ContentLoadException(
-                        $"{char.ToUpper(kind[0])}{kind[1..]} '{group.Key}' заменяют пакеты '{earlier}' и '{later}', не зависящие друг от друга: " +
+                        $"{char.ToUpper(kind.Name[0])}{kind.Name[1..]} '{group.Key}' заменяют пакеты '{earlier}' и '{later}', не зависящие друг от друга: " +
                         "неясно, чья замена главнее. Пусть один мод зависит от другого.");
             }
 
@@ -573,4 +703,6 @@ public static partial class ContentLoader
     private sealed record RecipeJson(string Path, string Pack, string Name, StackJson Result, ImmutableArray<StackJson> Ingredients,
         string? Station);
     private sealed record StackJson(string Item, int Count);
+    private sealed record QuestJson(string Path, string Pack, string Name, string Title, string Description,
+        (QuestGoalKind Kind, string Target, int Count) Goal, ImmutableArray<string> Requires);
 }

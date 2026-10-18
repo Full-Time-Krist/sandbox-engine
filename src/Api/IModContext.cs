@@ -1,5 +1,6 @@
 using Shared.Blocks;
 using Shared.Items;
+using Shared.Quests;
 
 namespace Api;
 
@@ -17,6 +18,9 @@ public interface IModContext
 
     /// <summary>Рецепты всего контента (с заменами модов).</summary>
     RecipeRegistry Recipes { get; }
+
+    /// <summary>Задания всего контента (с заменами модов), в порядке показа в журнале.</summary>
+    QuestRegistry Quests { get; }
 
     /// <summary>
     /// Регистрирует поведение предмета под именем <paramref name="id"/> вида <c>&lt;id мода&gt;:имя</c>.

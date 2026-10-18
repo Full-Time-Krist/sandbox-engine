@@ -90,7 +90,10 @@ keycode() {
     case ${1,,} in
         esc|escape) echo 1 ;; [1-9]) echo $(($1 + 1)) ;; 0) echo 11 ;;
         q) echo 16 ;; w) echo 17 ;; e) echo 18 ;; r) echo 19 ;; t) echo 20 ;;
+        y) echo 21 ;; u) echo 22 ;; i) echo 23 ;; o) echo 24 ;; p) echo 25 ;;
         a) echo 30 ;; s) echo 31 ;; d) echo 32 ;; f) echo 33 ;; g) echo 34 ;;
+        h) echo 35 ;; j) echo 36 ;; k) echo 37 ;; l) echo 38 ;;
+        z) echo 44 ;; x) echo 45 ;; c) echo 46 ;; v) echo 47 ;; b) echo 48 ;; n) echo 49 ;; m) echo 50 ;;
         ctrl|lctrl) echo 29 ;; shift|lshift) echo 42 ;; rshift) echo 54 ;; alt) echo 56 ;;
         space) echo 57 ;; enter) echo 28 ;; tab) echo 15 ;; f3) echo 61 ;;
         [0-9]*) echo "$1" ;;

@@ -1,0 +1,14 @@
+{
+  "type": "quest",
+  "name": "base:copper_ore",
+  "title": "Медная руда",
+  "description": "Найдите в камне руду с рыжими пятнами и добудьте 3.",
+  "goal": {
+    "type": "obtain",
+    "item": "base:copper_ore",
+    "count": 3
+  },
+  "requires": [
+    "base:stone_pickaxe"
+  ]
+}

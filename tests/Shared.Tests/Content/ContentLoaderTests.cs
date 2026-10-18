@@ -1,6 +1,7 @@
 using Shared.Content;
 using Shared.Blocks;
 using Shared.Items;
+using Shared.Quests;
 
 namespace Shared.Tests.Content;
 
@@ -456,6 +457,92 @@ public class ContentLoaderTests
             "name":"base:planks","override":true,"result":{"item":"mod_a:missing"},"ingredients":[{"item":"base:log"}]
             """)], [Pack("base"), Pack("mod_a", "base")]));
         Assert.Contains("mod_a/planks.json", exception.Message);
+    }
+
+    // --- Задания ---
+
+    private static ContentJsonFile QuestFile(string name, string goal, string? requires = null, string pack = "base") =>
+        File($"{pack}/quests/{name}.json", $$"""
+            {"type":"quest","name":"{{pack}}:{{name}}","title":"T {{name}}","description":"D {{name}}","goal":{{goal}}{{(requires is null ? "" : $",\"requires\":{requires}")}}}
+            """);
+
+    [Fact]
+    public void Load_Quests_ResolveGoals_OrderedByChainDepthThenName()
+    {
+        var content = ContentLoader.Load([BaseLog, BasePlanks, BaseTable, BaseStone,
+            QuestFile("z_start", """{"type":"obtain","item":"base:log","count":3}"""),
+            QuestFile("a_second", """{"type":"craft","item":"base:planks","count":4}""", """["base:z_start"]"""),
+            QuestFile("b_place", """{"type":"place","block":"base:table"}""", """["base:a_second"]"""),
+            QuestFile("a_break", """{"type":"break","block":"base:stone","count":2}""", """["base:z_start","base:b_place"]"""),
+            QuestFile("m_also_start", """{"type":"obtain","item":"base:planks"}""")]);
+
+        // Глубина: z_start и m_also_start — 0, a_second — 1, b_place — 2, a_break — 3.
+        Assert.Equal(["base:m_also_start", "base:z_start", "base:a_second", "base:b_place", "base:a_break"],
+            content.Quests.All.Select(q => q.Name));
+        var start = content.Quests.Get("base:z_start");
+        Assert.Equal("T z_start", start.Title);
+        Assert.Equal("D z_start", start.Description);
+        Assert.Equal(new QuestGoal(QuestGoalKind.Obtain, content.Items.Get("base:log").Id, BlockId.Air, 3), start.Goal);
+        Assert.Empty(start.Requires);
+        Assert.Equal(new QuestGoal(QuestGoalKind.Place, ItemId.Air, content.Blocks.Get("base:table").Id, 1), content.Quests.Get("base:b_place").Goal);
+        Assert.Equal(["base:z_start", "base:b_place"], content.Quests.Get("base:a_break").Requires);
+        Assert.Equal(QuestGoalKind.Break, content.Quests.Get("base:a_break").Goal.Kind);
+        Assert.Equal(2, content.Quests.Get("base:a_break").Goal.Count);
+    }
+
+    [Theory]
+    [InlineData("""{"type":"quest","name":"base:q","description":"d","goal":{"type":"obtain","item":"base:log"}}""", "'title'")]
+    [InlineData("""{"type":"quest","name":"base:q","title":"t","goal":{"type":"obtain","item":"base:log"}}""", "'description'")]
+    [InlineData("""{"type":"quest","name":"base:q","title":"t","description":"d"}""", "'goal'")]
+    [InlineData("""{"type":"quest","name":"base:q","title":"t","description":"d","goal":{"type":"mine","item":"base:log"}}""", "goal.type 'mine'")]
+    [InlineData("""{"type":"quest","name":"base:q","title":"t","description":"d","goal":{"type":"obtain","block":"base:table"}}""", "goal.block")]
+    [InlineData("""{"type":"quest","name":"base:q","title":"t","description":"d","goal":{"type":"break","item":"base:log"}}""", "goal.item")]
+    [InlineData("""{"type":"quest","name":"base:q","title":"t","description":"d","goal":{"type":"obtain","item":"base:missing"}}""", "неизвестный предмет")]
+    [InlineData("""{"type":"quest","name":"base:q","title":"t","description":"d","goal":{"type":"place","block":"base:log"}}""", "неизвестный блок")]
+    [InlineData("""{"type":"quest","name":"base:q","title":"t","description":"d","goal":{"type":"obtain","item":"base:log","count":0}}""", "goal.count")]
+    [InlineData("""{"type":"quest","name":"base:q","title":"t","description":"d","goal":{"type":"obtain","item":"base:log"},"requires":["base:nope"]}""", "'base:nope'")]
+    [InlineData("""{"type":"quest","name":"base:q","title":"t","description":"d","goal":{"type":"obtain","item":"base:log"},"requires":["base:q"]}""", "само себя")]
+    [InlineData("""{"type":"quest","name":"base:q","title":"t","description":"d","goal":{"type":"obtain","item":"base:log"},"requires":"base:x"}""", "'requires'")]
+    [InlineData("""{"type":"quest","name":"base:q","title":"t","description":"d","goal":{"type":"obtain","item":"base:log"},"reward":1}""", "'reward'")]
+    public void Load_InvalidQuest_ThrowsUsefulError(string json, string expected)
+    {
+        var exception = Assert.Throws<ContentLoadException>(() =>
+            ContentLoader.Load([BaseLog, BaseTable, File("base/quests/q.json", json)]));
+
+        Assert.Contains("base/quests/q.json", exception.Message);
+        Assert.Contains(expected, exception.Message);
+    }
+
+    [Fact]
+    public void Load_QuestCycle_Throws_NamingTheCircle()
+    {
+        var exception = Assert.Throws<ContentLoadException>(() => ContentLoader.Load([BaseLog,
+            QuestFile("a", """{"type":"obtain","item":"base:log"}""", """["base:c"]"""),
+            QuestFile("b", """{"type":"obtain","item":"base:log"}""", """["base:a"]"""),
+            QuestFile("c", """{"type":"obtain","item":"base:log"}""", """["base:b"]"""),
+            QuestFile("free", """{"type":"obtain","item":"base:log"}""")]));
+
+        Assert.Contains("по кругу", exception.Message);
+        Assert.Contains("base:a → base:c → base:b → base:a", exception.Message);
+    }
+
+    [Fact]
+    public void Override_ReplacesQuest_ModQuestMayRequireVanillaOne()
+    {
+        var content = ContentLoader.Load([BaseLog, BasePlanks,
+            QuestFile("wood", """{"type":"obtain","item":"base:log","count":3}"""),
+            File("mod_a/wood.json", """{"type":"quest","name":"base:wood","override":true,"title":"Новое","description":"d","goal":{"type":"obtain","item":"base:log","count":10}}"""),
+            QuestFile("more", """{"type":"craft","item":"base:planks"}""", """["base:wood"]""", pack: "mod_a")],
+            [Pack("base"), Pack("mod_a", "base")]);
+
+        Assert.Equal("Новое", content.Quests.Get("base:wood").Title);
+        Assert.Equal(10, content.Quests.Get("base:wood").Goal.Count);
+        Assert.Equal(["base:wood"], content.Quests.Get("mod_a:more").Requires);
+
+        var missing = Assert.Throws<ContentLoadException>(() => ContentLoader.Load([BaseLog,
+            File("mod_a/x.json", """{"type":"quest","name":"base:wood","override":true,"title":"t","description":"d","goal":{"type":"obtain","item":"base:log"}}""")],
+            [Pack("base"), Pack("mod_a", "base")]));
+        Assert.Contains("такого задания нет", missing.Message);
     }
 
     private sealed class TempContentDirectory : IDisposable

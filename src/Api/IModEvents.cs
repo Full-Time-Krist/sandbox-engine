@@ -1,5 +1,6 @@
 using Shared.Blocks;
 using Shared.Items;
+using Shared.Quests;
 using Shared.Voxels;
 
 namespace Api;
@@ -25,6 +26,9 @@ public interface IModEvents
 
     /// <summary>Игрок сделал предмет по рецепту: ингредиенты уже потрачены, результат в инвентаре.</summary>
     void OnItemCrafted(Action<ItemCrafted> handler);
+
+    /// <summary>Игрок выполнил задание (только в выживании): клиенту уже ушло сообщение о нём.</summary>
+    void OnQuestCompleted(Action<QuestCompleted> handler);
 }
 
 /// <param name="Block">Блок, который был на месте до ломания.</param>
@@ -40,3 +44,5 @@ public readonly record struct PlayerJoined(IWorld World, IPlayer Player);
 /// <c>Recipe.Result.Count × Times</c> штук.
 /// </param>
 public readonly record struct ItemCrafted(IWorld World, IPlayer Player, Recipe Recipe, int Times);
+
+public readonly record struct QuestCompleted(IWorld World, IPlayer Player, Quest Quest);

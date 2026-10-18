@@ -5,6 +5,7 @@ using Shared.Blocks;
 using Shared.Items;
 using Shared.Networking;
 using Shared.Protocol;
+using Shared.Quests;
 using Shared.Voxels;
 
 namespace Server;
@@ -37,8 +38,12 @@ internal sealed class ClientSession(IConnection<ServerMessage, ClientMessage> co
     /// <summary>Какие чанки нужны игроку и какие уже у его клиента. Появляется при подключении.</summary>
     public PlayerChunkView View { get; private set; } = null!;
 
-    public void Join(int playerId, string playerName, GameMode mode, Inventory inventory, PlayerChunkView view)
+    /// <summary>Задания игрока (выполненные и набранное). Появляются при подключении; ведёт их <see cref="Quests.QuestTracker"/>.</summary>
+    public QuestBook Quests { get; private set; } = null!;
+
+    public void Join(int playerId, string playerName, GameMode mode, Inventory inventory, QuestBook quests, PlayerChunkView view)
     {
+        Quests = quests;
         View = view;
         Mode = mode;
         Movement = new MovementCheck(mode);

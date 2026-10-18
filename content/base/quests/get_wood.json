@@ -1,0 +1,11 @@
+{
+  "type": "quest",
+  "name": "base:get_wood",
+  "title": "Лесоруб",
+  "description": "Срубите три бревна: держите ЛКМ на стволе дерева.",
+  "goal": {
+    "type": "obtain",
+    "item": "base:log",
+    "count": 3
+  }
+}

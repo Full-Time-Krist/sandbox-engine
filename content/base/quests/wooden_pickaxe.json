@@ -1,0 +1,13 @@
+{
+  "type": "quest",
+  "name": "base:wooden_pickaxe",
+  "title": "Первая кирка",
+  "description": "У верстака сделайте палки и деревянную кирку.",
+  "goal": {
+    "type": "craft",
+    "item": "base:wooden_pickaxe"
+  },
+  "requires": [
+    "base:crafting_table"
+  ]
+}

@@ -29,6 +29,24 @@ internal static class HudLayout
     /// <summary>Перекрестие: две черты длиной 9 и толщиной 1.</summary>
     public const int CrosshairLength = 9;
 
+    /// <summary>Строка подсказки заданий в углу: иконка 16 и по пикселю сверху и снизу.</summary>
+    public const int TrackerRow = 18;
+
+    /// <summary>Сообщение о выполненном задании: две строки текста рядом с иконкой.</summary>
+    public const int ToastHeight = 24;
+
+    /// <summary>
+    /// Сообщение о выполненном задании: в правом верхнем углу, с отступом хотбара от краёв (слева — подсказка заданий,
+    /// по центру сообщение наезжало бы на неё на маленьком экране). Ширина <paramref name="width"/> уже в пикселях экрана
+    /// (она зависит от текста), но не шире экрана.
+    /// </summary>
+    public static PixelRect Toast(int screenWidth, int width, int scale)
+    {
+        var margin = HotbarMargin * scale;
+        width = Math.Min(width, screenWidth - 2 * margin);
+        return new PixelRect(screenWidth - width - margin, margin, width, ToastHeight * scale);
+    }
+
     /// <summary>Хотбар по центру внизу экрана.</summary>
     public static PixelRect Hotbar(int screenWidth, int screenHeight, int scale)
     {

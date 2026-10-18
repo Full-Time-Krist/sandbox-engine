@@ -1,0 +1,14 @@
+{
+  "type": "quest",
+  "name": "example_mod:amethyst",
+  "title": "Аметисты",
+  "description": "Палочкой (ЛКМ по камню) наколдуйте руду и добудьте 4 аметиста.",
+  "goal": {
+    "type": "obtain",
+    "item": "example_mod:amethyst_ore",
+    "count": 4
+  },
+  "requires": [
+    "base:wooden_pickaxe"
+  ]
+}

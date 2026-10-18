@@ -1,0 +1,13 @@
+{
+  "type": "quest",
+  "name": "base:stone_pickaxe",
+  "title": "Каменная кирка",
+  "description": "У верстака сделайте кирку из камня: она добывает медь.",
+  "goal": {
+    "type": "craft",
+    "item": "base:stone_pickaxe"
+  },
+  "requires": [
+    "base:stone"
+  ]
+}

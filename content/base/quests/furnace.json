@@ -1,0 +1,13 @@
+{
+  "type": "quest",
+  "name": "base:furnace",
+  "title": "Печь",
+  "description": "Сделайте у верстака печь из 8 камня и поставьте её.",
+  "goal": {
+    "type": "place",
+    "block": "base:furnace"
+  },
+  "requires": [
+    "base:stone"
+  ]
+}

@@ -5,6 +5,7 @@ using Shared;
 using Shared.Blocks;
 using Shared.Content;
 using Shared.Items;
+using Shared.Quests;
 using Shared.Voxels;
 
 namespace Server.Tests.Storage;
@@ -147,9 +148,22 @@ public sealed class WorldSaveTests : IDisposable
         return [.. slots];
     }
 
+    /// <summary>Книга заданий: выполненные и набранное у невыполненных.</summary>
+    private static QuestBook Quests(string[]? completed = null, params (string Quest, int Count)[] progress)
+    {
+        var book = new QuestBook();
+        foreach (var name in completed ?? [])
+            book.Complete(name);
+        foreach (var (name, count) in progress)
+            book.SetProgress(name, count);
+        return book;
+    }
+
     private static void AssertPlayer(SavedPlayer expected, SavedPlayer? actual)
     {
         Assert.NotNull(actual);
+        Assert.Equal(expected.Quests.Completed.Order(), actual.Quests.Completed.Order());
+        Assert.Equal(expected.Quests.Progress.OrderBy(e => e.Key), actual.Quests.Progress.OrderBy(e => e.Key));
         Assert.Equal(expected.Position, actual.Position);
         Assert.Equal(expected.Look, actual.Look);
         Assert.Equal(expected.Mode, actual.Mode);
@@ -161,14 +175,16 @@ public sealed class WorldSaveTests : IDisposable
         new((items ?? ItemsFor(_registry)).Get(name).Id, count);
 
     [Fact]
-    public void Player_SurvivesReopen_WithLookModeSlotAndInventory()
+    public void Player_SurvivesReopen_WithLookModeSlotInventoryAndQuests()
     {
         var player = new SavedPlayer(new Vector3d(1_000_000.25, 70.5, -3.75), new LookAngles(2.5f, -0.75f), GameMode.Creative, 7,
-            Slots((0, Stack("base:stone", 64)), (35, Stack("base:sand", 1)), (Inventory.CursorSlot, Stack("base:dirt", 5))));
+            Slots((0, Stack("base:stone", 64)), (35, Stack("base:sand", 1)), (Inventory.CursorSlot, Stack("base:dirt", 5))),
+            // Задание мода, которого может не быть, хранится по имени, как и ванильное.
+            Quests(["base:get_wood", "other_mod:quest"], ("base:planks", 3)));
         using (var save = Open())
         {
             Assert.Null(save.LoadPlayer("Player"));
-            save.SavePlayer("Player", player with { Position = new Vector3d(1, 2, 3), Slots = Slots() });
+            save.SavePlayer("Player", player with { Position = new Vector3d(1, 2, 3), Slots = Slots(), Quests = Quests() });
             save.SavePlayer("Player", player);
             AssertPlayer(player, save.LoadPlayer("Player")); // из очереди записи
         }
@@ -205,7 +221,7 @@ public sealed class WorldSaveTests : IDisposable
         {
             save.SaveChunk(MixedChunk(position, oldBlocks, names));
             save.SavePlayer("Player", new SavedPlayer(default, default, GameMode.Survival, 0,
-                Slots([.. names.Select((name, slot) => (slot, Stack(name, slot + 1, oldItems)))])));
+                Slots([.. names.Select((name, slot) => (slot, Stack(name, slot + 1, oldItems)))]), Quests()));
         }
 
         using var reopened = Open(content.Blocks, items: content.Items);
@@ -248,7 +264,7 @@ public sealed class WorldSaveTests : IDisposable
         using (var save = Open(oldBlocks, items: oldItems))
         {
             save.SavePlayer("Player", new SavedPlayer(default, default, GameMode.Survival, 0, Slots(
-                (0, Stack("base:stone", 10, oldItems)), (1, Stack("base:dirt", 20, oldItems)), (2, Stack("base:sand", 30, oldItems)))));
+                (0, Stack("base:stone", 10, oldItems)), (1, Stack("base:dirt", 20, oldItems)), (2, Stack("base:sand", 30, oldItems))), Quests()));
         }
 
         using var reopened = Open(newBlocks, items: newItems);
@@ -286,16 +302,75 @@ public sealed class WorldSaveTests : IDisposable
             Assert.Equal(Info, save.Info); // режима в версии 1 нет — выживание
             Assert.True(chunk.Blocks.SequenceEqual(Load(save, chunk.Position).Blocks));
             // Новых данных у игрока нет: взгляд вдаль, режим мира, первый слот, пустой инвентарь.
-            AssertPlayer(new SavedPlayer(position, default, null, 0, Slots()), save.LoadPlayer("Player"));
+            AssertPlayer(new SavedPlayer(position, default, null, 0, Slots(), Quests()), save.LoadPlayer("Player"));
 
             save.SavePlayer("Player", new SavedPlayer(position, new LookAngles(1, 0.5f), GameMode.Creative, 2,
-                Slots((4, Stack("base:sand", 9)))));
+                Slots((4, Stack("base:sand", 9))), Quests()));
         }
-        Assert.Equal(2L, Execute("SELECT value FROM meta WHERE key = 'format_version'"));
+        Assert.Equal(3L, Execute("SELECT value FROM meta WHERE key = 'format_version'"));
 
         using var reopened = Open();
         Assert.Null(reopened.UpgradedFrom);
-        AssertPlayer(new SavedPlayer(position, new LookAngles(1, 0.5f), GameMode.Creative, 2, Slots((4, Stack("base:sand", 9)))),
+        AssertPlayer(new SavedPlayer(position, new LookAngles(1, 0.5f), GameMode.Creative, 2, Slots((4, Stack("base:sand", 9))), Quests()),
+            reopened.LoadPlayer("Player"));
+    }
+
+    [Fact]
+    public void Version2Save_IsUpgraded_PlayerKeepsInventory_QuestsStartEmpty()
+    {
+        // Схема версии 2 (этапы 3–6.4): игрок без столбца заданий.
+        Execute("""
+            PRAGMA journal_mode = WAL;
+            CREATE TABLE meta (key TEXT PRIMARY KEY, value);
+            CREATE TABLE block_names (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE);
+            CREATE TABLE item_names (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE);
+            CREATE TABLE chunks (
+                x INTEGER NOT NULL, y INTEGER NOT NULL, z INTEGER NOT NULL, data BLOB NOT NULL,
+                PRIMARY KEY (x, y, z)) WITHOUT ROWID;
+            CREATE TABLE players (name TEXT PRIMARY KEY, x REAL NOT NULL, y REAL NOT NULL, z REAL NOT NULL,
+                yaw REAL NOT NULL DEFAULT 0, pitch REAL NOT NULL DEFAULT 0, mode TEXT, selected_slot INTEGER NOT NULL DEFAULT 0,
+                inventory BLOB);
+            INSERT INTO meta VALUES ('format_version', 2), ('seed', 42), ('spawn_x', 0.5), ('spawn_y', 80.0), ('spawn_z', -3.5);
+            INSERT INTO block_names VALUES (0, 'base:air'), (1, 'base:stone');
+            INSERT INTO item_names VALUES (0, 'base:air'), (1, 'base:stone');
+            -- Инвентарь: версия 1, один слот — слот 4, предмет 1 (камень), 7 штук.
+            INSERT INTO players VALUES ('Player', 1.5, 64.0, 2.5, 0.5, 0.25, 'creative', 4, x'0101040107');
+            """);
+
+        var position = new Vector3d(1.5, 64, 2.5);
+        var expected = new SavedPlayer(position, new LookAngles(0.5f, 0.25f), GameMode.Creative, 4, Slots((4, Stack("base:stone", 7))), Quests());
+        using (var save = Open())
+        {
+            Assert.Equal(2, save.UpgradedFrom);
+            AssertPlayer(expected, save.LoadPlayer("Player"));
+            save.SavePlayer("Player", expected with { Quests = Quests(["base:get_wood"]) });
+        }
+        Assert.Equal(3L, Execute("SELECT value FROM meta WHERE key = 'format_version'"));
+
+        using var reopened = Open();
+        Assert.Null(reopened.UpgradedFrom);
+        AssertPlayer(expected with { Quests = Quests(["base:get_wood"]) }, reopened.LoadPlayer("Player"));
+    }
+
+    [Theory]
+    [InlineData("not json")]
+    [InlineData("""{"version":2,"completed":[],"progress":{}}""")]
+    [InlineData("""{"version":1,"completed":["no namespace"],"progress":{}}""")]
+    [InlineData("""{"version":1,"completed":[],"progress":{"base:a":-1}}""")]
+    [InlineData("""{"version":1,"completed":[],"progress":{"base:a":"many"}}""")]
+    [InlineData("""{"version":1,"completed":[42],"progress":{}}""")]
+    [InlineData("""{"version":1,"progress":{}}""")]
+    public void CorruptQuests_StartEmpty_RestOfPlayerKept(string quests)
+    {
+        var position = new Vector3d(1, 2, 3);
+        using (var save = Open())
+            save.SavePlayer("Player", new SavedPlayer(position, default, GameMode.Creative, 3, Slots((0, Stack("base:stone", 5))),
+                Quests(["base:get_wood"], ("base:planks", 2))));
+        Overwrite("UPDATE players SET quests = $quests", ("$quests", quests));
+
+        using var reopened = Open();
+
+        AssertPlayer(new SavedPlayer(position, default, GameMode.Creative, 3, Slots((0, Stack("base:stone", 5))), Quests()),
             reopened.LoadPlayer("Player"));
     }
 
@@ -304,7 +379,7 @@ public sealed class WorldSaveTests : IDisposable
     {
         var position = new Vector3d(1, 2, 3);
         using (var save = Open())
-            save.SavePlayer("Player", new SavedPlayer(position, default, GameMode.Creative, 3, Slots((0, Stack("base:stone", 5)))));
+            save.SavePlayer("Player", new SavedPlayer(position, default, GameMode.Creative, 3, Slots((0, Stack("base:stone", 5))), Quests()));
         Overwrite("UPDATE players SET inventory = x'01FF', mode = 'flying', selected_slot = 99, yaw = 1e30, pitch = 5");
 
         using var reopened = Open();
@@ -342,12 +417,14 @@ public sealed class WorldSaveTests : IDisposable
     }
 
     /// <summary>Портит базу напрямую, в обход WorldSave.</summary>
-    private void Overwrite(string sql)
+    private void Overwrite(string sql, params (string Name, object Value)[] parameters)
     {
         using var connection = new SqliteConnection($"Data Source={_directory.SaveFile};Pooling=False");
         connection.Open();
         using var command = connection.CreateCommand();
         command.CommandText = sql;
+        foreach (var (name, value) in parameters)
+            command.Parameters.AddWithValue(name, value);
         Assert.True(command.ExecuteNonQuery() > 0);
     }
 

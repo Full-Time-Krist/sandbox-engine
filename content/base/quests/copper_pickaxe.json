@@ -1,0 +1,13 @@
+{
+  "type": "quest",
+  "name": "base:copper_pickaxe",
+  "title": "Медная кирка",
+  "description": "Сделайте у верстака медную кирку.",
+  "goal": {
+    "type": "craft",
+    "item": "base:copper_pickaxe"
+  },
+  "requires": [
+    "base:copper_ingot"
+  ]
+}

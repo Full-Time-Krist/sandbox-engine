@@ -67,3 +67,18 @@ public sealed record PlayerTeleport(Vector3d Position, int TeleportId) : ServerM
 
 /// <summary>Блок в мире изменился. Клиент меняет свою копию и перестраивает меши.</summary>
 public sealed record BlockChanged(BlockPos Position, BlockId Block) : ServerMessage;
+
+/// <summary>
+/// Задания игрока целиком: приходит при входе сразу за <see cref="InventoryContents"/>, дальше — только <see cref="QuestChanged"/>.
+/// Задания — по именам (<see cref="Quests.Quest.Name"/>): клиент грузит тот же контент и знает их определения.
+/// </summary>
+/// <param name="Completed">Выполненные задания, в том числе из модов, которых сейчас нет.</param>
+/// <param name="Progress">Набранное у невыполненных считаемых заданий.</param>
+public sealed record QuestBookContents(ImmutableArray<string> Completed, ImmutableArray<QuestCount> Progress) : ServerMessage;
+
+/// <summary>Задание продвинулось или выполнено. Выполненное клиент показывает всплывающим сообщением.</summary>
+/// <param name="Progress">Набранное у считаемого задания; у выполненного не важно.</param>
+public sealed record QuestChanged(string Quest, int Progress, bool Completed) : ServerMessage;
+
+/// <summary>Набранное у задания: для <see cref="QuestBookContents"/>.</summary>
+public readonly record struct QuestCount(string Quest, int Count);

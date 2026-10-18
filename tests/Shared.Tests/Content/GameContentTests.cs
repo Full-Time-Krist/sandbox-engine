@@ -190,6 +190,42 @@ public class GameContentTests
         }
     }
 
+    /// <summary>
+    /// Ванильная цепочка заданий ведёт по лестнице: начинается с брёвен, каждое задание достижимо, последнее — медная кирка;
+    /// цели выполнимы — предмет для «сделать» имеет рецепт, блок для «поставить» — предмет.
+    /// </summary>
+    [Fact]
+    public void VanillaQuests_ChainFromWoodToCopperPickaxe()
+    {
+        var quests = _content.Quests.All;
+        Assert.Equal("base:get_wood", quests[0].Name);
+        Assert.Equal("base:copper_pickaxe", quests[^1].Name);
+        Assert.Equal([quests[0]], quests.Where(q => q.Requires.IsEmpty));
+
+        // Выполняем по порядку журнала: каждое задание к своей очереди доступно.
+        var book = new Shared.Quests.QuestBook();
+        foreach (var quest in quests)
+        {
+            Assert.True(book.IsAvailable(quest), quest.Name);
+            book.Complete(quest.Name);
+        }
+
+        foreach (var quest in quests)
+        {
+            Assert.False(string.IsNullOrWhiteSpace(quest.Title));
+            Assert.False(string.IsNullOrWhiteSpace(quest.Description));
+            switch (quest.Goal.Kind)
+            {
+                case Shared.Quests.QuestGoalKind.Craft:
+                    Assert.Contains(_content.Recipes.All, r => r.Result.Item == quest.Goal.Item);
+                    break;
+                case Shared.Quests.QuestGoalKind.Place:
+                    Assert.False(_content.Items.ForBlock(quest.Goal.Block).IsAir, quest.Name);
+                    break;
+            }
+        }
+    }
+
     private static BlockTextures Uniform(string name) => new("base:" + name, "base:" + name, "base:" + name);
 
     /// <summary>Названия ванильных предметов переехали из кода (ItemNames) в поле displayName.</summary>

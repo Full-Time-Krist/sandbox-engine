@@ -1,0 +1,13 @@
+{
+  "type": "quest",
+  "name": "base:crafting_table",
+  "title": "Верстак",
+  "description": "Сделайте верстак из четырёх досок и поставьте его (ПКМ).",
+  "goal": {
+    "type": "place",
+    "block": "base:crafting_table"
+  },
+  "requires": [
+    "base:planks"
+  ]
+}

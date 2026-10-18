@@ -12,6 +12,7 @@ using Shared.Items;
 using Shared.Modding;
 using Shared.Networking;
 using Shared.Protocol;
+using Shared.Quests;
 using Shared.Voxels;
 using Silk.NET.Input;
 using Silk.NET.Maths;
@@ -69,6 +70,13 @@ internal sealed class ClientApp(
     private Hud _hud = null!;
     private InventoryScreen _inventoryScreen = null!;
     private bool _inventoryOpen;
+    private JournalScreen _journal = null!;
+    private bool _journalOpen;
+
+    private QuestRegistry _questRegistry = null!;
+
+    /// <summary>Копия заданий игрока для журнала и подсказок. Авторитетная — на сервере, он присылает изменения.</summary>
+    private QuestBook _quests = new();
     private TextureArray _blockTextures = null!;
     private ChunkRenderer _chunkRenderer = null!;
 
@@ -105,6 +113,7 @@ internal sealed class ClientApp(
         var content = GameContent.Load(mods);
         _registry = content.Blocks;
         _items = content.Items;
+        _questRegistry = content.Quests;
         _inventory = new Inventory(_items);
         UpdateStatusText();
 
@@ -124,7 +133,9 @@ internal sealed class ClientApp(
         _crackShader.SetUniform("u_Textures", 0);
         _cracks = new CrackRenderer(Gl, _crackShader, crackLayer);
         _hud = new Hud(Gl, Path.Combine(AppContext.BaseDirectory, "Assets", "Fonts", "ui.ttf"), Window.FramebufferSize,
-            _blockTextures, itemVisuals, _items, names);
+            _blockTextures, itemVisuals, _items, names, content.Quests);
+        _journal = new JournalScreen(Gl, Path.Combine(AppContext.BaseDirectory, "Assets", "Fonts", "ui.ttf"), Window.FramebufferSize,
+            _blockTextures, itemVisuals, _items, content.Quests);
         _inventoryScreen = new InventoryScreen(Gl, Path.Combine(AppContext.BaseDirectory, "Assets", "Fonts", "ui.ttf"),
             Window.FramebufferSize, _blockTextures, itemVisuals, _items, _registry, content.Recipes, names);
 
@@ -266,6 +277,21 @@ internal sealed class ClientApp(
                     UpdateStatusText();
                     break;
 
+                case QuestBookContents book:
+                    _quests = new QuestBook();
+                    foreach (var name in book.Completed)
+                        _quests.Complete(name);
+                    foreach (var (name, count) in book.Progress)
+                        _quests.SetProgress(name, count);
+                    break;
+
+                case QuestChanged quest:
+                    if (!quest.Completed)
+                        _quests.SetProgress(quest.Quest, quest.Progress);
+                    else if (_quests.Complete(quest.Quest) && _questRegistry.TryGet(quest.Quest, out var completed))
+                        _hud.ShowQuestCompleted(completed);
+                    break;
+
                 default:
                     Console.WriteLine($"[Client] Неизвестное сообщение {message.GetType().Name}");
                     break;
@@ -319,10 +345,14 @@ internal sealed class ClientApp(
 
         DrawSelection(eye);
         DrawCracks(eye, viewProjection);
-        _hud.Draw(_framebufferSize, _inventory, deltaTime, _inventoryOpen);
+        // Задания идут только в выживании: в творческом подсказывать их незачем.
+        _hud.Draw(_framebufferSize, _inventory, deltaTime, _inventoryOpen || _journalOpen, _mode == GameMode.Survival ? _quests : null);
         if (_inventoryOpen)
             _inventoryScreen.Draw(_framebufferSize, _inventory, _mode == GameMode.Creative, MouseFramebufferPosition,
                 station => Crafting.IsStationNear(_world.Chunks, eye, station));
+        if (_journalOpen)
+            _journal.Draw(_framebufferSize, _quests, _inventory, _mode == GameMode.Survival);
+        _hud.DrawToasts(_framebufferSize, deltaTime);
     }
 
     private void DrawSelection(Vector3d eye)
@@ -390,6 +420,20 @@ internal sealed class ClientApp(
             return false;
         }
 
+        if (_journalOpen)
+        {
+            if (Input.WasKeyPressed(Key.Escape) || Input.WasKeyPressed(Key.J))
+            {
+                _journalOpen = false;
+                Input.CaptureCursor();
+            }
+            else
+            {
+                _journal.Scroll(Input.ScrollDelta);
+            }
+            return false;
+        }
+
         if (!Input.IsCursorCaptured)
         {
             // Клик, захвативший курсор, не должен заодно сломать блок: действия — только со следующего кадра.
@@ -407,6 +451,13 @@ internal sealed class ClientApp(
         if (Input.WasKeyPressed(Key.E) && _inventoryReceived)
         {
             _inventoryOpen = true;
+            Input.ReleaseCursor();
+            return false;
+        }
+
+        if (Input.WasKeyPressed(Key.J) && _joined)
+        {
+            _journalOpen = true;
             Input.ReleaseCursor();
             return false;
         }
@@ -547,6 +598,7 @@ internal sealed class ClientApp(
         _cracks.Dispose();
         _crackShader.Dispose();
         _hud.Dispose();
+        _journal.Dispose();
         _selectionBox.Dispose();
         _lineShader.Dispose();
         _chunkShader.Dispose();

@@ -72,6 +72,8 @@ public sealed class ExampleModTests : IDisposable
         Assert.Equal(content.Items.Get("example_mod:wand").Id, wandRecipe.Result.Item);
         Assert.Contains(new ItemStack(content.Items.Get("base:stick").Id, 1), wandRecipe.Ingredients);
         Assert.Equal(content.Blocks.Get("base:crafting_table").Id, wandRecipe.Station);
+        // Задание мода продолжает ванильную цепочку.
+        Assert.Equal(["base:wooden_pickaxe"], content.Quests.Get("example_mod:amethyst").Requires);
         Assert.True(File.Exists(Path.Combine(ExampleMod().BlockTextureDirectory, "sand_rippled.png")));
     }
 

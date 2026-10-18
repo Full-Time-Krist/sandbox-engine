@@ -2,6 +2,7 @@ using Api;
 using Shared.Blocks;
 using Shared.Content;
 using Shared.Items;
+using Shared.Quests;
 
 namespace Server.Modding;
 
@@ -13,6 +14,7 @@ internal sealed class ModContext(string modId, ContentRegistries content, ItemBe
     public BlockRegistry Blocks => content.Blocks;
     public ItemRegistry Items => content.Items;
     public RecipeRegistry Recipes => content.Recipes;
+    public QuestRegistry Quests => content.Quests;
 
     public IModEvents Events { get; } = events.For(modId);
 

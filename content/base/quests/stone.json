@@ -1,0 +1,14 @@
+{
+  "type": "quest",
+  "name": "base:stone",
+  "title": "Каменный век",
+  "description": "Копайте вниз деревянной киркой и добудьте 8 камня.",
+  "goal": {
+    "type": "obtain",
+    "item": "base:stone",
+    "count": 8
+  },
+  "requires": [
+    "base:wooden_pickaxe"
+  ]
+}

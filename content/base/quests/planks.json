@@ -1,0 +1,14 @@
+{
+  "type": "quest",
+  "name": "base:planks",
+  "title": "Доски",
+  "description": "Откройте инвентарь (E) и сделайте доски из бревна.",
+  "goal": {
+    "type": "craft",
+    "item": "base:planks",
+    "count": 4
+  },
+  "requires": [
+    "base:get_wood"
+  ]
+}
