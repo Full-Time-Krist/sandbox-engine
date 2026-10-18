@@ -12,6 +12,18 @@ public interface IWorld
     /// <summary>Стоит ли блок <paramref name="block"/> в точке <paramref name="pos"/> поперёк тела какого-нибудь игрока.</summary>
     bool IsBlockedByPlayer(BlockPos pos, BlockId block);
 
-    /// <summary>Меняет блок и рассылает изменение. False, если чанк не загружен.</summary>
+    /// <summary>
+    /// Меняет блок и рассылает изменение, без событий: для правок мира, которые не действие игрока.
+    /// False, если чанк не загружен.
+    /// </summary>
     bool TrySetBlock(BlockPos pos, BlockId block);
+
+    /// <summary>
+    /// Игрок ломает блок: на его месте становится воздух, моды получают <see cref="BlockBroken"/>. Добычу это не выдаёт —
+    /// это дело поведения предмета. False, если там воздух или чанк не загружен.
+    /// </summary>
+    bool TryBreakBlock(BlockPos pos, IPlayer player);
+
+    /// <summary>Игрок ставит блок: моды получают <see cref="BlockPlaced"/>. False, если чанк не загружен.</summary>
+    bool TryPlaceBlock(BlockPos pos, BlockId block, IPlayer player);
 }

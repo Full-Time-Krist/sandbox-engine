@@ -22,4 +22,7 @@ public interface IModContext
     /// <exception cref="ArgumentException">Имя не вида <c>namespace:name</c> или не из пространства имён мода.</exception>
     /// <exception cref="InvalidOperationException">Поведение с таким именем уже есть или загрузка модов закончилась.</exception>
     void RegisterItemBehavior(string id, IItemBehavior behavior);
+
+    /// <summary>Подписка на события мира.</summary>
+    IModEvents Events { get; }
 }

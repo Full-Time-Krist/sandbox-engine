@@ -1,5 +1,4 @@
 using Api;
-using Shared.Blocks;
 using Shared.Items;
 
 namespace Server.Items;
@@ -27,7 +26,7 @@ internal sealed class HandBehavior : IItemBehavior
 
         if (context.InfiniteItems)
         {
-            context.World.TrySetBlock(target.Block, BlockId.Air);
+            context.World.TryBreakBlock(target.Block, context.Player);
             return;
         }
 
@@ -35,7 +34,7 @@ internal sealed class HandBehavior : IItemBehavior
         if (!context.Inventory.CanAdd(drop))
             return;
 
-        if (context.World.TrySetBlock(target.Block, BlockId.Air))
+        if (context.World.TryBreakBlock(target.Block, context.Player))
             context.Inventory.Add(drop);
     }
 }

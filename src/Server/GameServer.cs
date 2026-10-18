@@ -43,6 +43,9 @@ public sealed class GameServer : IDisposable
 
     /// <summary>Поведение каждого предмета по номеру <see cref="ItemId"/>: связано с реестром предметов после загрузки модов.</summary>
     private readonly IItemBehavior[] _behaviors;
+
+    /// <summary>События мира для модов: действия ставят их в очередь, обработчики вызываются после каждого сообщения.</summary>
+    private readonly GameEvents _events;
     private readonly WorldEditor _editor;
     /// <summary>
     /// Сколько чанков отправлять одному игроку за тик. Иначе при входе клиент получил бы сотни чанков разом:
@@ -86,6 +89,15 @@ public sealed class GameServer : IDisposable
     public GameServer(int? seed, int? generatorThreads = null,
         int viewDistance = DefaultViewDistance, int verticalDistance = DefaultVerticalDistance,
         (int X, int Z)? spawnColumn = null, string? savePath = null, GameMode? defaultMode = null)
+        : this(seed, generatorThreads, viewDistance, verticalDistance, spawnColumn, savePath, defaultMode, mods: [], Console.WriteLine)
+    {
+    }
+
+    /// <param name="mods">Моды кроме встроенного <c>base</c>, по порядку загрузки (пока только из тестов; папка модов — шаг 5.3).</param>
+    /// <param name="modLog">Куда писать ошибки обработчиков модов (тесты перехватывают).</param>
+    internal GameServer(int? seed, int? generatorThreads, int viewDistance, int verticalDistance,
+        (int X, int Z)? spawnColumn, string? savePath, GameMode? defaultMode,
+        IReadOnlyList<(string Id, IMod Mod)> mods, Action<string> modLog)
     {
         _viewDistance = viewDistance;
         _verticalDistance = verticalDistance;
@@ -98,7 +110,8 @@ public sealed class GameServer : IDisposable
 
         _items = content.Items;
         _itemNames = [.. _items.All.Select(i => i.Name)];
-        _behaviors = LoadMods(content);
+        _events = new GameEvents(modLog);
+        _behaviors = LoadMods(content, mods, _events);
 
         if (savePath != null)
             _save = WorldSave.Open(savePath, registry, _items);
@@ -120,13 +133,15 @@ public sealed class GameServer : IDisposable
     }
 
     /// <summary>
-    /// Подключает моды: каждый регистрирует свои поведения через <see cref="IModContext"/>. Пока мод один — встроенный
-    /// <c>base</c>; сторонние из папки модов появятся на шаге 5.3 и пойдут тем же путём.
+    /// Подключает моды: каждый регистрирует поведения и подписки через свой <see cref="IModContext"/>. Первым — встроенный
+    /// <c>base</c>, затем остальные по порядку; после этого поведения связываются с предметами, подписки закрываются.
     /// </summary>
-    private static IItemBehavior[] LoadMods(ContentRegistries content)
+    private static IItemBehavior[] LoadMods(ContentRegistries content, IReadOnlyList<(string Id, IMod Mod)> mods, GameEvents events)
     {
         var behaviors = new ItemBehaviorRegistry();
-        new BaseMod().Load(new ModContext(BaseMod.Id, content, behaviors));
+        foreach (var (id, mod) in mods.Prepend((BaseMod.Id, new BaseMod())))
+            mod.Load(new ModContext(id, content, behaviors, events));
+        events.Freeze();
         return behaviors.Bind(content.Items);
     }
 
@@ -169,7 +184,11 @@ public sealed class GameServer : IDisposable
             if (session.IsJoined)
                 session.Movement.Refill();
             while (session.Connection.TryReceive(out var message))
+            {
                 Handle(session, message);
+                // Обработчики модов — после того, как действие игрока закончено целиком.
+                _events.Dispatch();
+            }
         }
 
         World.CollectGenerated();
@@ -369,6 +388,7 @@ public sealed class GameServer : IDisposable
         session.Connection.Send(new InventoryContents(inventory.CopySlots(), inventory.SelectedSlot));
         inventory.TakeChanges();
         Console.WriteLine($"[Server] {session.PlayerName} подключился (id {session.PlayerId}, режим {mode.ToName()})");
+        _events.Raise(new PlayerJoined(_editor, session));
     }
 
     /// <summary>
@@ -501,6 +521,25 @@ public sealed class GameServer : IDisposable
                     return true;
             }
             return false;
+        }
+
+        public bool TryBreakBlock(BlockPos pos, IPlayer player)
+        {
+            var old = GetBlock(pos);
+            if (old.IsAir || !TrySetBlock(pos, BlockId.Air))
+                return false;
+
+            server._events.Raise(new BlockBroken(this, player, pos, old));
+            return true;
+        }
+
+        public bool TryPlaceBlock(BlockPos pos, BlockId block, IPlayer player)
+        {
+            if (!TrySetBlock(pos, block))
+                return false;
+
+            server._events.Raise(new BlockPlaced(this, player, pos, block));
+            return true;
         }
 
         public bool TrySetBlock(BlockPos pos, BlockId block)

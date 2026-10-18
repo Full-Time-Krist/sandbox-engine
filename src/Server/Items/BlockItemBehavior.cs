@@ -40,7 +40,7 @@ internal sealed class BlockItemBehavior : IItemBehavior
             return;
 
         // В выживании поставленный блок тратит одну штуку; последняя освобождает слот.
-        if (context.World.TrySetBlock(position, block) && !context.InfiniteItems)
+        if (context.World.TryPlaceBlock(position, block, context.Player) && !context.InfiniteItems)
             context.Inventory.Remove(context.Inventory.SelectedSlot, 1);
     }
 }

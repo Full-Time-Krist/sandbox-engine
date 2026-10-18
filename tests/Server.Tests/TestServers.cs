@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Api;
 using System.Diagnostics.CodeAnalysis;
 using Shared;
 using Shared.Networking;
@@ -19,9 +20,13 @@ internal static class TestServers
     public const int ViewDistance = 1;
     public const int VerticalDistance = 1;
 
+    /// <param name="mods">Моды кроме встроенного <c>base</c>.</param>
+    /// <param name="modLog">Куда писать ошибки обработчиков модов; null — в консоль.</param>
     public static GameServer Create(int viewDistance = ViewDistance, int verticalDistance = VerticalDistance,
-        string? savePath = null, int? seed = Seed, GameMode? defaultMode = null) =>
-        new(seed, generatorThreads: 2, viewDistance, verticalDistance, savePath: savePath, defaultMode: defaultMode);
+        string? savePath = null, int? seed = Seed, GameMode? defaultMode = null,
+        IReadOnlyList<(string Id, IMod Mod)>? mods = null, Action<string>? modLog = null) =>
+        new(seed, generatorThreads: 2, viewDistance, verticalDistance, spawnColumn: null, savePath, defaultMode,
+            mods ?? [], modLog ?? Console.WriteLine);
 
     /// <summary>Сколько чанков получает игрок при дальности по умолчанию для тестов.</summary>
     public static int AreaSize(int viewDistance = ViewDistance, int verticalDistance = VerticalDistance) =>
