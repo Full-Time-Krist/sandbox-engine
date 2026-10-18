@@ -6,7 +6,7 @@ namespace ExampleMod;
 
 /// <summary>
 /// Пример мода: аметистовая руда (блок и предмет — в <c>content/</c>, текстура — в <c>textures/</c>), волшебная палочка
-/// с поведением на C# и два обработчика событий. Кроме того, <c>content/overrides/sand.json</c> заменяет ванильный
+/// с поведением на C#, рецепт и задание (в <c>content/</c>) и три обработчика событий. Кроме того, <c>content/overrides/sand.json</c> заменяет ванильный
 /// песок (<c>"override": true</c>) — новая текстура; для этого мод зависит от <c>base</c> в <c>mod.json</c>.
 /// Игра находит этот класс сама: он единственный реализует <see cref="IMod"/>.
 /// </summary>
@@ -19,6 +19,7 @@ public sealed class ExampleMod : IMod
         var amethystOre = context.Blocks.Get("example_mod:amethyst_ore").Id;
         var amethystOreItem = context.Items.Get("example_mod:amethyst_ore").Id;
         var wand = context.Items.Get("example_mod:wand").Id;
+        var copperIngot = context.Items.Get("base:copper_ingot").Id;
 
         // Предмет example_mod:wand ссылается на это поведение полем "behavior" в своём JSON.
         context.RegisterItemBehavior("example_mod:wand", new WandBehavior(stone, amethystOre));
@@ -30,6 +31,16 @@ public sealed class ExampleMod : IMod
                 return;
             e.Player.Inventory.Add(new ItemStack(amethystOreItem, 1));
             context.Log($"{e.Player.Name} добыл аметистовую руду: +1 в награду");
+        });
+
+        // Награда за своё задание (content/quests/amethyst.json): три медных слитка. Что не влезло — пропадает, как добыча
+        // без места; для примера этого достаточно.
+        context.Events.OnQuestCompleted(e =>
+        {
+            if (e.Quest.Name != "example_mod:amethyst")
+                return;
+            e.Player.Inventory.Add(new ItemStack(copperIngot, 3));
+            context.Log($"{e.Player.Name} выполнил «{e.Quest.Title}»: награда — 3 медных слитка");
         });
 
         // Палочка — каждому вошедшему, у кого её ещё нет.

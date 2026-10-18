@@ -103,7 +103,7 @@ public sealed class CraftingTests : IDisposable
         Craft("base:wooden_pickaxe");
         Assert.Equal(0, _inventory.Count(pickaxe)); // верстака нет
 
-        PlaceStation("base:crafting_table", 6, 0);  // в 5,5 блока по горизонтали — далеко
+        PlaceStation("base:crafting_table", 8, 0);  // в 7,5 блока по горизонтали — дальше досягаемости (6)
         Craft("base:wooden_pickaxe");
         Assert.Equal(0, _inventory.Count(pickaxe));
 

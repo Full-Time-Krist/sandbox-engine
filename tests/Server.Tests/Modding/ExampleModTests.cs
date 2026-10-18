@@ -133,6 +133,26 @@ public sealed class ExampleModTests : IDisposable
     }
 
     [Fact]
+    public void ModQuest_AfterVanillaOne_CompletedByInventory_GivesModReward()
+    {
+        var (client, inventory) = StartWithExampleMod();
+        var content = GameContent.Load([ExampleMod()]);
+        var quests = _server!.PlayerQuests(client.PlayerId);
+        var ore = new ItemStack(content.Items.Get("example_mod:amethyst_ore").Id, 4);
+        inventory.Set(5, ore);
+        _server.Tick();
+        Assert.False(quests.IsCompleted("example_mod:amethyst")); // ванильная «Первая кирка» ещё не выполнена
+
+        foreach (var name in new[] { "base:get_wood", "base:planks", "base:crafting_table", "base:wooden_pickaxe" })
+            quests.Complete(name);
+        _server.Tick();
+
+        Assert.True(quests.IsCompleted("example_mod:amethyst"));
+        Assert.Equal(3, inventory.Count(content.Items.Get("base:copper_ingot").Id));
+        Assert.Contains("[Mod example_mod] Tester выполнил «Аметисты»: награда — 3 медных слитка", _log);
+    }
+
+    [Fact]
     public void DataOnlyMod_HasNoCode_ItsContentLoads()
     {
         var directory = TempMod("data_mod");

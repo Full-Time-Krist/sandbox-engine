@@ -124,13 +124,14 @@ public class CraftingTests
 
     // Глаз — в центре блока (0, 1, 0), на x = 0,5: до блока (dx, 1, dz) по X — от ближней грани куба.
     [Theory]
-    [InlineData(4, 0, true)]    // грань x = 4 — в 3,5
-    [InlineData(5, 0, false)]   // 4,5
-    [InlineData(4, 1, true)]    // √(3,5² + 0,5²) ≈ 3,54; до центра было бы √(4² + 0,5²) ≈ 4,03
-    [InlineData(4, 3, false)]   // по диагонали: √(3,5² + 2,5²) ≈ 4,3
-    [InlineData(3, 3, true)]    // √(2,5² + 2,5²) ≈ 3,5
-    [InlineData(-4, 0, true)]   // блок −4..−3: грань x = −3 — в 3,5
-    [InlineData(-5, 0, false)]  // 4,5
+    // Досягаемость — 6 (Crafting.StationReach).
+    [InlineData(6, 0, true)]    // грань x = 6 — в 5,5
+    [InlineData(7, 0, false)]   // 6,5
+    [InlineData(6, 1, true)]    // √(5,5² + 0,5²) ≈ 5,52; до центра было бы √(6² + 0,5²) ≈ 6,02
+    [InlineData(6, 3, false)]   // по диагонали: √(5,5² + 2,5²) ≈ 6,04
+    [InlineData(4, 4, true)]    // √(3,5² + 3,5²) ≈ 4,95
+    [InlineData(-6, 0, true)]   // блок −6..−5: грань x = −5 — в 5,5
+    [InlineData(-7, 0, false)]  // 6,5
     public void IsStationNear_MeasuresToNearestPointOfBlock(int dx, int dz, bool expected)
     {
         var station = new BlockId(3);
