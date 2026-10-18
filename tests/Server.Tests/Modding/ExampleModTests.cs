@@ -62,6 +62,9 @@ public sealed class ExampleModTests : IDisposable
             content.BlockTextures["example_mod:copper_ore"]);
         Assert.Equal("Волшебная палочка", content.ItemDisplayNames["example_mod:wand"]);
         Assert.True(File.Exists(Path.Combine(ExampleMod().BlockTextureDirectory, "copper_ore.png")));
+        // Замена ванильного определения: песок с текстурой мода.
+        Assert.Equal("example_mod:sand_rippled", content.BlockTextures["base:sand"].Top);
+        Assert.True(File.Exists(Path.Combine(ExampleMod().BlockTextureDirectory, "sand_rippled.png")));
     }
 
     [Fact]
@@ -147,6 +150,32 @@ public sealed class ExampleModTests : IDisposable
         Assert.Contains("нет класса, реализующего IMod", missingEntry.Message);
         Assert.Contains("'garbage'", notAssembly.Message);
         Assert.Contains("не загрузилась", notAssembly.Message);
+    }
+
+    /// <summary>
+    /// Мод уменьшил предел стопки камня до 16 заменой определения, а в сохранении у игрока 64: мир открывается,
+    /// стопка урезана до нового предела (а не падает на проверке инвентаря).
+    /// </summary>
+    [Fact]
+    public void OverrideLoweringStackSize_SavedStackIsClamped()
+    {
+        var savePath = Path.Combine(Directory.CreateTempSubdirectory("override-save-").FullName, "world.db");
+        _tempDirectories.Add(Path.GetDirectoryName(savePath)!);
+        var stone = GameContent.Load().Items.Get("base:stone");
+        using (var first = TestServers.Create(savePath: savePath))
+        {
+            var client = TestServers.JoinAndLoad(first);
+            first.PlayerInventory(client.PlayerId).Set(0, new ItemStack(stone.Id, 64));
+        }
+
+        var mod = TempMod("small_stacks", ""","dependencies":{"base":"1.0"}""");
+        Directory.CreateDirectory(Path.Combine(mod, "content"));
+        File.WriteAllText(Path.Combine(mod, "content", "stone.json"),
+            """{"type":"item","name":"base:stone","maxStackSize":16,"placesBlock":"base:stone","override":true}""");
+        _server = TestServers.Create(savePath: savePath, modInfos: [ModDiscovery.ReadManifest(mod)]);
+        var reopened = TestServers.JoinAndLoad(_server);
+
+        Assert.Equal(new ItemStack(stone.Id, 16), _server.PlayerInventory(reopened.PlayerId)[0]);
     }
 
     private sealed class FailingMod : IMod

@@ -259,6 +259,75 @@ public class ContentLoaderTests
         Assert.Contains("stray.json", exception.Message);
     }
 
+    // --- Замена определений ---
+
+    private static readonly ContentJsonFile BaseStone = File("base/stone.json", """{"type":"block","name":"base:stone","isOpaque":true,"textures":"stone"}""");
+    private static readonly ContentJsonFile BaseStoneItem =
+        File("base/stone_item.json", """{"type":"item","name":"base:stone","maxStackSize":64,"placesBlock":"base:stone"}""");
+    private static readonly ContentJsonFile BaseDirt = File("base/dirt.json", """{"type":"block","name":"base:dirt","isOpaque":true}""");
+
+    private static ContentPack Pack(string name, params string[] dependencies) => new(name, "", dependencies);
+
+    [Fact]
+    public void Override_ReplacesWholeDefinition_IdsUnchanged()
+    {
+        ContentJsonFile[] files = [BaseStone, BaseStoneItem, BaseDirt];
+        var plain = ContentLoader.Load(files, [Pack("base")]);
+
+        var content = ContentLoader.Load([.. files,
+            File("mod_a/stone.json", """{"type":"block","name":"base:stone","isOpaque":false,"override":true,"textures":"shiny"}"""),
+            File("mod_a/stone_item.json", """{"type":"item","name":"base:stone","maxStackSize":16,"placesBlock":"base:stone","override":true}""")
+        ], [Pack("base"), Pack("mod_a", "base")]);
+
+        Assert.False(content.Blocks.Get("base:stone").IsOpaque);
+        Assert.Equal(new BlockTextures("mod_a:shiny", "mod_a:shiny", "mod_a:shiny"), content.BlockTextures["base:stone"]);
+        Assert.Equal(16, content.Items.Get("base:stone").MaxStackSize);
+        Assert.Equal(plain.Blocks.All.Select(b => b.Name), content.Blocks.All.Select(b => b.Name));
+        Assert.Equal(plain.Blocks.Get("base:stone").Id, content.Blocks.Get("base:stone").Id);
+    }
+
+    [Theory]
+    [InlineData("""{"type":"block","name":"base:stone","isOpaque":true}""", "\"override\": true")]                // без флага
+    [InlineData("""{"type":"block","name":"mod_a:ore","isOpaque":true,"override":true}""", "из своего пакета")]   // своё имя
+    [InlineData("""{"type":"block","name":"base:missing","isOpaque":true,"override":true}""", "такого блока нет")]
+    [InlineData("""{"type":"item","name":"base:dirt","maxStackSize":1,"override":true}""", "такого предмета нет")] // блок есть, предмета нет
+    [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"override":"yes"}""", "логическим")]
+    public void Override_Invalid_Throws(string json, string expected)
+    {
+        var exception = Assert.Throws<ContentLoadException>(() =>
+            ContentLoader.Load([BaseStone, BaseDirt, File("mod_a/x.json", json)], [Pack("base"), Pack("mod_a", "base")]));
+
+        Assert.Contains("mod_a/x.json", exception.Message);
+        Assert.Contains(expected, exception.Message);
+    }
+
+    [Fact]
+    public void Override_WithoutDependency_Throws_PointingToModJson()
+    {
+        var exception = Assert.Throws<ContentLoadException>(() => ContentLoader.Load([BaseStone,
+            File("mod_a/stone.json", """{"type":"block","name":"base:stone","isOpaque":true,"override":true}""")
+        ], [Pack("base"), Pack("mod_a")]));
+
+        Assert.Contains("не зависит от пакета 'base'", exception.Message);
+        Assert.Contains("mod.json", exception.Message);
+    }
+
+    [Fact]
+    public void TwoOverrides_LaterDependentWins_IndependentAreAConflict()
+    {
+        var a = File("mod_a/stone.json", """{"type":"block","name":"base:stone","isOpaque":true,"override":true,"textures":"a"}""");
+        var b = File("mod_b/stone.json", """{"type":"block","name":"base:stone","isOpaque":true,"override":true,"textures":"b"}""");
+
+        // mod_b зависит от mod_a: его замена применяется позже и побеждает, в каком бы порядке ни шли файлы.
+        var chained = ContentLoader.Load([b, a, BaseStone], [Pack("base"), Pack("mod_a", "base"), Pack("mod_b", "base", "mod_a")]);
+        Assert.Equal("mod_b:b", chained.BlockTextures["base:stone"].Top);
+
+        var exception = Assert.Throws<ContentLoadException>(() =>
+            ContentLoader.Load([a, b, BaseStone], [Pack("base"), Pack("mod_a", "base"), Pack("mod_b", "base")]));
+        Assert.Contains("'mod_a' и 'mod_b'", exception.Message);
+        Assert.Contains("не зависящие друг от друга", exception.Message);
+    }
+
     private sealed class TempContentDirectory : IDisposable
     {
         public string Path { get; } = Directory.CreateTempSubdirectory("content-test-").FullName;

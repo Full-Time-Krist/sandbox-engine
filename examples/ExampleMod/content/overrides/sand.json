@@ -1,0 +1,7 @@
+{
+  "type": "block",
+  "name": "base:sand",
+  "isOpaque": true,
+  "override": true,
+  "textures": "sand_rippled"
+}

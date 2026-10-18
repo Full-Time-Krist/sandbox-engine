@@ -1,5 +1,6 @@
 using Shared.Blocks;
 using Shared.Content;
+using Shared.Modding;
 
 namespace Shared.Tests.Content;
 
@@ -65,6 +66,36 @@ public class GameContentTests
 
         Assert.Equal(_content.Blocks.All.Select(b => b.Name), other.Blocks.All.Select(b => b.Name));
         Assert.Equal(_content.Items.All.Select(i => i.Name), other.Items.All.Select(i => i.Name));
+    }
+
+    /// <summary>Мод заменяет определение пакета, от которого зависит не прямо, а через другой мод.</summary>
+    [Fact]
+    public void ModPacks_Dependencies_AreTransitive()
+    {
+        var root = Directory.CreateTempSubdirectory("content-mods-").FullName;
+        try
+        {
+            var middle = Path.Combine(root, "middle_mod");
+            var top = Path.Combine(root, "top_mod");
+            Directory.CreateDirectory(middle);
+            Directory.CreateDirectory(Path.Combine(top, "content"));
+            File.WriteAllText(Path.Combine(top, "content", "stone.json"),
+                """{"type":"block","name":"base:stone","isOpaque":true,"override":true,"textures":"stone"}""");
+            var version = new Version(1, 0);
+            ModInfo[] mods =
+            [
+                new("middle_mod", "m", version, new Dictionary<string, Version> { ["base"] = version }, middle, null),
+                new("top_mod", "t", version, new Dictionary<string, Version> { ["middle_mod"] = version }, top, null),
+            ];
+
+            var content = GameContent.Load(mods);
+
+            Assert.Equal("top_mod:stone", content.BlockTextures["base:stone"].Top);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     private static BlockTextures Uniform(string name) => new("base:" + name, "base:" + name, "base:" + name);
