@@ -141,6 +141,49 @@ def copper_ore(rng):
     return px
 
 
+def crafting_table_top(rng):
+    px = planks(rng)
+    for i in range(SIZE):  # рамка и сетка 3 × 3 — место для узора ремесла
+        for j in (0, 5, 10, 15):
+            px[i][j] = (92, 64, 34)
+            px[j][i] = (92, 64, 34)
+    return px
+
+
+def crafting_table_side(rng):
+    px = planks(rng)
+    for x in range(SIZE):  # тёмная столешница сверху
+        px[0][x] = px[1][x] = (110, 78, 42)
+    for y in range(4, 13):  # пила и молоток на боку
+        px[y][4] = (150, 150, 155)
+        px[y][5] = (120, 120, 126)
+    for x in range(9, 14):
+        px[5][x] = (130, 130, 136)
+    for y in range(6, 13):
+        px[y][11] = (96, 64, 34)
+    return px
+
+
+def furnace_side(rng):
+    px = noisy(rng, (112, 112, 116), 12)
+    for y in range(SIZE):  # кладка: швы между камнями вразбежку
+        for x in range(SIZE):
+            if y % 4 == 3 or (x + (4 if (y // 4) % 2 else 0)) % 8 == 7:
+                px[y][x] = (70, 70, 74)
+    for y in range(8, 14):  # топка с огнём внизу
+        for x in range(4, 12):
+            px[y][x] = (28, 24, 22) if y < 11 else (clamp(220 + rng.randint(-20, 20)), clamp(110 + rng.randint(-30, 30)), 30)
+    return px
+
+
+def furnace_top(rng):
+    px = noisy(rng, (104, 104, 108), 14)
+    for x in range(SIZE):
+        px[0][x] = px[SIZE - 1][x] = (70, 70, 74)
+        px[x][0] = px[x][SIZE - 1] = (70, 70, 74)
+    return px
+
+
 TEXTURES = {
     "stone": stone,
     "dirt": dirt,
@@ -152,6 +195,10 @@ TEXTURES = {
     "planks": planks,
     "leaves": leaves,
     "copper_ore": copper_ore,
+    "crafting_table_top": crafting_table_top,
+    "crafting_table_side": crafting_table_side,
+    "furnace_side": furnace_side,
+    "furnace_top": furnace_top,
 }
 
 
@@ -202,8 +249,26 @@ def tool(kind, material):
     return px
 
 
+def stick():
+    px = blank()
+    handle(px, 12)
+    return px
+
+
+def copper_ingot():
+    base, light = MATERIALS["copper"]
+    dark = (150, 78, 40)
+    px = blank()
+    for y in range(6, 11):  # брусок в перспективе: светлый верх, тёмный низ
+        for x in range(2 + (10 - y) // 2, 14 - (y - 6) // 2):
+            px[y][x] = light if y == 6 else (dark if y == 10 else base)
+    return px
+
+
 ITEMS = {f"{material}_{kind}": (lambda kind=kind, material=material: tool(kind, material))
          for material in MATERIALS for kind in ("pickaxe", "axe", "shovel")}
+ITEMS["stick"] = stick
+ITEMS["copper_ingot"] = copper_ingot
 
 
 # --- Стадии трещин: 0 — едва заметная, 9 — почти разваленный блок. Тёмные линии с прозрачностью поверх блока. ---

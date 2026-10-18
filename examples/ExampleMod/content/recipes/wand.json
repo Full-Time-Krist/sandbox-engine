@@ -1,0 +1,17 @@
+{
+  "type": "recipe",
+  "name": "example_mod:wand",
+  "result": {
+    "item": "example_mod:wand"
+  },
+  "ingredients": [
+    {
+      "item": "example_mod:amethyst_ore",
+      "count": 2
+    },
+    {
+      "item": "base:stick"
+    }
+  ],
+  "station": "base:crafting_table"
+}

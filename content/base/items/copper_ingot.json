@@ -1,0 +1,7 @@
+{
+  "type": "item",
+  "name": "base:copper_ingot",
+  "maxStackSize": 64,
+  "icon": "copper_ingot",
+  "displayName": "Медный слиток"
+}

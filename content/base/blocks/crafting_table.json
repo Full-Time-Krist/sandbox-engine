@@ -1,0 +1,12 @@
+{
+  "type": "block",
+  "name": "base:crafting_table",
+  "isOpaque": true,
+  "textures": {
+    "top": "crafting_table_top",
+    "side": "crafting_table_side",
+    "bottom": "planks"
+  },
+  "hardness": 2.5,
+  "tool": "axe"
+}

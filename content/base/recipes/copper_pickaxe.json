@@ -1,0 +1,18 @@
+{
+  "type": "recipe",
+  "name": "base:copper_pickaxe",
+  "result": {
+    "item": "base:copper_pickaxe"
+  },
+  "ingredients": [
+    {
+      "item": "base:copper_ingot",
+      "count": 3
+    },
+    {
+      "item": "base:stick",
+      "count": 2
+    }
+  ],
+  "station": "base:crafting_table"
+}

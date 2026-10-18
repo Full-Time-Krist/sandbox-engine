@@ -1,0 +1,7 @@
+{
+  "type": "item",
+  "name": "base:furnace",
+  "maxStackSize": 64,
+  "placesBlock": "base:furnace",
+  "displayName": "Печь"
+}

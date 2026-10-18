@@ -370,6 +370,94 @@ public class ContentLoaderTests
         Assert.Contains("не зависящие друг от друга", exception.Message);
     }
 
+    // --- Рецепты ---
+
+    private static readonly ContentJsonFile BaseLog = File("base/log.json", """{"type":"item","name":"base:log","maxStackSize":64}""");
+    private static readonly ContentJsonFile BasePlanks = File("base/planks.json", """{"type":"item","name":"base:planks","maxStackSize":64}""");
+    private static readonly ContentJsonFile BaseTable = File("base/table.json", """{"type":"block","name":"base:table","isOpaque":true}""");
+
+    private static ContentJsonFile RecipeFile(string path, string body) => File(path, $$"""{"type":"recipe",{{body}}}""");
+
+    [Fact]
+    public void Load_Recipe_ResolvesItemsAndStation_CountDefaultsToOne()
+    {
+        var content = ContentLoader.Load([BaseLog, BasePlanks, BaseTable, BaseStone, BaseStoneItem,
+            RecipeFile("base/recipes/planks.json", """
+                "name":"base:planks","result":{"item":"base:planks","count":4},"ingredients":[{"item":"base:log"}]
+                """),
+            RecipeFile("base/recipes/wall.json", """
+                "name":"base:wall","result":{"item":"base:stone"},
+                "ingredients":[{"item":"base:planks","count":2},{"item":"base:log","count":3}],"station":"base:table"
+                """)]);
+
+        var planks = content.Recipes.Get("base:planks");
+        Assert.Equal(new ItemStack(content.Items.Get("base:planks").Id, 4), planks.Result);
+        Assert.Equal([new ItemStack(content.Items.Get("base:log").Id, 1)], planks.Ingredients);
+        Assert.Null(planks.Station);
+
+        var wall = content.Recipes.Get("base:wall");
+        Assert.Equal(new ItemStack(content.Items.Get("base:stone").Id, 1), wall.Result);
+        Assert.Equal([new ItemStack(content.Items.Get("base:planks").Id, 2), new ItemStack(content.Items.Get("base:log").Id, 3)],
+            wall.Ingredients);
+        Assert.Equal(content.Blocks.Get("base:table").Id, wall.Station);
+        Assert.Equal(["base:planks", "base:wall"], content.Recipes.All.Select(r => r.Name));
+    }
+
+    [Theory]
+    [InlineData(""" "name":"base:r","ingredients":[{"item":"base:log"}] """, "'result'")]
+    [InlineData(""" "name":"base:r","result":{"item":"base:planks"} """, "'ingredients'")]
+    [InlineData(""" "name":"base:r","result":{"item":"base:planks"},"ingredients":[] """, "'ingredients'")]
+    [InlineData(""" "name":"base:r","result":{"item":"base:missing"},"ingredients":[{"item":"base:log"}] """, "неизвестный предмет")]
+    [InlineData(""" "name":"base:r","result":{"item":"base:planks"},"ingredients":[{"item":"base:missing"}] """, "'base:missing'")]
+    [InlineData(""" "name":"base:r","result":{"item":"base:planks"},"ingredients":[{"item":"base:air"}] """, "'base:air'")]
+    [InlineData(""" "name":"base:r","result":{"item":"base:planks","count":0},"ingredients":[{"item":"base:log"}] """, "положительным")]
+    [InlineData(""" "name":"base:r","result":{"item":"base:planks","count":65},"ingredients":[{"item":"base:log"}] """, "больше стопки")]
+    [InlineData(""" "name":"base:r","result":{"item":"base:planks"},"ingredients":[{"item":"base:log","count":-2}] """, "положительным")]
+    [InlineData(""" "name":"base:r","result":{"item":"base:planks"},"ingredients":[{"item":"base:log"},{"item":"base:log"}] """, "несколько раз")]
+    [InlineData(""" "name":"base:r","result":{"item":"base:planks"},"ingredients":[{"item":"base:log","amount":2}] """, "ingredients[0].amount")]
+    [InlineData(""" "name":"base:r","result":"base:planks","ingredients":[{"item":"base:log"}] """, "'result'")]
+    [InlineData(""" "name":"base:r","result":{"item":"base:planks"},"ingredients":[{"item":"base:log"}],"station":"base:log" """, "не блок")]
+    [InlineData(""" "name":"base:r","result":{"item":"base:planks"},"ingredients":[{"item":"base:log"}],"station":"table" """, "station")]
+    [InlineData(""" "name":"base:r","result":{"item":"base:planks"},"ingredients":[{"item":"base:log"}],"time":5 """, "'time'")]
+    public void Load_InvalidRecipe_ThrowsUsefulError(string body, string expected)
+    {
+        var exception = Assert.Throws<ContentLoadException>(() =>
+            ContentLoader.Load([BaseLog, BasePlanks, BaseTable, RecipeFile("base/recipes/r.json", body)]));
+
+        Assert.Contains("base/recipes/r.json", exception.Message);
+        Assert.Contains(expected, exception.Message);
+    }
+
+    [Fact]
+    public void Load_DuplicateRecipeNames_Throws_ButRecipeMayShareNameWithItem()
+    {
+        var recipe = """ "name":"base:planks","result":{"item":"base:planks"},"ingredients":[{"item":"base:log"}] """;
+        Assert.Throws<ContentLoadException>(() => ContentLoader.Load([BaseLog, BasePlanks,
+            RecipeFile("base/a.json", recipe), RecipeFile("base/b.json", recipe)]));
+
+        // Имена рецептов — своё пространство: рецепт base:planks и предмет base:planks не мешают друг другу.
+        Assert.Single(ContentLoader.Load([BaseLog, BasePlanks, RecipeFile("base/a.json", recipe)]).Recipes.All);
+    }
+
+    [Fact]
+    public void Override_ReplacesRecipe_AndChecksItsReferences()
+    {
+        ContentJsonFile[] files = [BaseLog, BasePlanks, RecipeFile("base/planks.json", """
+            "name":"base:planks","result":{"item":"base:planks","count":4},"ingredients":[{"item":"base:log"}]
+            """)];
+
+        var content = ContentLoader.Load([.. files, RecipeFile("mod_a/planks.json", """
+            "name":"base:planks","override":true,"result":{"item":"base:planks","count":2},"ingredients":[{"item":"base:log"}]
+            """)], [Pack("base"), Pack("mod_a", "base")]);
+        Assert.Equal(2, Assert.Single(content.Recipes.All).Result.Count);
+
+        // Замена проверяется так же, как обычный рецепт.
+        var exception = Assert.Throws<ContentLoadException>(() => ContentLoader.Load([.. files, RecipeFile("mod_a/planks.json", """
+            "name":"base:planks","override":true,"result":{"item":"mod_a:missing"},"ingredients":[{"item":"base:log"}]
+            """)], [Pack("base"), Pack("mod_a", "base")]));
+        Assert.Contains("mod_a/planks.json", exception.Message);
+    }
+
     private sealed class TempContentDirectory : IDisposable
     {
         public string Path { get; } = Directory.CreateTempSubdirectory("content-test-").FullName;

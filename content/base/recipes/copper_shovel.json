@@ -1,0 +1,18 @@
+{
+  "type": "recipe",
+  "name": "base:copper_shovel",
+  "result": {
+    "item": "base:copper_shovel"
+  },
+  "ingredients": [
+    {
+      "item": "base:copper_ingot",
+      "count": 1
+    },
+    {
+      "item": "base:stick",
+      "count": 2
+    }
+  ],
+  "station": "base:crafting_table"
+}

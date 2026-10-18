@@ -12,6 +12,7 @@ internal sealed class ModContext(string modId, ContentRegistries content, ItemBe
     public string ModId => modId;
     public BlockRegistry Blocks => content.Blocks;
     public ItemRegistry Items => content.Items;
+    public RecipeRegistry Recipes => content.Recipes;
 
     public IModEvents Events { get; } = events.For(modId);
 

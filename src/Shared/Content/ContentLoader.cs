@@ -30,9 +30,10 @@ public sealed record ContentPack(string Name, string Directory, IReadOnlyCollect
 /// Картинки предметов (поле <c>icon</c>) — полные имена текстур <c>пакет:имя</c>, как у блоков; предмета без картинки
 /// здесь нет (предмет-блок тогда рисуется кубиком).
 /// </param>
+/// <param name="Recipes">Рецепты (<c>type: "recipe"</c>); ссылки на предметы и станки уже проверены.</param>
 public sealed record ContentRegistries(BlockRegistry Blocks, ItemRegistry Items,
     ImmutableDictionary<string, BlockTextures> BlockTextures, ImmutableDictionary<string, string> ItemDisplayNames,
-    ImmutableDictionary<string, string> ItemIcons);
+    ImmutableDictionary<string, string> ItemIcons, RecipeRegistry Recipes);
 
 /// <summary>
 /// Текстуры граней блока — полные имена <c>пакет:имя</c>. В JSON можно писать коротко (<c>"stone"</c>): имя дополняется
@@ -48,7 +49,7 @@ public sealed class ContentLoadException : Exception
 }
 
 /// <summary>
-/// Загружает JSON-описания блоков и предметов в реестры. Числовые ID назначаются по строковым именам
+/// Загружает JSON-описания блоков, предметов и рецептов в реестры. Числовые ID назначаются по строковым именам
 /// в ordinal-порядке, поэтому не зависят от порядка файлов в каталоге.
 /// </summary>
 /// <remarks>
@@ -142,8 +143,11 @@ public static partial class ContentLoader
         var items = new List<ItemJson>();
         var blockOverrides = new List<BlockJson>();
         var itemOverrides = new List<ItemJson>();
+        var recipes = new List<RecipeJson>();
+        var recipeOverrides = new List<RecipeJson>();
         var blockNames = new HashSet<string>(StringComparer.Ordinal);
         var itemNames = new HashSet<string>(StringComparer.Ordinal);
+        var recipeNames = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var file in orderedFiles.OrderBy(file => file.Path, StringComparer.Ordinal))
         {
@@ -211,13 +215,27 @@ public static partial class ContentLoader
                         OptionalString(root, "displayName", file), icon, ToolOf(root, file)));
                     break;
 
+                case "recipe":
+                    CheckProperties(root, file, "type", "name", "result", "ingredients", "station", "override");
+                    if (!isOverride && !recipeNames.Add(name))
+                        throw Error(file, $"рецепт '{name}' объявлен более одного раза.");
+                    var station = OptionalString(root, "station", file);
+                    if (station is not null && !ContentNames.IsValid(station))
+                        throw Error(file, $"station '{station}' должен иметь вид 'namespace:name'.");
+                    (isOverride ? recipeOverrides : recipes).Add(new RecipeJson(file.Path, pack, name,
+                        root.TryGetProperty("result", out var result) ? StackOf(result, "result", file)
+                            : throw Error(file, "нет обязательного поля 'result'."),
+                        IngredientsOf(root, file), station));
+                    break;
+
                 default:
-                    throw Error(file, $"неизвестный type '{type}'; допустимы 'block' и 'item'.");
+                    throw Error(file, $"неизвестный type '{type}'; допустимы 'block', 'item' и 'recipe'.");
             }
         }
 
         ApplyOverrides(blocks, blockOverrides, "блок", block => block.Name, block => block.Pack, block => block.Path, packOrder, packDependencies);
         ApplyOverrides(items, itemOverrides, "предмет", item => item.Name, item => item.Pack, item => item.Path, packOrder, packDependencies);
+        ApplyOverrides(recipes, recipeOverrides, "рецепт", recipe => recipe.Name, recipe => recipe.Pack, recipe => recipe.Path, packOrder, packDependencies);
 
         var blockRegistry = new BlockRegistry();
         var textures = ImmutableDictionary.CreateBuilder<string, BlockTextures>(StringComparer.Ordinal);
@@ -254,7 +272,73 @@ public static partial class ContentLoader
 
         blockRegistry.Freeze();
         itemRegistry.Freeze();
-        return new ContentRegistries(blockRegistry, itemRegistry, textures.ToImmutable(), displayNames.ToImmutable(), icons.ToImmutable());
+        var recipeRegistry = new RecipeRegistry(recipes.Select(recipe => ResolveRecipe(recipe, blockRegistry, itemRegistry)));
+        return new ContentRegistries(blockRegistry, itemRegistry, textures.ToImmutable(), displayNames.ToImmutable(), icons.ToImmutable(),
+            recipeRegistry);
+    }
+
+    /// <summary>
+    /// Проверяет ссылки рецепта, когда все блоки и предметы (с заменами) уже известны: предметы и станок существуют,
+    /// результат помещается в одну стопку, ингредиенты не повторяются.
+    /// </summary>
+    private static Recipe ResolveRecipe(RecipeJson recipe, BlockRegistry blocks, ItemRegistry items)
+    {
+        var result = Stack(recipe.Result, "результат");
+        var maxStack = items.Get(result.Item).MaxStackSize;
+        if (result.Count > maxStack)
+            throw RecipeError($"результат {recipe.Result.Count} × '{recipe.Result.Item}' больше стопки этого предмета ({maxStack}).");
+
+        var ingredients = recipe.Ingredients.Select(ingredient => Stack(ingredient, "ингредиент")).ToImmutableArray();
+        if (ingredients.GroupBy(ingredient => ingredient.Item).FirstOrDefault(group => group.Count() > 1) is { } repeated)
+            throw RecipeError($"ингредиент '{items.Get(repeated.Key).Name}' указан несколько раз; укажите его один раз с общим числом.");
+
+        BlockId? station = null;
+        if (recipe.Station is not null)
+        {
+            if (!blocks.TryGet(recipe.Station, out var block) || block.Id.IsAir)
+                throw RecipeError($"станок '{recipe.Station}' — не блок.");
+            station = block.Id;
+        }
+
+        return new Recipe(recipe.Name, result, ingredients, station);
+
+        ItemStack Stack(StackJson stack, string role)
+        {
+            if (!items.TryGet(stack.Item, out var item) || item.Id.IsAir)
+                throw RecipeError($"{role} '{stack.Item}' — неизвестный предмет.");
+            return new ItemStack(item.Id, stack.Count);
+        }
+
+        ContentLoadException RecipeError(string message) => new($"Файл '{recipe.Path}': рецепт '{recipe.Name}': {message}");
+    }
+
+    /// <summary>Поле <c>ingredients</c>: непустой массив стопок <c>{"item", "count"}</c>.</summary>
+    private static ImmutableArray<StackJson> IngredientsOf(JsonElement root, ContentJsonFile file)
+    {
+        if (!root.TryGetProperty("ingredients", out var value) || value.ValueKind != JsonValueKind.Array || value.GetArrayLength() == 0)
+            throw Error(file, "обязательное поле 'ingredients' должно быть непустым массивом {\"item\", \"count\"}.");
+        return [.. value.EnumerateArray().Select((ingredient, index) => StackOf(ingredient, $"ingredients[{index}]", file))];
+    }
+
+    /// <summary>Стопка в рецепте: <c>{"item": "base:planks", "count": 4}</c>, <c>count</c> по умолчанию 1.</summary>
+    private static StackJson StackOf(JsonElement value, string property, ContentJsonFile file)
+    {
+        if (value.ValueKind != JsonValueKind.Object)
+            throw Error(file, $"поле '{property}' должно быть объектом {{\"item\", \"count\"}}.");
+        CheckNoDuplicates(value, file);
+        foreach (var field in value.EnumerateObject())
+        {
+            if (field.Name is not ("item" or "count"))
+                throw Error(file, $"неизвестное поле '{property}.{field.Name}'; допустимы item и count.");
+        }
+
+        var item = RequiredString(value, "item", file);
+        if (!ContentNames.IsValid(item))
+            throw Error(file, $"{property}.item '{item}' должен иметь вид 'namespace:name'.");
+        var count = value.TryGetProperty("count", out _) ? RequiredInt32(value, "count", file) : 1;
+        if (count < 1)
+            throw Error(file, $"{property}.count должен быть положительным, получено {count}.");
+        return new StackJson(item, count);
     }
 
     /// <summary>
@@ -486,4 +570,7 @@ public static partial class ContentLoader
         BlockMining Mining);
     private sealed record ItemJson(string Path, string Pack, string Name, int MaxStackSize, string? PlacesBlock, string? Behavior,
         string? DisplayName, string? Icon, ToolInfo? Tool);
+    private sealed record RecipeJson(string Path, string Pack, string Name, StackJson Result, ImmutableArray<StackJson> Ingredients,
+        string? Station);
+    private sealed record StackJson(string Item, int Count);
 }

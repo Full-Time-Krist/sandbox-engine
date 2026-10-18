@@ -45,6 +45,14 @@ public sealed record InventoryDragDistribute(ImmutableArray<int> TargetSlots, bo
 /// <summary>Закрытие экрана: сервер возвращает предмет с курсора в инвентарь.</summary>
 public sealed record ReturnInventoryCursor : ClientMessage;
 
+/// <summary>
+/// Игрок выбрал рецепт в списке на экране инвентаря. Сервер сам проверяет ингредиенты, станок рядом и место
+/// под результат (<see cref="Crafting"/>) и присылает изменённые слоты; невыполнимую просьбу молча пропускает.
+/// </summary>
+/// <param name="Recipe">Имя рецепта (<see cref="Recipe.Name"/>).</param>
+/// <param name="All">Shift+клик: делать, пока хватает ингредиентов и места; иначе — один раз.</param>
+public sealed record CraftRecipe(string Recipe, bool All) : ClientMessage;
+
 /// <summary>Запрос предмета из палитры творческого режима. Сервер проверяет режим игрока.</summary>
 public sealed record CreativeGiveItem(ItemId Item) : ClientMessage;
 

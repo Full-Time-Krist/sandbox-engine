@@ -20,7 +20,9 @@ public class GameContentTests
         (string Name, bool Opaque, bool Solid, BlockTextures Textures)[] expected =
         [
             ("base:copper_ore", true, true, Uniform("copper_ore")),
+            ("base:crafting_table", true, true, new("base:crafting_table_top", "base:crafting_table_side", "base:planks")),
             ("base:dirt", true, true, Uniform("dirt")),
+            ("base:furnace", true, true, new("base:furnace_top", "base:furnace_side", "base:furnace_top")),
             ("base:grass", true, true, new("base:grass_top", "base:grass_side", "base:dirt")),
             ("base:leaves", true, true, Uniform("leaves")),
             ("base:log", true, true, new("base:log_top", "base:log_side", "base:log_top")),
@@ -116,6 +118,75 @@ public class GameContentTests
         finally
         {
             Directory.Delete(root, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// Путь от голых рук до медной кирки: начиная с пустого инвентаря, добываем из природных блоков то, что позволяет
+    /// лучший инструмент из уже сделанного, и делаем всё, на что хватает (станок считается доступным, если он сделан —
+    /// его можно поставить). Медная кирка должна получиться, а камень — только после деревянной кирки.
+    /// </summary>
+    [Fact]
+    public void VanillaRecipes_LeadFromBareHandsToCopperPickaxe()
+    {
+        string[] natural = ["base:grass", "base:dirt", "base:sand", "base:log", "base:leaves", "base:stone", "base:copper_ore"];
+        var have = new HashSet<string>(StringComparer.Ordinal);
+        var order = new List<string>();
+
+        for (var changed = true; changed;)
+        {
+            changed = false;
+            var tools = have.Select(name => _content.Items.Get(name).Tool).OfType<ToolInfo>().ToArray();
+            foreach (var name in natural)
+            {
+                var block = _content.Blocks.Get(name);
+                var harvest = Mining.CanHarvest(block.Mining, null) || tools.Any(tool => Mining.CanHarvest(block.Mining, tool));
+                var drop = _content.Items.Get(_content.Items.ForBlock(block.Id)).Name;
+                if (harvest && have.Add(drop))
+                {
+                    order.Add(drop);
+                    changed = true;
+                }
+            }
+
+            foreach (var recipe in _content.Recipes.All)
+            {
+                var hasIngredients = recipe.Ingredients.All(i => have.Contains(_content.Items.Get(i.Item).Name));
+                var hasStation = recipe.Station is not { } station || have.Contains(_content.Items.Get(_content.Items.ForBlock(station)).Name);
+                var result = _content.Items.Get(recipe.Result.Item).Name;
+                if (hasIngredients && hasStation && have.Add(result))
+                {
+                    order.Add(result);
+                    changed = true;
+                }
+            }
+        }
+
+        Assert.Contains("base:copper_pickaxe", have);
+        Assert.True(order.IndexOf("base:wooden_pickaxe") < order.IndexOf("base:stone"), string.Join(", ", order));
+        Assert.True(order.IndexOf("base:stone_pickaxe") < order.IndexOf("base:copper_ore"), string.Join(", ", order));
+        // Каждый ванильный предмет, кроме природных блоков, делается по рецепту.
+        Assert.All(_content.Items.All.Where(i => !i.Id.IsAir), item => Assert.Contains(item.Name, have));
+    }
+
+    /// <summary>Ремесло ванили: доски из бревна, инструменты у верстака, слиток в печи, одна штука инструмента за раз.</summary>
+    [Fact]
+    public void VanillaRecipes_Stations()
+    {
+        var table = _content.Blocks.Get("base:crafting_table").Id;
+        var furnace = _content.Blocks.Get("base:furnace").Id;
+
+        var planks = _content.Recipes.Get("base:planks");
+        Assert.Null(planks.Station);
+        Assert.Equal(new ItemStack(_content.Items.Get("base:planks").Id, 4), planks.Result);
+        Assert.Equal([new ItemStack(_content.Items.Get("base:log").Id, 1)], planks.Ingredients);
+        Assert.Equal(furnace, _content.Recipes.Get("base:copper_ingot").Station);
+        foreach (var material in new[] { "wooden", "stone", "copper" })
+        foreach (var kind in new[] { "pickaxe", "axe", "shovel" })
+        {
+            var recipe = _content.Recipes.Get($"base:{material}_{kind}");
+            Assert.Equal(table, recipe.Station);
+            Assert.Equal(new ItemStack(_content.Items.Get($"base:{material}_{kind}").Id, 1), recipe.Result);
         }
     }
 

@@ -41,6 +41,7 @@ public sealed class GameServer : IDisposable
     private readonly BlockRegistry _registry;
     private readonly BaseBlocks _blocks;
     private readonly ItemRegistry _items;
+    private readonly RecipeRegistry _recipes;
 
     /// <summary>Поведение каждого предмета по номеру <see cref="ItemId"/>: связано с реестром предметов после загрузки модов.</summary>
     private readonly IItemBehavior[] _behaviors;
@@ -116,6 +117,7 @@ public sealed class GameServer : IDisposable
 
         _items = content.Items;
         _itemNames = [.. _items.All.Select(i => i.Name)];
+        _recipes = content.Recipes;
         _events = new GameEvents(modLog);
         _behaviors = LoadMods(content, mods, extraMods, _events, modLog);
 
@@ -399,6 +401,10 @@ public sealed class GameServer : IDisposable
                     Console.WriteLine($"[Server] {session.PlayerName}: неверные цели перетаскивания инвентаря");
                 break;
 
+            case CraftRecipe craft when session.IsJoined:
+                HandleCraft(session, craft);
+                break;
+
             case CreativeGiveItem give when session.IsJoined && session.Mode == GameMode.Creative:
                 if (_items.Contains(give.Item) && !give.Item.IsAir)
                 {
@@ -545,6 +551,36 @@ public sealed class GameServer : IDisposable
         var target = VoxelRaycast.Cast(World.Chunks, use.EyePosition, use.LookDirection, GameRules.BlockReach);
         _behaviors[session.Inventory.Selected.Item.Value].Use(use.Action,
             new ItemUseContext(_editor, _items, session, target, use.EyePosition, new Breaker(this, session)));
+    }
+
+    /// <summary>
+    /// Ремесло: тратит ингредиенты и кладёт результат, если всё это есть, станок рядом с глазом и результату хватает места.
+    /// Shift+клик повторяет, пока получается. Невыполнимая просьба ничего не меняет: клиент мог показать рецепт по
+    /// чуть устаревшему инвентарю (или отойти от станка), это не ошибка протокола.
+    /// </summary>
+    private void HandleCraft(ClientSession session, CraftRecipe craft)
+    {
+        if (craft.Recipe is null || !_recipes.TryGet(craft.Recipe, out var recipe))
+        {
+            Console.WriteLine($"[Server] {session.PlayerName}: неизвестный рецепт '{craft.Recipe}'");
+            return;
+        }
+
+        var eye = session.PlayerPosition + new Vector3d(0, PlayerPhysics.EyeHeight, 0);
+        if (recipe.Station is { } station && !Crafting.IsStationNear(World.Chunks, eye, station))
+            return;
+
+        // Каждый раз тратит хотя бы одну штуку, поэтому повторов не больше, чем предметов в инвентаре.
+        var times = 0;
+        while (session.Inventory.TryExchange(recipe.Ingredients, recipe.Result))
+        {
+            times++;
+            if (!craft.All)
+                break;
+        }
+
+        if (times > 0)
+            _events.Raise(new ItemCrafted(_editor, session, recipe, times));
     }
 
     /// <summary>

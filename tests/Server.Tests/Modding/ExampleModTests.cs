@@ -67,6 +67,11 @@ public sealed class ExampleModTests : IDisposable
         Assert.True(File.Exists(Path.Combine(ExampleMod().ItemTextureDirectory, "wand.png")));
         // Замена ванильного определения: песок с текстурой мода.
         Assert.Equal("example_mod:sand_rippled", content.BlockTextures["base:sand"].Top);
+        // Рецепт мода смешивает свои и ванильные предметы и ванильный станок.
+        var wandRecipe = content.Recipes.Get("example_mod:wand");
+        Assert.Equal(content.Items.Get("example_mod:wand").Id, wandRecipe.Result.Item);
+        Assert.Contains(new ItemStack(content.Items.Get("base:stick").Id, 1), wandRecipe.Ingredients);
+        Assert.Equal(content.Blocks.Get("base:crafting_table").Id, wandRecipe.Station);
         Assert.True(File.Exists(Path.Combine(ExampleMod().BlockTextureDirectory, "sand_rippled.png")));
     }
 

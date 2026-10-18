@@ -1,0 +1,14 @@
+{
+  "type": "recipe",
+  "name": "base:planks",
+  "result": {
+    "item": "base:planks",
+    "count": 4
+  },
+  "ingredients": [
+    {
+      "item": "base:log",
+      "count": 1
+    }
+  ]
+}

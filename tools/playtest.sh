@@ -11,6 +11,7 @@
 #   tools/playtest.sh enter                     # клик в центр кадра: захват мыши
 #   tools/playtest.sh key w 1000                # W одну секунду
 #   tools/playtest.sh keys 1500 w space         # W и Space вместе (разбег с прыжком)
+#   tools/playtest.sh key-down shift            # зажать клавишу (Shift+клик в инвентаре); key-up shift — отпустить
 #   tools/playtest.sh move 0 10 30              # 30 шагов по 10 px вниз (относительное движение)
 #   tools/playtest.sh mouse-to 400 300          # курсор в точку кадра (для экрана инвентаря)
 #   tools/playtest.sh click left|right          # клик; drag-to X Y left|right — перетаскивание до точки
@@ -283,6 +284,8 @@ case $command in
     enter) cmd_enter ;;
     key) cmd_key "$@" ;;
     keys) cmd_keys "$@" ;;
+    key-down) send key "$(keycode "$1")" 1 ;;
+    key-up) send key "$(keycode "$1")" 0; sleep 0.2 ;;
     move) cmd_move "$@" ;;
     mouse-to) cmd_mouse_to "$@" ;;
     click) cmd_click "$@" ;;

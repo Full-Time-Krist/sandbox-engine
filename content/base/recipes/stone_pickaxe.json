@@ -1,0 +1,18 @@
+{
+  "type": "recipe",
+  "name": "base:stone_pickaxe",
+  "result": {
+    "item": "base:stone_pickaxe"
+  },
+  "ingredients": [
+    {
+      "item": "base:stone",
+      "count": 3
+    },
+    {
+      "item": "base:stick",
+      "count": 2
+    }
+  ],
+  "station": "base:crafting_table"
+}

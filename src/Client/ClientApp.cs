@@ -126,7 +126,7 @@ internal sealed class ClientApp(
         _hud = new Hud(Gl, Path.Combine(AppContext.BaseDirectory, "Assets", "Fonts", "ui.ttf"), Window.FramebufferSize,
             _blockTextures, itemVisuals, _items, names);
         _inventoryScreen = new InventoryScreen(Gl, Path.Combine(AppContext.BaseDirectory, "Assets", "Fonts", "ui.ttf"),
-            Window.FramebufferSize, _blockTextures, itemVisuals, _items, names);
+            Window.FramebufferSize, _blockTextures, itemVisuals, _items, _registry, content.Recipes, names);
 
         // Позицию задаст сервер в JoinAccepted. До неё чанков нет, и тело стоит на месте.
         _controller = new PlayerController(_camera, _world.Chunks, _registry);
@@ -321,7 +321,8 @@ internal sealed class ClientApp(
         DrawCracks(eye, viewProjection);
         _hud.Draw(_framebufferSize, _inventory, deltaTime, _inventoryOpen);
         if (_inventoryOpen)
-            _inventoryScreen.Draw(_framebufferSize, _inventory, _mode == GameMode.Creative, MouseFramebufferPosition);
+            _inventoryScreen.Draw(_framebufferSize, _inventory, _mode == GameMode.Creative, MouseFramebufferPosition,
+                station => Crafting.IsStationNear(_world.Chunks, eye, station));
     }
 
     private void DrawSelection(Vector3d eye)
@@ -385,6 +386,7 @@ internal sealed class ClientApp(
                 Input.IsMouseDown(MouseButton.Left), Input.IsMouseDown(MouseButton.Right),
                 Input.IsKeyDown(Key.ShiftLeft) || Input.IsKeyDown(Key.ShiftRight), _inventory,
                 _mode == GameMode.Creative, connection.Send);
+            _inventoryScreen.Scroll(MouseFramebufferPosition, _framebufferSize, _mode == GameMode.Creative, Input.ScrollDelta);
             return false;
         }
 

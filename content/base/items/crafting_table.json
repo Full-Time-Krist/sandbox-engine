@@ -1,0 +1,7 @@
+{
+  "type": "item",
+  "name": "base:crafting_table",
+  "maxStackSize": 64,
+  "placesBlock": "base:crafting_table",
+  "displayName": "Верстак"
+}

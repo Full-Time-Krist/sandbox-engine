@@ -1,0 +1,14 @@
+{
+  "type": "recipe",
+  "name": "base:furnace",
+  "result": {
+    "item": "base:furnace"
+  },
+  "ingredients": [
+    {
+      "item": "base:stone",
+      "count": 8
+    }
+  ],
+  "station": "base:crafting_table"
+}

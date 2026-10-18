@@ -1,0 +1,13 @@
+{
+  "type": "recipe",
+  "name": "base:crafting_table",
+  "result": {
+    "item": "base:crafting_table"
+  },
+  "ingredients": [
+    {
+      "item": "base:planks",
+      "count": 4
+    }
+  ]
+}

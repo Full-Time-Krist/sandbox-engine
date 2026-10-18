@@ -15,6 +15,9 @@ public interface IModContext
     /// <summary>Предметы всего контента, уже загруженные и замороженные.</summary>
     ItemRegistry Items { get; }
 
+    /// <summary>Рецепты всего контента (с заменами модов).</summary>
+    RecipeRegistry Recipes { get; }
+
     /// <summary>
     /// Регистрирует поведение предмета под именем <paramref name="id"/> вида <c>&lt;id мода&gt;:имя</c>.
     /// Предметы ссылаются на него полем <c>behavior</c> в JSON.

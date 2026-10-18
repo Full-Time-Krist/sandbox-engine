@@ -1,0 +1,14 @@
+{
+  "type": "recipe",
+  "name": "base:stick",
+  "result": {
+    "item": "base:stick",
+    "count": 4
+  },
+  "ingredients": [
+    {
+      "item": "base:planks",
+      "count": 2
+    }
+  ]
+}

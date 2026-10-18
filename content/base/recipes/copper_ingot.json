@@ -1,0 +1,14 @@
+{
+  "type": "recipe",
+  "name": "base:copper_ingot",
+  "result": {
+    "item": "base:copper_ingot"
+  },
+  "ingredients": [
+    {
+      "item": "base:copper_ore",
+      "count": 1
+    }
+  ],
+  "station": "base:furnace"
+}

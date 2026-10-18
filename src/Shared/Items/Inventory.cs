@@ -88,6 +88,68 @@ public sealed class Inventory
         Put(CursorSlot, new ItemStack(cursor.Item, Add(cursor)));
     }
 
+    /// <summary>Сколько штук предмета во всех слотах (курсор не считается).</summary>
+    public int Count(ItemId item)
+    {
+        if (item.IsAir)
+            return 0;
+        var count = 0;
+        for (var slot = 0; slot < Size; slot++)
+        {
+            if (_slots[slot].Item == item)
+                count += _slots[slot].Count;
+        }
+        return count;
+    }
+
+    /// <summary>
+    /// Обмен целиком или никак: забирает стопки <paramref name="take"/> из слотов (сначала из основной части, потом из
+    /// хотбара — чтобы не трогать то, что под рукой) и кладёт <paramref name="give"/>, как добычу (<see cref="Add"/>).
+    /// Если чего-то не хватает или результату не хватает места даже после траты, ничего не меняется и возвращается false.
+    /// Место считается после траты: последние доски, ушедшие на верстак, освобождают для него слот.
+    /// </summary>
+    public bool TryExchange(IReadOnlyList<ItemStack> take, ItemStack give)
+    {
+        ArgumentNullException.ThrowIfNull(take);
+        var saved = (ItemStack[])_slots.Clone();
+        var savedChanged = _changed;
+
+        var ok = true;
+        foreach (var stack in take)
+        {
+            var left = TakeFrom(stack.Item, stack.Count, HotbarSize, Size);
+            left = TakeFrom(stack.Item, left, 0, HotbarSize);
+            if (left > 0)
+            {
+                ok = false;
+                break;
+            }
+        }
+
+        if (ok && AddTo(give, 0, Size) == 0)
+            return true;
+
+        // Откат: слоты и отметки об изменениях — как до обмена, клиенту нечего присылать.
+        Array.Copy(saved, _slots, SlotCount);
+        _changed = savedChanged;
+        return false;
+    }
+
+    /// <summary>Забирает до <paramref name="count"/> штук предмета из слотов [from, to). Возвращает, сколько не нашлось.</summary>
+    private int TakeFrom(ItemId item, int count, int from, int to)
+    {
+        for (var slot = from; slot < to && count > 0; slot++)
+        {
+            var current = _slots[slot];
+            if (current.IsEmpty || current.Item != item)
+                continue;
+            var taken = Math.Min(count, current.Count);
+            Put(slot, new ItemStack(item, current.Count - taken));
+            count -= taken;
+        }
+        return count;
+    }
+
     /// <summary>Убирает <paramref name="count"/> штук из слота. Последняя штука освобождает слот.</summary>
     public void Remove(int slot, int count)
     {

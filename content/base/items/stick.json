@@ -1,0 +1,7 @@
+{
+  "type": "item",
+  "name": "base:stick",
+  "maxStackSize": 64,
+  "icon": "stick",
+  "displayName": "Палка"
+}

@@ -1,0 +1,13 @@
+{
+  "type": "block",
+  "name": "base:furnace",
+  "isOpaque": true,
+  "textures": {
+    "top": "furnace_top",
+    "side": "furnace_side",
+    "bottom": "furnace_top"
+  },
+  "hardness": 3.5,
+  "tool": "pickaxe",
+  "toolTier": 1
+}
