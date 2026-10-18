@@ -57,6 +57,15 @@ internal sealed class ClientApp(
     private ShaderProgram _chunkShader = null!;
     private ShaderProgram _lineShader = null!;
     private ColorMesh _selectionBox = null!;
+    private ShaderProgram _crackShader = null!;
+    private CrackRenderer _cracks = null!;
+
+    /// <summary>
+    /// Блок, который игрок ломает удержанием ЛКМ (в выживании): что, каким предметом и с какого момента. Время ломания
+    /// клиент считает той же формулой, что сервер (<see cref="Mining"/>), — для трещин; сломает блок всё равно сервер.
+    /// </summary>
+    private (BlockPos Pos, BlockId Block, ItemId Held, int Slot, double Start, double Seconds)? _breaking;
+    private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
     private Hud _hud = null!;
     private InventoryScreen _inventoryScreen = null!;
     private bool _inventoryOpen;
@@ -102,6 +111,7 @@ internal sealed class ClientApp(
         var visuals = new BlockVisuals(_registry, BlockVisuals.AppearancesFrom(content.BlockTextures));
         var itemVisuals = new ItemVisuals(visuals, _items, content.ItemIcons);
         _blockTextures = LoadTextures(visuals.TextureNames, itemVisuals.TextureNames, new TextureFiles(mods));
+        var crackLayer = visuals.TextureNames.Count + itemVisuals.TextureNames.Count;
         var names = new ItemNames(content.ItemDisplayNames);
         _chunkRenderer = new ChunkRenderer(Gl, new ChunkMesher(visuals), MeshBuildQueue.DefaultWorkerCount);
 
@@ -110,6 +120,9 @@ internal sealed class ClientApp(
         _chunkShader.SetUniform("u_Textures", 0); // сэмплер читает текстурный блок 0
         _lineShader = ShaderProgram.FromFiles(Gl, Path.Combine(shaders, "basic"));
         _selectionBox = LineGeometry.CreateBoxOutline(Gl, new Vector3(0.05f));
+        _crackShader = ShaderProgram.FromFiles(Gl, Path.Combine(shaders, "crack"));
+        _crackShader.SetUniform("u_Textures", 0);
+        _cracks = new CrackRenderer(Gl, _crackShader, crackLayer);
         _hud = new Hud(Gl, Path.Combine(AppContext.BaseDirectory, "Assets", "Fonts", "ui.ttf"), Window.FramebufferSize,
             _blockTextures, itemVisuals, _items, names);
         _inventoryScreen = new InventoryScreen(Gl, Path.Combine(AppContext.BaseDirectory, "Assets", "Fonts", "ui.ttf"),
@@ -122,25 +135,30 @@ internal sealed class ClientApp(
         connection.Send(new JoinRequest("Player"));
     }
 
-    /// <summary>Массив текстур: сначала текстуры блоков (по слоям <see cref="BlockVisuals"/>), за ними картинки предметов.</summary>
+    /// <summary>
+    /// Массив текстур: сначала текстуры блоков (по слоям <see cref="BlockVisuals"/>), за ними картинки предметов
+    /// (<see cref="ItemVisuals"/>), последними — стадии трещин (<see cref="CrackRenderer"/>).
+    /// </summary>
     private TextureArray LoadTextures(IReadOnlyList<string> blockNames, IReadOnlyList<string> itemNames, TextureFiles files)
     {
         const int MissingSize = 16;
-        var images = new List<Image>(blockNames.Count + itemNames.Count);
+        var images = new List<Image>(blockNames.Count + itemNames.Count + CrackRenderer.Stages);
 
         foreach (var name in blockNames)
-            images.Add(name == BlockVisuals.MissingTexture ? Image.CreateMissing(MissingSize, MissingSize) : Load(name, TextureKind.Block));
+            images.Add(name == BlockVisuals.MissingTexture ? Image.CreateMissing(MissingSize, MissingSize) : Load(name, files.PathFor(name, TextureKind.Block)));
         foreach (var name in itemNames)
-            images.Add(Load(name, TextureKind.Item));
+            images.Add(Load(name, files.PathFor(name, TextureKind.Item)));
+        var effects = Path.Combine(AppContext.BaseDirectory, "Assets", "Textures", "Effects");
+        for (var stage = 0; stage < CrackRenderer.Stages; stage++)
+            images.Add(Load($"destroy_{stage}", Path.Combine(effects, $"destroy_{stage}.png")));
 
-        Console.WriteLine($"[Client] Текстуры: {blockNames.Count} слоёв блоков, {itemNames.Count} картинок предметов");
+        Console.WriteLine($"[Client] Текстуры: {blockNames.Count} слоёв блоков, {itemNames.Count} картинок предметов, {CrackRenderer.Stages} стадий трещин");
         return new TextureArray(Gl, images);
 
-        Image Load(string name, TextureKind kind)
+        Image Load(string name, string path)
         {
             // Нет файла или не тот размер (все слои массива одного размера) — не повод падать: будет шахматка,
             // а в логе видно, что не так. Картинку чужого размера могла положить и опечатка, и мод.
-            var path = files.PathFor(name, kind);
             if (!File.Exists(path))
             {
                 Console.WriteLine($"[Client] Нет текстуры {name}: {path}");
@@ -283,6 +301,8 @@ internal sealed class ClientApp(
         _target = VoxelRaycast.Cast(_world.Chunks, eye, _camera.Forward, GameRules.BlockReach);
         if (actionsAllowed)
             HandleItemActions();
+        else
+            StopBreaking(); // открыли инвентарь или отпустили курсор — ломание прерывается
 
         var stats = _chunkRenderer.Update(_world, eye);
         _meshStats.Add(stats);
@@ -298,6 +318,7 @@ internal sealed class ClientApp(
         _drawnChunks = _chunkRenderer.Draw(_chunkShader, eye, Frustum.FromMatrix(viewProjection));
 
         DrawSelection(eye);
+        DrawCracks(eye, viewProjection);
         _hud.Draw(_framebufferSize, _inventory, deltaTime, _inventoryOpen);
         if (_inventoryOpen)
             _inventoryScreen.Draw(_framebufferSize, _inventory, _mode == GameMode.Creative, MouseFramebufferPosition);
@@ -440,10 +461,68 @@ internal sealed class ClientApp(
     /// </summary>
     private void HandleItemActions()
     {
-        if (Input.WasMousePressed(MouseButton.Left))
-            connection.Send(new UseItem(ItemAction.Primary, _controller.EyePosition, _camera.Forward));
+        // В творческом — по блоку на клик (ломается сразу, удержание снесло бы полмира); в выживании ЛКМ держат.
+        if (_mode == GameMode.Creative)
+        {
+            if (Input.WasMousePressed(MouseButton.Left))
+                connection.Send(new UseItem(ItemAction.Primary, _controller.EyePosition, _camera.Forward));
+        }
+        else
+        {
+            UpdateBreaking();
+        }
+
         if (Input.WasMousePressed(MouseButton.Right))
             connection.Send(new UseItem(ItemAction.Secondary, _controller.EyePosition, _camera.Forward));
+    }
+
+    /// <summary>
+    /// Удержание ЛКМ в выживании. Пока цель, предмет в руке и сам блок те же — ломание идёт (его ведёт сервер по тикам).
+    /// Сменилось что-то из этого (в том числе блок сломан и прицел перешёл на следующий) — серверу уходит новое основное
+    /// действие, как при нажатии. Отпустили кнопку или прицел ушёл в пустоту — ломание останавливается.
+    /// </summary>
+    private void UpdateBreaking()
+    {
+        if (!Input.IsMouseDown(MouseButton.Left) || _target is not { } target)
+        {
+            StopBreaking();
+            return;
+        }
+
+        var block = _world.Chunks.GetBlock(target.Block);
+        var held = _inventory.Selected.Item;
+        if (_breaking is { } current && current.Pos == target.Block && current.Block == block && current.Held == held
+            && current.Slot == _inventory.SelectedSlot)
+            return;
+
+        connection.Send(new UseItem(ItemAction.Primary, _controller.EyePosition, _camera.Forward));
+        var seconds = Mining.BreakSeconds(_registry.Get(block).Mining, _items.Get(held).Tool);
+        _breaking = (target.Block, block, held, _inventory.SelectedSlot, _clock.Elapsed.TotalSeconds, seconds);
+    }
+
+    private void StopBreaking()
+    {
+        if (_breaking == null)
+            return;
+        _breaking = null;
+        connection.Send(new StopBreaking());
+    }
+
+    /// <summary>
+    /// Трещины на блоке, который ломают. Только у предметов, ломающих удержанием (рука, инструменты, предметы-блоки):
+    /// у предмета со своим поведением (волшебная палочка мода) ЛКМ значит другое, и трещины ввели бы в заблуждение.
+    /// </summary>
+    private void DrawCracks(Vector3d eye, Matrix4x4 viewProjection)
+    {
+        if (_breaking is not { Seconds: > 0 } breaking)
+            return;
+        var behavior = _items.Get(breaking.Held).Behavior;
+        if (behavior != ItemRegistry.HandBehavior && behavior != ItemRegistry.PlaceBlockBehavior)
+            return;
+
+        var progress = (_clock.Elapsed.TotalSeconds - breaking.Start) / breaking.Seconds;
+        var offset = (new Vector3d(breaking.Pos.X, breaking.Pos.Y, breaking.Pos.Z) - eye).ToVector3();
+        _cracks.Draw(viewProjection, offset, CrackRenderer.StageFor(progress));
     }
 
     private void UpdateStatusText()
@@ -463,6 +542,8 @@ internal sealed class ClientApp(
         _chunkRenderer.Dispose();
         _blockTextures.Dispose();
         _inventoryScreen.Dispose();
+        _cracks.Dispose();
+        _crackShader.Dispose();
         _hud.Dispose();
         _selectionBox.Dispose();
         _lineShader.Dispose();

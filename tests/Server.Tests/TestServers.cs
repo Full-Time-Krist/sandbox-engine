@@ -16,6 +16,18 @@ internal static class TestServers
 {
     public const int Seed = 1;
 
+    /// <summary>
+    /// Сколько тиков держать ЛКМ, чтобы рукой наверняка сломать блок у поверхности (дёрн — 18, земля и песок — 15).
+    /// Ломание идёт по тикам сервера; тестам, которым важно не время, а результат, хватает этого запаса.
+    /// </summary>
+    public const int HoldBreakTicks = 40;
+
+    public static void Tick(GameServer server, int times)
+    {
+        for (var i = 0; i < times; i++)
+            server.Tick();
+    }
+
     /// <summary>Маленькая дальность, чтобы тесты не ждали генерации сотен чанков.</summary>
     public const int ViewDistance = 1;
     public const int VerticalDistance = 1;

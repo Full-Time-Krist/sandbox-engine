@@ -1,0 +1,12 @@
+{
+  "type": "item",
+  "name": "base:stone_pickaxe",
+  "maxStackSize": 1,
+  "icon": "stone_pickaxe",
+  "displayName": "Каменная кирка",
+  "tool": {
+    "type": "pickaxe",
+    "tier": 2,
+    "speed": 4.0
+  }
+}

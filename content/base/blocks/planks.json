@@ -2,5 +2,7 @@
   "type": "block",
   "name": "base:planks",
   "isOpaque": true,
-  "textures": "planks"
+  "textures": "planks",
+  "hardness": 3.0,
+  "tool": "axe"
 }

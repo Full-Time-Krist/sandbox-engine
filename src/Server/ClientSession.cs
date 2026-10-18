@@ -1,9 +1,11 @@
 using System.Numerics;
 using Api;
 using Shared;
+using Shared.Blocks;
 using Shared.Items;
 using Shared.Networking;
 using Shared.Protocol;
+using Shared.Voxels;
 
 namespace Server;
 
@@ -46,9 +48,16 @@ internal sealed class ClientSession(IConnection<ServerMessage, ClientMessage> co
         Inventory = inventory;
     }
 
+    /// <summary>Блок, который игрок сейчас ломает удержанием ЛКМ, или null (<see cref="GameServer"/> ведёт и завершает).</summary>
+    public BlockBreaking? Breaking { get; set; }
+
     public void SetMode(GameMode mode)
     {
         Mode = mode;
         Movement.SetMode(mode);
     }
 }
+
+/// <summary>Незаконченное ломание: что ломается, с какого тика, сколько тиков нужно и с каким предметом в руке.</summary>
+/// <param name="Slot">Выбранный слот при начале: сменил слот или предмет в нём — ломание отменяется.</param>
+internal readonly record struct BlockBreaking(BlockPos Position, BlockId Block, long StartTick, int Ticks, int Slot, ItemId Held);

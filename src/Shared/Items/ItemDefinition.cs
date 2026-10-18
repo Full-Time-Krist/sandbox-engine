@@ -13,4 +13,10 @@ namespace Shared.Items;
 /// Имя поведения (<c>namespace:name</c>) — что предмет делает при ЛКМ/ПКМ. Само поведение — код мода на сервере,
 /// оно ищется по этому имени после загрузки модов.
 /// </param>
-public sealed record ItemDefinition(ItemId Id, string Name, int MaxStackSize, BlockId? Block, string Behavior);
+/// <param name="Tool">Свойства инструмента или null, если предмет не инструмент.</param>
+public sealed record ItemDefinition(ItemId Id, string Name, int MaxStackSize, BlockId? Block, string Behavior, ToolInfo? Tool = null);
+
+/// <summary>Инструмент: какие блоки ломает быстрее (<paramref name="Type"/> совпадает с <see cref="BlockMining.Tool"/>), уровень и скорость.</summary>
+/// <param name="Tier">Уровень: деревянный 1, каменный 2, медный 3. Блок с <see cref="BlockMining.ToolTier"/> выше уровня добычи не даёт.</param>
+/// <param name="Speed">Во сколько раз быстрее руки ломает блоки своего вида.</param>
+public sealed record ToolInfo(string Type, int Tier, float Speed);

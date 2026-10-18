@@ -1,0 +1,12 @@
+{
+  "type": "item",
+  "name": "base:wooden_pickaxe",
+  "maxStackSize": 1,
+  "icon": "wooden_pickaxe",
+  "displayName": "Деревянная кирка",
+  "tool": {
+    "type": "pickaxe",
+    "tier": 1,
+    "speed": 2.0
+  }
+}

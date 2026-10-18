@@ -26,7 +26,7 @@ public sealed class SaveLoadTests : IDisposable
         var eye = new Vector3d(0.5, surface.Y + 3.5, 0.5);
         TestServers.Teleport(server, client, eye);
         client.Send(new UseItem(ItemAction.Primary, eye, -Vector3.UnitY));
-        server.Tick();
+        TestServers.Tick(server, TestServers.HoldBreakTicks);
 
         Assert.True(server.World.Chunks.GetBlock(surface).IsAir);
         return surface;

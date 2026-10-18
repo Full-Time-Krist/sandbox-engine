@@ -14,6 +14,7 @@
 #   tools/playtest.sh move 0 10 30              # 30 шагов по 10 px вниз (относительное движение)
 #   tools/playtest.sh mouse-to 400 300          # курсор в точку кадра (для экрана инвентаря)
 #   tools/playtest.sh click left|right          # клик; drag-to X Y left|right — перетаскивание до точки
+#   tools/playtest.sh hold left 1500            # держать кнопку мыши (ломание удержанием); hold-start/hold-end — без ожидания
 #   tools/playtest.sh scroll -1                 # колесо: +1 — от себя, -1 — на себя
 #   tools/playtest.sh resize 800 600            # размер кадра, например для масштаба интерфейса
 #   tools/playtest.sh shot /path/frame.png      # только кадр, пиксель в пиксель (даже если окно перекрыто)
@@ -210,6 +211,14 @@ cmd_move() {
     sleep 0.3
 }
 
+# Держать кнопку мыши: ломание удержанием ЛКМ. hold-start/hold-end — нажать и отпустить отдельно (скриншот посередине).
+cmd_hold() {
+    local button=${1:-left}
+    [[ $button == left || $button == right ]] || die "кнопка: left или right"
+    send btn "$button" 1; ms "${2:-1000}"; send btn "$button" 0
+    sleep 0.2
+}
+
 # Нажать кнопку, провести курсор до точки кадра и отпустить: перетаскивание по слотам инвентаря.
 cmd_drag_to() {
     local x=$1 y=$2 button=${3:-left}
@@ -278,6 +287,9 @@ case $command in
     mouse-to) cmd_mouse_to "$@" ;;
     click) cmd_click "$@" ;;
     drag-to) cmd_drag_to "$@" ;;
+    hold) cmd_hold "$@" ;;
+    hold-start) send btn "${1:-left}" 1 ;;
+    hold-end) send btn "${1:-left}" 0; sleep 0.2 ;;
     scroll) cmd_scroll "$@" ;;
     resize) cmd_resize "$@" ;;
     shot) cmd_shot "$@" ;;

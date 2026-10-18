@@ -1,0 +1,12 @@
+{
+  "type": "item",
+  "name": "base:copper_pickaxe",
+  "maxStackSize": 1,
+  "icon": "copper_pickaxe",
+  "displayName": "Медная кирка",
+  "tool": {
+    "type": "pickaxe",
+    "tier": 3,
+    "speed": 6.0
+  }
+}

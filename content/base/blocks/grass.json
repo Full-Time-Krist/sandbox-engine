@@ -6,5 +6,7 @@
     "top": "grass_top",
     "side": "grass_side",
     "bottom": "dirt"
-  }
+  },
+  "hardness": 0.9,
+  "tool": "shovel"
 }

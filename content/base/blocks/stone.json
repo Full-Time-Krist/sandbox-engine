@@ -2,5 +2,8 @@
   "type": "block",
   "name": "base:stone",
   "isOpaque": true,
-  "textures": "stone"
+  "textures": "stone",
+  "hardness": 2.25,
+  "tool": "pickaxe",
+  "toolTier": 1
 }

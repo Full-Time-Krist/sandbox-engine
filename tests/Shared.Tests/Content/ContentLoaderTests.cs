@@ -61,6 +61,14 @@ public class ContentLoaderTests
     [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"typo":false}""", "base/stone.json")]
     [InlineData("""{"type":"entity","name":"base:ghost"}""", "base/ghost.json")]
     [InlineData("""{"type":"item","name":"base:stick","maxStackSize":"64"}""", "base/stick.json")]
+    [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"hardness":-1}""", "base/stone.json")]
+    [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"hardness":"hard"}""", "base/stone.json")]
+    [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"toolTier":1}""", "base/stone.json")]
+    [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"tool":"Pick Axe"}""", "base/stone.json")]
+    [InlineData("""{"type":"item","name":"base:pick","maxStackSize":1,"tool":{"type":"pickaxe","tier":1}}""", "base/pick.json")]
+    [InlineData("""{"type":"item","name":"base:pick","maxStackSize":1,"tool":{"type":"pickaxe","speed":0}}""", "base/pick.json")]
+    [InlineData("""{"type":"item","name":"base:pick","maxStackSize":1,"tool":{"type":"pickaxe","speed":2,"power":9}}""", "base/pick.json")]
+    [InlineData("""{"type":"item","name":"base:pick","maxStackSize":1,"tool":"pickaxe"}""", "base/pick.json")]
     [InlineData("""{"type":"item","name":"base:stick","maxStackSize":64,"behavior":"wand"}""", "base/stick.json")]
     [InlineData("""{"type":"item","name":"base:stick","maxStackSize":64,"behavior":42}""", "base/stick.json")]
     [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"textures":"../secret"}""", "base/stone.json")]
@@ -180,6 +188,23 @@ public class ContentLoaderTests
         var exception = Assert.Throws<ContentLoadException>(() => ContentLoader.Load([
             File("base/bad.json", """{"type":"item","name":"base:bad","maxStackSize":1,"icon":"../bad"}""")]));
         Assert.Contains("'icon'", exception.Message);
+    }
+
+    [Fact]
+    public void Load_MiningAndTool_FieldsAndDefaults()
+    {
+        var content = ContentLoader.Load([
+            File("base/stone.json", """{"type":"block","name":"base:stone","isOpaque":true,"hardness":2.25,"tool":"pickaxe","toolTier":1}"""),
+            File("base/glass.json", """{"type":"block","name":"base:glass","isOpaque":false}"""),
+            File("base/pick.json", """{"type":"item","name":"base:pick","maxStackSize":1,"tool":{"type":"pickaxe","tier":2,"speed":4}}"""),
+            File("base/rock.json", """{"type":"item","name":"base:rock","maxStackSize":64}""")
+        ]);
+
+        Assert.Equal(new BlockMining(2.25f, "pickaxe", 1), content.Blocks.Get("base:stone").Mining);
+        Assert.Equal(BlockMining.Default, content.Blocks.Get("base:glass").Mining);
+        Assert.Equal(new ToolInfo("pickaxe", 2, 4), content.Items.Get("base:pick").Tool);
+        Assert.Null(content.Items.Get("base:rock").Tool);
+        Assert.Equal(ItemRegistry.HandBehavior, content.Items.Get("base:pick").Behavior); // инструмент ломает как рука, только быстрее
     }
 
     [Fact]

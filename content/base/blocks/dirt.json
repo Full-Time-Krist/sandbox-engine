@@ -2,5 +2,7 @@
   "type": "block",
   "name": "base:dirt",
   "isOpaque": true,
-  "textures": "dirt"
+  "textures": "dirt",
+  "hardness": 0.75,
+  "tool": "shovel"
 }

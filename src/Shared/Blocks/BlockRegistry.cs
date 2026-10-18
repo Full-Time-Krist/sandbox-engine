@@ -21,11 +21,12 @@ public sealed class BlockRegistry
     public BlockRegistry()
     {
         // Воздух всегда получает id 0: новый массив блоков заполнен нулями, то есть воздухом.
-        Register(AirName, isOpaque: false, isSolid: false);
+        Register(AirName, isOpaque: false, isSolid: false, new BlockMining(0, null, 0));
     }
 
     /// <param name="isSolid">Тела в него упираются. По умолчанию да: таких блоков большинство.</param>
-    public BlockDefinition Register(string name, bool isOpaque, bool isSolid = true)
+    /// <param name="mining">Как блок ломается; null — <see cref="BlockMining.Default"/>.</param>
+    public BlockDefinition Register(string name, bool isOpaque, bool isSolid = true, BlockMining? mining = null)
     {
         if (IsFrozen)
             throw new InvalidOperationException($"Реестр заморожен, блок '{name}' зарегистрировать нельзя.");
@@ -36,7 +37,7 @@ public sealed class BlockRegistry
         if (_byId.Count > ushort.MaxValue)
             throw new InvalidOperationException($"Превышено число типов блоков ({ushort.MaxValue + 1}).");
 
-        var definition = new BlockDefinition(new BlockId((ushort)_byId.Count), name, isOpaque, isSolid);
+        var definition = new BlockDefinition(new BlockId((ushort)_byId.Count), name, isOpaque, isSolid, mining ?? BlockMining.Default);
         _byId.Add(definition);
         _byName.Add(name, definition);
         return definition;

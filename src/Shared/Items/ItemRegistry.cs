@@ -42,7 +42,8 @@ public sealed class ItemRegistry
     /// становится и добычей с него.</param>
     /// <param name="behavior">Имя поведения; null — по умолчанию (<see cref="PlaceBlockBehavior"/> для предмета-блока,
     /// иначе <see cref="HandBehavior"/>).</param>
-    public ItemDefinition Register(string name, int maxStackSize, BlockId? block = null, string? behavior = null)
+    /// <param name="tool">Свойства инструмента; null — не инструмент.</param>
+    public ItemDefinition Register(string name, int maxStackSize, BlockId? block = null, string? behavior = null, ToolInfo? tool = null)
     {
         if (IsFrozen)
             throw new InvalidOperationException($"Реестр заморожен, предмет '{name}' зарегистрировать нельзя.");
@@ -60,7 +61,7 @@ public sealed class ItemRegistry
             throw new ArgumentException($"Имя поведения '{behavior}' должно иметь вид 'namespace:name'.", nameof(behavior));
 
         var definition = new ItemDefinition(new ItemId((ushort)_byId.Count), name, maxStackSize, block,
-            behavior ?? (block != null ? PlaceBlockBehavior : HandBehavior));
+            behavior ?? (block != null ? PlaceBlockBehavior : HandBehavior), tool);
         Add(definition);
         if (block is { } placed)
             _byBlock.TryAdd(placed, definition.Id);

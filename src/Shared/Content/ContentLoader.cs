@@ -180,7 +180,7 @@ public static partial class ContentLoader
             switch (type)
             {
                 case "block":
-                    CheckProperties(root, file, "type", "name", "isOpaque", "isSolid", "textures", "override");
+                    CheckProperties(root, file, "type", "name", "isOpaque", "isSolid", "textures", "hardness", "tool", "toolTier", "override");
                     if (name == BlockRegistry.AirName)
                         throw Error(file, $"имя '{name}' зарезервировано для воздуха и не должно объявляться в JSON.");
                     if (!isOverride && !blockNames.Add(name))
@@ -188,11 +188,11 @@ public static partial class ContentLoader
                     (isOverride ? blockOverrides : blocks).Add(new BlockJson(file.Path, pack, name,
                         RequiredBoolean(root, "isOpaque", file),
                         OptionalBoolean(root, "isSolid", defaultValue: true, file),
-                        OptionalTextures(root, pack, file)));
+                        OptionalTextures(root, pack, file), BlockMiningOf(root, file)));
                     break;
 
                 case "item":
-                    CheckProperties(root, file, "type", "name", "maxStackSize", "placesBlock", "behavior", "displayName", "icon", "override");
+                    CheckProperties(root, file, "type", "name", "maxStackSize", "placesBlock", "behavior", "displayName", "icon", "tool", "override");
                     if (name == ItemRegistry.AirName)
                         throw Error(file, $"имя '{name}' зарезервировано для пустого предмета и не должно объявляться в JSON.");
                     if (!isOverride && !itemNames.Add(name))
@@ -208,7 +208,7 @@ public static partial class ContentLoader
                         throw Error(file, $"behavior '{behavior}' должен иметь вид 'namespace:name'.");
                     var icon = root.TryGetProperty("icon", out var iconValue) ? TextureName(iconValue, "icon", pack, file) : null;
                     (isOverride ? itemOverrides : items).Add(new ItemJson(file.Path, pack, name, maxStackSize, placesBlock, behavior,
-                        OptionalString(root, "displayName", file), icon));
+                        OptionalString(root, "displayName", file), icon, ToolOf(root, file)));
                     break;
 
                 default:
@@ -223,7 +223,7 @@ public static partial class ContentLoader
         var textures = ImmutableDictionary.CreateBuilder<string, BlockTextures>(StringComparer.Ordinal);
         foreach (var block in blocks.OrderBy(block => block.Name, StringComparer.Ordinal))
         {
-            blockRegistry.Register(block.Name, block.IsOpaque, block.IsSolid);
+            blockRegistry.Register(block.Name, block.IsOpaque, block.IsSolid, block.Mining);
             if (block.Textures is not null)
                 textures.Add(block.Name, block.Textures);
         }
@@ -245,7 +245,7 @@ public static partial class ContentLoader
                 placedBlock = definition.Id;
             }
 
-            itemRegistry.Register(item.Name, item.MaxStackSize, placedBlock, item.Behavior);
+            itemRegistry.Register(item.Name, item.MaxStackSize, placedBlock, item.Behavior, item.Tool);
             if (item.DisplayName is not null)
                 displayNames.Add(item.Name, item.DisplayName);
             if (item.Icon is not null)
@@ -365,6 +365,63 @@ public static partial class ContentLoader
             : throw Error(file, $"в 'textures' нет обязательного поля '{face}'.");
     }
 
+    /// <summary>Вид инструмента: имя без пространства имён (<c>pickaxe</c>) — виды общие для всех модов.</summary>
+    [GeneratedRegex("^[a-z_]+$")]
+    private static partial Regex ToolTypePattern();
+
+    /// <summary>
+    /// Поля ломания блока: <c>hardness</c> (секунды рукой, по умолчанию 1), <c>tool</c> (вид инструмента) и <c>toolTier</c>
+    /// (нужный уровень, по умолчанию 0). Уровень без вида инструмента не имеет смысла — ошибка.
+    /// </summary>
+    private static BlockMining BlockMiningOf(JsonElement root, ContentJsonFile file)
+    {
+        var hardness = OptionalNumber(root, "hardness", BlockMining.Default.Hardness, file);
+        if (hardness < 0)
+            throw Error(file, $"hardness не может быть отрицательной, получено {hardness}.");
+        var tool = OptionalString(root, "tool", file);
+        if (tool is not null && !ToolTypePattern().IsMatch(tool))
+            throw Error(file, $"tool '{tool}' должен быть видом инструмента: a–z и _, например \"pickaxe\".");
+        var tier = root.TryGetProperty("toolTier", out _) ? RequiredInt32(root, "toolTier", file) : 0;
+        if (tier < 0)
+            throw Error(file, $"toolTier не может быть отрицательным, получено {tier}.");
+        if (tier > 0 && tool is null)
+            throw Error(file, "toolTier указан без tool: неизвестно, инструмент какого вида нужен.");
+        return new BlockMining(hardness, tool, tier);
+    }
+
+    /// <summary>Поле <c>tool</c> предмета: объект <c>{"type": "pickaxe", "tier": 1, "speed": 2}</c>.</summary>
+    private static ToolInfo? ToolOf(JsonElement root, ContentJsonFile file)
+    {
+        if (!root.TryGetProperty("tool", out var tool))
+            return null;
+        if (tool.ValueKind != JsonValueKind.Object)
+            throw Error(file, "поле 'tool' должно быть объектом {\"type\", \"tier\", \"speed\"}.");
+        CheckNoDuplicates(tool, file);
+        foreach (var property in tool.EnumerateObject())
+        {
+            if (property.Name is not ("type" or "tier" or "speed"))
+                throw Error(file, $"неизвестное поле 'tool.{property.Name}'; допустимы type, tier и speed.");
+        }
+
+        var type = RequiredString(tool, "type", file);
+        if (!ToolTypePattern().IsMatch(type))
+            throw Error(file, $"tool.type '{type}' должен быть видом инструмента: a–z и _, например \"pickaxe\".");
+        var tier = tool.TryGetProperty("tier", out _) ? RequiredInt32(tool, "tier", file) : 0;
+        var speed = (float)OptionalNumber(tool, "speed", double.NaN, file);
+        if (tier < 0 || !(speed > 0))
+            throw Error(file, $"у инструмента tier ≥ 0 и обязательный speed > 0, получено tier {tier}, speed {speed}.");
+        return new ToolInfo(type, tier, speed);
+    }
+
+    private static float OptionalNumber(JsonElement root, string property, double defaultValue, ContentJsonFile file)
+    {
+        if (!root.TryGetProperty(property, out var value))
+            return (float)defaultValue;
+        if (value.ValueKind != JsonValueKind.Number || !value.TryGetDouble(out var number) || !double.IsFinite(number))
+            throw Error(file, $"поле '{property}' должно быть числом.");
+        return (float)number;
+    }
+
     /// <summary>Полное имя текстуры: <c>пакет:имя</c> как есть или короткое <c>имя</c> из своего пакета.</summary>
     private static string TextureName(JsonElement value, string property, string pack, ContentJsonFile file)
     {
@@ -425,7 +482,8 @@ public static partial class ContentLoader
     private static ContentLoadException Error(ContentJsonFile file, string message) =>
         new($"Файл '{file.Path}': {message}");
 
-    private sealed record BlockJson(string Path, string Pack, string Name, bool IsOpaque, bool IsSolid, BlockTextures? Textures);
+    private sealed record BlockJson(string Path, string Pack, string Name, bool IsOpaque, bool IsSolid, BlockTextures? Textures,
+        BlockMining Mining);
     private sealed record ItemJson(string Path, string Pack, string Name, int MaxStackSize, string? PlacesBlock, string? Behavior,
-        string? DisplayName, string? Icon);
+        string? DisplayName, string? Icon, ToolInfo? Tool);
 }

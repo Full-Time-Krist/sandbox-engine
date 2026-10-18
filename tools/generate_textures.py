@@ -1,4 +1,5 @@
-"""Генерирует текстуры-заглушки блоков 16×16 в src/Client/Assets/Textures/Blocks.
+"""Генерирует текстуры-заглушки 16×16: блоки — в src/Client/Assets/Textures/Blocks, картинки предметов — в …/Items,
+стадии трещин при ломании — в …/Effects.
 
 Без зависимостей (PNG пишется вручную через zlib), seed фиксирован: результат всегда одинаковый.
 Запуск из корня репозитория: python tools/generate_textures.py
@@ -11,11 +12,16 @@ import zlib
 from pathlib import Path
 
 SIZE = 16
-OUT_DIR = Path(__file__).resolve().parent.parent / "src" / "Client" / "Assets" / "Textures" / "Blocks"
+TEXTURES_DIR = Path(__file__).resolve().parent.parent / "src" / "Client" / "Assets" / "Textures"
+OUT_DIR = TEXTURES_DIR / "Blocks"
+ITEMS_DIR = TEXTURES_DIR / "Items"
+EFFECTS_DIR = TEXTURES_DIR / "Effects"
+CLEAR = (0, 0, 0, 0)
 
 
 def write_png(path: Path, pixels: list[list[tuple[int, int, int]]]) -> None:
-    raw = b"".join(b"\x00" + bytes(c for px in row for c in (*px, 255)) for row in pixels)
+    # Пиксель — (r, g, b) непрозрачный или (r, g, b, a) с прозрачностью (картинки предметов, трещины).
+    raw = b"".join(b"\x00" + bytes(c for px in row for c in (px if len(px) == 4 else (*px, 255))) for row in pixels)
 
     def chunk(tag: bytes, data: bytes) -> bytes:
         return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
@@ -149,12 +155,100 @@ TEXTURES = {
 }
 
 
+# --- Картинки предметов: инструменты. Рукоять по диагонали снизу слева, навершие вверху справа. ---
+
+MATERIALS = {  # навершие: основной цвет и блик
+    "wooden": ((150, 108, 60), (190, 146, 88)),
+    "stone": ((120, 120, 124), (165, 165, 170)),
+    "copper": ((196, 110, 58), (236, 160, 98)),
+}
+HANDLE, HANDLE_LIGHT = (96, 64, 34), (130, 92, 52)
+
+
+def blank():
+    return [[CLEAR] * SIZE for _ in range(SIZE)]
+
+
+def handle(px, length):
+    for i in range(length):  # от (2, 13) вверх вправо
+        x, y = 2 + i, 13 - i
+        px[y][x] = HANDLE
+        px[y][x + 1] = HANDLE_LIGHT
+
+
+def tool(kind, material):
+    base, light = MATERIALS[material]
+    px = blank()
+    if kind == "pickaxe":
+        handle(px, 10)
+        for x, y in ((6, 3), (7, 2), (8, 2), (9, 2), (10, 2), (11, 3), (12, 3), (12, 4), (13, 5), (13, 6), (13, 7), (14, 8), (5, 4), (4, 5)):
+            px[y][x] = base
+        for x, y in ((8, 3), (9, 3), (10, 3), (11, 4), (12, 5)):
+            px[y][x] = light
+    elif kind == "axe":
+        handle(px, 10)
+        for y in range(2, 9):
+            for x in range(9, 9 + (4 if 3 <= y <= 7 else 3)):
+                px[y][x] = base
+        for y in range(3, 8):
+            px[y][9] = light
+    else:  # shovel
+        handle(px, 8)
+        for x, y in ((10, 2), (11, 2), (12, 2), (9, 3), (10, 3), (11, 3), (12, 3), (13, 3), (9, 4), (10, 4), (11, 4), (12, 4),
+                     (13, 4), (10, 5), (11, 5), (12, 5)):
+            px[y][x] = base
+        for x, y in ((10, 3), (11, 3), (10, 4)):
+            px[y][x] = light
+    return px
+
+
+ITEMS = {f"{material}_{kind}": (lambda kind=kind, material=material: tool(kind, material))
+         for material in MATERIALS for kind in ("pickaxe", "axe", "shovel")}
+
+
+# --- Стадии трещин: 0 — едва заметная, 9 — почти разваленный блок. Тёмные линии с прозрачностью поверх блока. ---
+
+def crack_paths(rng):
+    """Ломаные из центра к краям: стадия N рисует первые части каждой ломаной."""
+    paths = []
+    for angle in range(8):
+        x, y = 7.5, 7.5
+        dx, dy = [(1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1)][angle]
+        path = []
+        for _ in range(10):
+            x += dx + rng.uniform(-0.6, 0.6)
+            y += dy + rng.uniform(-0.6, 0.6)
+            path.append((int(x), int(y)))
+        paths.append(path)
+    return paths
+
+
+def crack(stage, paths):
+    px = blank()
+    for path in paths:
+        for x, y in path[: stage + 1]:
+            if 0 <= x < SIZE and 0 <= y < SIZE:
+                px[y][x] = (20, 20, 20, 200)
+    return px
+
+
 def main() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     for name, generate in TEXTURES.items():
         rng = random.Random(name)  # свой seed у каждой текстуры: правка одной не меняет остальные
         write_png(OUT_DIR / f"{name}.png", generate(rng))
         print(f"{name}.png")
+
+    ITEMS_DIR.mkdir(parents=True, exist_ok=True)
+    for name, generate in ITEMS.items():
+        write_png(ITEMS_DIR / f"{name}.png", generate())
+        print(f"Items/{name}.png")
+
+    EFFECTS_DIR.mkdir(parents=True, exist_ok=True)
+    paths = crack_paths(random.Random("crack"))
+    for stage in range(10):
+        write_png(EFFECTS_DIR / f"destroy_{stage}.png", crack(stage, paths))
+    print("Effects/destroy_0..9.png")
 
 
 if __name__ == "__main__":

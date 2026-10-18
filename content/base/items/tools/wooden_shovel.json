@@ -1,0 +1,12 @@
+{
+  "type": "item",
+  "name": "base:wooden_shovel",
+  "maxStackSize": 1,
+  "icon": "wooden_shovel",
+  "displayName": "Деревянная лопата",
+  "tool": {
+    "type": "shovel",
+    "tier": 1,
+    "speed": 2.0
+  }
+}

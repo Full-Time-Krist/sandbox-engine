@@ -219,7 +219,7 @@ public sealed class GameServerTests : IDisposable
         var eye = new Vector3(0.5f, surface.Y + 3.5f, 0.5f);
         TestServers.Teleport(server, near, eye);
         near.Send(new UseItem(Shared.Items.ItemAction.Primary, eye, -Vector3.UnitY));
-        server.Tick();
+        TestServers.Tick(server, TestServers.HoldBreakTicks);
 
         Assert.Contains(Drain(near), m => m is BlockChanged);
         Assert.DoesNotContain(Drain(far), m => m is BlockChanged);

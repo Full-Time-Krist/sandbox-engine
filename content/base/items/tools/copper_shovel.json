@@ -1,0 +1,12 @@
+{
+  "type": "item",
+  "name": "base:copper_shovel",
+  "maxStackSize": 1,
+  "icon": "copper_shovel",
+  "displayName": "Медная лопата",
+  "tool": {
+    "type": "shovel",
+    "tier": 3,
+    "speed": 6.0
+  }
+}

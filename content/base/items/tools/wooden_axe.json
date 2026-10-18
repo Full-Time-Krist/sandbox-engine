@@ -1,0 +1,12 @@
+{
+  "type": "item",
+  "name": "base:wooden_axe",
+  "maxStackSize": 1,
+  "icon": "wooden_axe",
+  "displayName": "Деревянный топор",
+  "tool": {
+    "type": "axe",
+    "tier": 1,
+    "speed": 2.0
+  }
+}

@@ -2,5 +2,7 @@
   "type": "block",
   "name": "base:sand",
   "isOpaque": true,
-  "textures": "sand"
+  "textures": "sand",
+  "hardness": 0.75,
+  "tool": "shovel"
 }

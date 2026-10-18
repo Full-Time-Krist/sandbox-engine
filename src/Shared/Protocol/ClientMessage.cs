@@ -54,3 +54,9 @@ public sealed record CreativeGiveItem(ItemId Item) : ClientMessage;
 /// Так новые предметы (инструменты, еда, оружие) не потребуют новых сообщений.
 /// </summary>
 public sealed record UseItem(ItemAction Action, Vector3d EyePosition, Vector3 LookDirection) : ClientMessage;
+
+/// <summary>
+/// Игрок отпустил ЛКМ или отвёл взгляд от блока: незаконченное ломание отменяется. Начинает ломание сам <see cref="UseItem"/>
+/// с основным действием (предмет в руке на сервере решает, ломать ли).
+/// </summary>
+public sealed record StopBreaking : ClientMessage;

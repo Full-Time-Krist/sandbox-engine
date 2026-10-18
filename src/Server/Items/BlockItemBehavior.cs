@@ -5,7 +5,7 @@ using Shared.Voxels;
 namespace Server.Items;
 
 /// <summary>
-/// Предмет-блок в руке (<c>base:place_block</c>): основное действие ломает блок под прицелом (как рукой),
+/// Предмет-блок в руке (<c>base:place_block</c>): основное действие начинает ломать блок под прицелом (как рукой),
 /// дополнительное ставит этот блок рядом. Регистрирует встроенный мод <see cref="Modding.BaseMod"/>.
 /// </summary>
 internal sealed class BlockItemBehavior : IItemBehavior
@@ -15,7 +15,8 @@ internal sealed class BlockItemBehavior : IItemBehavior
         switch (action)
         {
             case ItemAction.Primary:
-                HandBehavior.BreakTarget(context);
+                if (context.Target is { } breakTarget)
+                    context.Breaker.StartBreaking(breakTarget.Block);
                 break;
 
             case ItemAction.Secondary:

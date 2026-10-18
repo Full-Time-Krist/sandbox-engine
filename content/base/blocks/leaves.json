@@ -2,5 +2,6 @@
   "type": "block",
   "name": "base:leaves",
   "isOpaque": true,
-  "textures": "leaves"
+  "textures": "leaves",
+  "hardness": 0.3
 }

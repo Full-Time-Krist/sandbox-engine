@@ -1,5 +1,6 @@
 using Shared.Blocks;
 using Shared.Content;
+using Shared.Items;
 using Shared.Modding;
 
 namespace Shared.Tests.Content;
@@ -39,13 +40,31 @@ public class GameContentTests
     [Fact]
     public void EveryBlock_HasItemWithSameName_ThatPlacesIt()
     {
-        Assert.Equal(_content.Blocks.Count, _content.Items.Count); // воздух есть в обоих
         foreach (var block in _content.Blocks.All.Where(block => !block.Id.IsAir))
         {
             var item = _content.Items.Get(block.Name);
             Assert.Equal(block.Id, item.Block);
             Assert.Equal(64, item.MaxStackSize);
             Assert.Equal(item.Id, _content.Items.ForBlock(block.Id));
+        }
+    }
+
+    /// <summary>Лестница инструментов: камень — деревянной киркой и выше, медь — каменной и выше; остальное — рукой.</summary>
+    [Fact]
+    public void VanillaMining_ToolLadder()
+    {
+        Assert.Equal(new BlockMining(2.25f, "pickaxe", 1), _content.Blocks.Get("base:stone").Mining);
+        Assert.Equal(new BlockMining(4.5f, "pickaxe", 2), _content.Blocks.Get("base:copper_ore").Mining);
+        foreach (var name in new[] { "base:dirt", "base:grass", "base:sand", "base:log", "base:planks", "base:leaves" })
+            Assert.Equal(0, _content.Blocks.Get(name).Mining.ToolTier);
+
+        foreach (var (material, tier, speed) in new[] { ("wooden", 1, 2f), ("stone", 2, 4f), ("copper", 3, 6f) })
+        foreach (var kind in new[] { "pickaxe", "axe", "shovel" })
+        {
+            var tool = _content.Items.Get($"base:{material}_{kind}");
+            Assert.Equal(new ToolInfo(kind, tier, speed), tool.Tool);
+            Assert.Equal(1, tool.MaxStackSize);
+            Assert.Equal($"base:{material}_{kind}", _content.ItemIcons[tool.Name]);
         }
     }
 

@@ -1,0 +1,12 @@
+{
+  "type": "item",
+  "name": "base:stone_axe",
+  "maxStackSize": 1,
+  "icon": "stone_axe",
+  "displayName": "Каменный топор",
+  "tool": {
+    "type": "axe",
+    "tier": 2,
+    "speed": 4.0
+  }
+}

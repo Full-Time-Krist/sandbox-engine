@@ -18,7 +18,9 @@ public interface IItemBehavior
 /// <param name="Player">Игрок, применивший предмет; предмет в руке — выбранный слот его инвентаря.</param>
 /// <param name="Target">Блок под прицелом по лучу, повторённому сервером, или null, если в пределах дальности пусто.</param>
 /// <param name="EyePosition">Точка глаза игрока, из которой сервер пускал луч.</param>
-public readonly record struct ItemUseContext(IWorld World, ItemRegistry Items, IPlayer Player, BlockHit? Target, Vector3d EyePosition)
+/// <param name="Breaker">Ломание удержанием от имени этого игрока: так ломают рука и инструменты.</param>
+public readonly record struct ItemUseContext(IWorld World, ItemRegistry Items, IPlayer Player, BlockHit? Target, Vector3d EyePosition,
+    IBlockBreaker Breaker)
 {
     public Inventory Inventory => Player.Inventory;
 

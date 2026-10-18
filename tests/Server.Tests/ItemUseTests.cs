@@ -59,22 +59,29 @@ public sealed class ItemUseTests : IDisposable
 
     private ItemStack Stack(BlockId block, int count) => new(_items.ForBlock(block), count);
 
-    /// <summary>Отправляет сообщения от основного клиента, тикает сервер и возвращает полученные изменения блоков.</summary>
+    /// <summary>
+    /// Отправляет сообщения от основного клиента, тикает сервер и возвращает полученные изменения блоков. Основное действие
+    /// ломает удержанием, поэтому с ним сервер тикает <see cref="TestServers.HoldBreakTicks"/> раз — как если бы ЛКМ держали.
+    /// </summary>
     private List<BlockChanged> Send(params ClientMessage[] messages)
     {
         foreach (var message in messages)
             _client.Send(message);
-        _server.Tick();
+        var holdsPrimary = messages.Any(m => m is UseItem { Action: ItemAction.Primary });
 
         // Если игрок перешёл в другой чанк, вместе с изменениями могут прийти чанки: они здесь не важны.
         var changes = new List<BlockChanged>();
         _inventoryChanges.Clear();
-        while (_client.TryReceive(out var message))
+        for (var tick = 0; tick < (holdsPrimary ? TestServers.HoldBreakTicks : 1); tick++)
         {
-            if (message is BlockChanged change)
-                changes.Add(change);
-            if (message is InventoryChanged inventoryChange)
-                _inventoryChanges.Add(inventoryChange);
+            _server.Tick();
+            while (_client.TryReceive(out var message))
+            {
+                if (message is BlockChanged change)
+                    changes.Add(change);
+                if (message is InventoryChanged inventoryChange)
+                    _inventoryChanges.Add(inventoryChange);
+            }
         }
         return changes;
     }

@@ -65,7 +65,8 @@ public sealed class ModEventsTests : IDisposable
         var feet = new Vector3d(0.5, _surface.Y + 2, 0.5);
         TestServers.Teleport(_server, _client, feet);
         _client.Send(new UseItem(action, feet + new Vector3d(0, PlayerPhysics.EyeHeight, 0), Down));
-        _server.Tick();
+        // ЛКМ ломает удержанием — держим, пока блок у поверхности наверняка сломается.
+        TestServers.Tick(_server, action == ItemAction.Primary ? TestServers.HoldBreakTicks : 1);
         while (_client.TryReceive(out _)) { }
     }
 

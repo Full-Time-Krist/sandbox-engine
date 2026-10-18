@@ -119,7 +119,7 @@ public sealed class ExampleModTests : IDisposable
         // Пустой рукой (слот 2) ломаем руду: одну штуку даёт игра, вторую — обработчик мода.
         client.Send(new SelectHotbarSlot(1));
         client.Send(new UseItem(ItemAction.Primary, eye, Down));
-        _server.Tick();
+        TestServers.Tick(_server, TestServers.HoldBreakTicks); // ломание удержанием: у руды мода твёрдость по умолчанию — 1 с
         Assert.True(_server.World.Chunks.GetBlock(surface).IsAir);
         Assert.Equal(new ItemStack(content.Items.Get("example_mod:amethyst_ore").Id, 2), inventory[1]);
         Assert.Contains("[Mod example_mod] Tester добыл аметистовую руду: +1 в награду", _log);

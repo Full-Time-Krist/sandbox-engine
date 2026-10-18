@@ -1,0 +1,12 @@
+{
+  "type": "item",
+  "name": "base:copper_axe",
+  "maxStackSize": 1,
+  "icon": "copper_axe",
+  "displayName": "Медный топор",
+  "tool": {
+    "type": "axe",
+    "tier": 3,
+    "speed": 6.0
+  }
+}

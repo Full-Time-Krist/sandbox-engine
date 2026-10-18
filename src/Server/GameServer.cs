@@ -237,6 +237,14 @@ public sealed class GameServer : IDisposable
             }
         }
 
+        // Ломание удержанием: по тикам сервера, а не по сообщениям клиента — ломать быстрее положенного нельзя.
+        foreach (var session in _sessions)
+        {
+            if (session.IsJoined && session.Breaking != null)
+                ContinueBreaking(session);
+        }
+        _events.Dispatch();
+
         World.CollectGenerated();
         foreach (var session in _sessions)
         {
@@ -403,6 +411,10 @@ public sealed class GameServer : IDisposable
                 HandleUseItem(session, use);
                 break;
 
+            case StopBreaking when session.IsJoined:
+                session.Breaking = null;
+                break;
+
             default:
                 // До JoinRequest принимается только он сам. Незнакомое сообщение — ошибка протокола, а не повод падать.
                 Console.WriteLine($"[Server] Сообщение {message.GetType().Name} отклонено (joined: {session.IsJoined})");
@@ -532,7 +544,79 @@ public sealed class GameServer : IDisposable
         // Сервер сам повторяет луч по своей копии мира: клиент не может указать произвольный блок.
         var target = VoxelRaycast.Cast(World.Chunks, use.EyePosition, use.LookDirection, GameRules.BlockReach);
         _behaviors[session.Inventory.Selected.Item.Value].Use(use.Action,
-            new ItemUseContext(_editor, _items, session, target, use.EyePosition));
+            new ItemUseContext(_editor, _items, session, target, use.EyePosition, new Breaker(this, session)));
+    }
+
+    /// <summary>
+    /// Начинает ломание блока игроком (<see cref="IBlockBreaker"/>): запоминает цель, тик и нужное число тиков по твёрдости
+    /// и инструменту в руке. В творческом режиме и у блока с нулевой твёрдостью ломает сразу.
+    /// </summary>
+    private void StartBreaking(ClientSession session, BlockPos pos)
+    {
+        var block = World.Chunks.GetBlock(pos);
+        if (block.IsAir)
+        {
+            session.Breaking = null;
+            return;
+        }
+
+        var held = session.Inventory.Selected.Item;
+        var ticks = session.Mode == GameMode.Creative ? 0 : Mining.BreakTicks(_registry.Get(block).Mining, _items.Get(held).Tool);
+        session.Breaking = new BlockBreaking(pos, block, _tick, ticks, session.Inventory.SelectedSlot, held);
+        if (ticks == 0)
+            FinishBreaking(session);
+    }
+
+    /// <summary>
+    /// Тик ломания: отменяет его, если блок уже не тот, игрок сменил предмет или отошёл дальше досягаемости; завершает,
+    /// когда прошло нужное число тиков.
+    /// </summary>
+    private void ContinueBreaking(ClientSession session)
+    {
+        var breaking = session.Breaking!.Value;
+        var eye = session.PlayerPosition + new Vector3d(0, PlayerPhysics.EyeHeight, 0);
+        var center = new Vector3d(breaking.Position.X + 0.5, breaking.Position.Y + 0.5, breaking.Position.Z + 0.5);
+        if (World.Chunks.GetBlock(breaking.Position) != breaking.Block
+            || session.Inventory.SelectedSlot != breaking.Slot || session.Inventory.Selected.Item != breaking.Held
+            // Луч до любой точки блока не длиннее BlockReach: до центра — не дальше ещё половины диагонали куба.
+            || Vector3d.Distance(eye, center) > GameRules.BlockReach + 0.87)
+        {
+            session.Breaking = null;
+            return;
+        }
+
+        if (_tick - breaking.StartTick >= breaking.Ticks)
+            FinishBreaking(session);
+    }
+
+    /// <summary>
+    /// Ломает блок и в выживании кладёт добычу, если инструмент позволяет её получить. Если добыча положена, а класть
+    /// некуда, блок не ломается: предметов на земле пока нет, и добыча пропала бы молча. Без добычи (рука по камню)
+    /// блок ломается всегда.
+    /// </summary>
+    private void FinishBreaking(ClientSession session)
+    {
+        var breaking = session.Breaking!.Value;
+        session.Breaking = null;
+
+        if (session.Mode == GameMode.Creative)
+        {
+            _editor.TryBreakBlock(breaking.Position, session);
+            return;
+        }
+
+        var harvest = Mining.CanHarvest(_registry.Get(breaking.Block).Mining, _items.Get(breaking.Held).Tool);
+        var drop = harvest ? new ItemStack(_items.ForBlock(breaking.Block), 1) : ItemStack.Empty;
+        if (!session.Inventory.CanAdd(drop))
+            return;
+        if (_editor.TryBreakBlock(breaking.Position, session))
+            session.Inventory.Add(drop);
+    }
+
+    /// <summary>Ломание от имени игрока для поведений предметов (<see cref="ItemUseContext.Breaker"/>).</summary>
+    private sealed class Breaker(GameServer server, ClientSession session) : IBlockBreaker
+    {
+        public void StartBreaking(BlockPos pos) => server.StartBreaking(session, pos);
     }
 
     private static bool IsValidPosition(Vector3d position) =>
