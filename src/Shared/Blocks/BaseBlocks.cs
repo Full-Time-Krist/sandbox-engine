@@ -12,6 +12,8 @@ public sealed class BaseBlocks
     public BlockId Sand { get; }
     public BlockId Log { get; }
     public BlockId Planks { get; }
+    public BlockId Leaves { get; }
+    public BlockId CopperOre { get; }
 
     private BaseBlocks(BlockRegistry registry)
     {
@@ -21,6 +23,8 @@ public sealed class BaseBlocks
         Sand = registry.Get("base:sand").Id;
         Log = registry.Get("base:log").Id;
         Planks = registry.Get("base:planks").Id;
+        Leaves = registry.Get("base:leaves").Id;
+        CopperOre = registry.Get("base:copper_ore").Id;
     }
 
     /// <exception cref="KeyNotFoundException">В реестре нет одного из ванильных блоков: контент неполный.</exception>

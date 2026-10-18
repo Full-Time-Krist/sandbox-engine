@@ -56,12 +56,12 @@ public sealed class ExampleModTests : IDisposable
     {
         var content = GameContent.Load([ExampleMod()]);
 
-        Assert.True(content.Blocks.TryGet("example_mod:copper_ore", out _));
+        Assert.True(content.Blocks.TryGet("example_mod:amethyst_ore", out _));
         Assert.Equal("example_mod:wand", content.Items.Get("example_mod:wand").Behavior);
-        Assert.Equal(new BlockTextures("example_mod:copper_ore", "example_mod:copper_ore", "example_mod:copper_ore"),
-            content.BlockTextures["example_mod:copper_ore"]);
+        Assert.Equal(new BlockTextures("example_mod:amethyst_ore", "example_mod:amethyst_ore", "example_mod:amethyst_ore"),
+            content.BlockTextures["example_mod:amethyst_ore"]);
         Assert.Equal("Волшебная палочка", content.ItemDisplayNames["example_mod:wand"]);
-        Assert.True(File.Exists(Path.Combine(ExampleMod().BlockTextureDirectory, "copper_ore.png")));
+        Assert.True(File.Exists(Path.Combine(ExampleMod().BlockTextureDirectory, "amethyst_ore.png")));
         // Картинка предмета — из textures/items мода.
         Assert.Equal("example_mod:wand", content.ItemIcons["example_mod:wand"]);
         Assert.True(File.Exists(Path.Combine(ExampleMod().ItemTextureDirectory, "wand.png")));
@@ -114,15 +114,15 @@ public sealed class ExampleModTests : IDisposable
         TestServers.Teleport(_server, client, feet);
         client.Send(new UseItem(ItemAction.Primary, eye, Down));
         _server.Tick();
-        Assert.Equal(content.Blocks.Get("example_mod:copper_ore").Id, _server.World.Chunks.GetBlock(surface));
+        Assert.Equal(content.Blocks.Get("example_mod:amethyst_ore").Id, _server.World.Chunks.GetBlock(surface));
 
         // Пустой рукой (слот 2) ломаем руду: одну штуку даёт игра, вторую — обработчик мода.
         client.Send(new SelectHotbarSlot(1));
         client.Send(new UseItem(ItemAction.Primary, eye, Down));
         _server.Tick();
         Assert.True(_server.World.Chunks.GetBlock(surface).IsAir);
-        Assert.Equal(new ItemStack(content.Items.Get("example_mod:copper_ore").Id, 2), inventory[1]);
-        Assert.Contains("[Mod example_mod] Tester добыл медную руду: +1 в награду", _log);
+        Assert.Equal(new ItemStack(content.Items.Get("example_mod:amethyst_ore").Id, 2), inventory[1]);
+        Assert.Contains("[Mod example_mod] Tester добыл аметистовую руду: +1 в награду", _log);
     }
 
     [Fact]

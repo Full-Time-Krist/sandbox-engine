@@ -18,8 +18,10 @@ public class GameContentTests
     {
         (string Name, bool Opaque, bool Solid, BlockTextures Textures)[] expected =
         [
+            ("base:copper_ore", true, true, Uniform("copper_ore")),
             ("base:dirt", true, true, Uniform("dirt")),
             ("base:grass", true, true, new("base:grass_top", "base:grass_side", "base:dirt")),
+            ("base:leaves", true, true, Uniform("leaves")),
             ("base:log", true, true, new("base:log_top", "base:log_side", "base:log_top")),
             ("base:planks", true, true, Uniform("planks")),
             ("base:sand", true, true, Uniform("sand")),

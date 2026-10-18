@@ -61,8 +61,13 @@ public class TerrainGeneratorTests
 
         var surface = map.GetBlock(new BlockPos(x, height - 1, z));
         Assert.Contains(surface, new[] { _blocks.Grass, _blocks.Sand, _blocks.Stone });
-        Assert.True(map.GetBlock(new BlockPos(x, height, z)).IsAir, "Над поверхностью не воздух");
-        Assert.Equal(_blocks.Stone, map.GetBlock(new BlockPos(x, height - 10, z)));
+        // Над поверхностью — воздух, если здесь не стоит дерево (ствол или крона, своего или соседнего).
+        var above = map.GetBlock(new BlockPos(x, height, z));
+        if (generator.HasTreeBlock(x, z, height, height))
+            Assert.Contains(above, new[] { _blocks.Log, _blocks.Leaves });
+        else
+            Assert.True(above.IsAir, "Над поверхностью не воздух");
+        Assert.Contains(map.GetBlock(new BlockPos(x, height - 10, z)), new[] { _blocks.Stone, _blocks.CopperOre });
     }
 
     [Fact]
@@ -114,7 +119,160 @@ public class TerrainGeneratorTests
 
         Assert.True(above.IsEmpty);
         Assert.Equal(ChunkMath.Volume, below.NonAirCount);
-        Assert.All(below.Blocks.ToArray(), b => Assert.Equal(_blocks.Stone, b));
+        // Глубоко — камень с жилами руды: быстрый путь для сплошного камня руду не пропускает.
+        Assert.All(below.Blocks.ToArray(), b => Assert.Contains(b, new[] { _blocks.Stone, _blocks.CopperOre }));
+        Assert.Contains(_blocks.CopperOre, below.Blocks.ToArray());
+    }
+
+    // --- Деревья и руда ---
+
+    /// <summary>Деревья в квадрате ячеек вокруг начала мира.</summary>
+    private static List<TerrainGenerator.Tree> Trees(TerrainGenerator generator, int cells = 40)
+    {
+        var trees = new List<TerrainGenerator.Tree>();
+        for (var cx = -cells; cx < cells; cx++)
+        for (var cz = -cells; cz < cells; cz++)
+        {
+            if (generator.TreeInCell(cx, cz) is { } tree)
+                trees.Add(tree);
+        }
+        return trees;
+    }
+
+    [Fact]
+    public void Trees_ForestsAndClearings_OnlyOnGrass()
+    {
+        var generator = Generator();
+        var near = Trees(generator);
+        // 80 × 80 ячеек у начала мира: деревья есть, но не в каждой ячейке.
+        Assert.InRange(near.Count, 300, 80 * 80 * 0.8);
+        foreach (var tree in near.Take(30))
+        {
+            var under = new BlockPos(tree.X, tree.Base - 1, tree.Z);
+            Assert.Equal(_blocks.Grass, generator.Generate(under.Chunk).Get(under.Local));
+        }
+
+        // Широко (±2000 блоков, каждая третья ячейка), чтобы попали пляжи и голые горы: ни одного дерева там.
+        var (beaches, rocks, trees) = (0, 0, 0);
+        for (var cx = -330; cx < 330; cx += 3)
+        for (var cz = -330; cz < 330; cz += 3)
+        {
+            var h = generator.SurfaceHeight(cx * TerrainGenerator.TreeCellSize, cz * TerrainGenerator.TreeCellSize);
+            beaches += h <= TerrainGenerator.SeaLevel + TerrainGenerator.BeachHeight ? 1 : 0;
+            rocks += h >= TerrainGenerator.BareRockHeight ? 1 : 0;
+            if (generator.TreeInCell(cx, cz) is not { } tree)
+                continue;
+            trees++;
+            Assert.InRange(tree.Base, TerrainGenerator.SeaLevel + TerrainGenerator.BeachHeight + 1, TerrainGenerator.BareRockHeight - 1);
+        }
+        Assert.True(beaches > 0 && rocks > 0 && trees > 0, $"Выборка без пляжей ({beaches}), гор ({rocks}) или деревьев ({trees})");
+    }
+
+    /// <summary>
+    /// Дерево на границе чанков: его ствол в одном чанке, а часть кроны — в соседнем, и соседний чанк строит её сам,
+    /// хотя генерируется отдельно. Проверяем все блоки кроны, попавшие в воздух над рельефом.
+    /// </summary>
+    [Fact]
+    public void TreeAcrossChunkBorder_IsBuiltByBothChunks()
+    {
+        var generator = Generator();
+        // Трудный случай: ячейка дерева целиком в одном чанке, а крона заходит в соседний. Так бывает, где граница ячеек
+        // совпадает с границей чанков (каждые 96 блоков): соседний чанк сам свою ячейку с этим деревом не задевает и должен
+        // найти дерево по кроне. Если бы ячейка пересекала границу, тест прошёл бы и при поиске деревьев без запаса на крону.
+        static bool CellInOneChunk(int x) =>
+            Math.Floor(x / (double)TerrainGenerator.TreeCellSize) * TerrainGenerator.TreeCellSize is var start
+            && ((int)start >> ChunkMath.Bits) == (((int)start + TerrainGenerator.TreeCellSize - 1) >> ChunkMath.Bits);
+        var trees = Trees(generator, cells: 120);
+        // Проверяем только точки, куда блок может поставить лишь это дерево: в лесу крона соседа часто занимает те же
+        // места, и тогда листья были бы на месте и без кроны проверяемого дерева (так тест сначала не ловил поломку).
+        bool OnlyThisTree(TerrainGenerator.Tree tree, int x, int y, int z) =>
+            trees.All(other => other == tree || generator.TreeBlock(other, x, y, z) == null);
+        bool HasUniqueAcross(TerrainGenerator.Tree t)
+        {
+            var x = t.X + TerrainGenerator.TreeCanopyRadius;
+            for (var y = t.Base; y <= t.Top; y++)
+            for (var z = t.Z - TerrainGenerator.TreeCanopyRadius; z <= t.Z + TerrainGenerator.TreeCanopyRadius; z++)
+            {
+                if (generator.TreeBlock(t, x, y, z) != null && y >= generator.SurfaceHeight(x, z) && OnlyThisTree(t, x, y, z))
+                    return true;
+            }
+            return false;
+        }
+        var tree = trees.First(t => CellInOneChunk(t.X)
+            && ((t.X + TerrainGenerator.TreeCanopyRadius) >> ChunkMath.Bits) != (t.X >> ChunkMath.Bits)
+            && HasUniqueAcross(t));
+        var map = new ChunkMap();
+        for (var y = tree.Base; y <= tree.Top; y++)
+        for (var dx = -TerrainGenerator.TreeCanopyRadius; dx <= TerrainGenerator.TreeCanopyRadius; dx++)
+        {
+            var chunk = new BlockPos(tree.X + dx, y, tree.Z).Chunk;
+            if (map.Get(chunk) == null)
+                map.Set(generator.Generate(chunk));
+        }
+
+        var checkedAcross = 0;
+        for (var y = tree.Base; y <= tree.Top; y++)
+        for (var x = tree.X - TerrainGenerator.TreeCanopyRadius; x <= tree.X + TerrainGenerator.TreeCanopyRadius; x++)
+        for (var z = tree.Z - TerrainGenerator.TreeCanopyRadius; z <= tree.Z + TerrainGenerator.TreeCanopyRadius; z++)
+        {
+            if (generator.TreeBlock(tree, x, y, z) is not { } expected || y < generator.SurfaceHeight(x, z)
+                || !OnlyThisTree(tree, x, y, z))
+                continue;
+            var actual = map.GetBlock(new BlockPos(x, y, z));
+            Assert.True(actual == expected, $"({x}, {y}, {z}): {actual}, ждали {expected}");
+            if (x >> ChunkMath.Bits != tree.X >> ChunkMath.Bits)
+                checkedAcross++;
+        }
+        Assert.True(checkedAcross > 0, "Ни одного блока кроны в соседнем чанке — тест ничего не проверил");
+    }
+
+    [Fact]
+    public void Generation_DoesNotDependOnOrder()
+    {
+        // Порядок генерации чанков в игре случаен (фоновые потоки): один генератор в одном порядке, другой — в обратном.
+        var positions = Enumerable.Range(-2, 4).SelectMany(x => Enumerable.Range(-2, 4).Select(z => new ChunkPos(x, 0, z))).ToList();
+        var first = positions.Select(Generator().Generate).ToList();
+        var second = Enumerable.Reverse(positions).Select(Generator().Generate).Reverse().ToList();
+
+        for (var i = 0; i < positions.Count; i++)
+            Assert.True(first[i].Blocks.SequenceEqual(second[i].Blocks), $"Чанк {positions[i]} отличается");
+    }
+
+    [Fact]
+    public void CopperOre_OnlyWhereStoneWouldBe()
+    {
+        var generator = Generator();
+        var ore = 0;
+        foreach (var (cx, cz) in Grid(radius: 4, step: 1))
+        {
+            var chunk = generator.Generate(new ChunkPos(cx, -1, cz));
+            var origin = chunk.Position.Origin;
+            for (var i = 0; i < ChunkMath.Volume; i++)
+            {
+                if (chunk.Blocks[i] != _blocks.CopperOre)
+                    continue;
+                ore++;
+                var local = LocalPos.FromIndex(i);
+                var x = origin.X + local.X;
+                var z = origin.Z + local.Z;
+                // Камень начинается глубже верхнего блока и слоя земли (3 блока).
+                Assert.True(origin.Y + local.Y < generator.SurfaceHeight(x, z) - 4, $"Руда не в камне: ({x}, {origin.Y + local.Y}, {z})");
+            }
+        }
+        Assert.True(ore > 0, "Руды нет совсем");
+    }
+
+    [Fact]
+    public void SpawnColumn_AvoidsTrees()
+    {
+        var generator = Generator();
+        var tree = Trees(generator)[0];
+
+        var (x, z) = generator.SpawnColumnNear(tree.X, tree.Z);
+
+        Assert.NotEqual((tree.X, tree.Z), (x, z));
+        var surface = generator.SurfaceHeight(x, z);
+        Assert.False(generator.HasTreeBlock(x, z, surface, surface + 1));
     }
 
     [Theory]

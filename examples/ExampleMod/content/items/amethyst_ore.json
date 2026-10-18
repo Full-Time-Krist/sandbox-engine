@@ -1,0 +1,7 @@
+{
+  "type": "item",
+  "name": "example_mod:amethyst_ore",
+  "maxStackSize": 64,
+  "placesBlock": "example_mod:amethyst_ore",
+  "displayName": "Аметистовая руда"
+}

@@ -115,6 +115,26 @@ def planks(rng):
     return px
 
 
+def leaves(rng):
+    # Листва непрозрачная (как «быстрая графика» Minecraft): пятна светлой и тёмной зелени вместо просветов.
+    px = noisy(rng, (58, 112, 42), 18)
+    for _ in range(26):
+        x, y = rng.randrange(SIZE), rng.randrange(SIZE)
+        px[y][x] = (34, 72, 26) if rng.random() < 0.6 else (88, 150, 60)
+    return px
+
+
+def copper_ore(rng):
+    px = stone(rng)
+    for _ in range(6):  # рыжие вкрапления пятнами 2×2 с неровным краем
+        x, y = rng.randrange(1, SIZE - 2), rng.randrange(1, SIZE - 2)
+        for dx, dy in ((0, 0), (1, 0), (0, 1), (1, 1)):
+            if rng.random() < 0.85:
+                r = rng.randint(196, 228)
+                px[y + dy][x + dx] = (r, clamp(r * 0.56), clamp(r * 0.3))
+    return px
+
+
 TEXTURES = {
     "stone": stone,
     "dirt": dirt,
@@ -124,6 +144,8 @@ TEXTURES = {
     "log_side": log_side,
     "log_top": log_top,
     "planks": planks,
+    "leaves": leaves,
+    "copper_ore": copper_ore,
 }
 
 

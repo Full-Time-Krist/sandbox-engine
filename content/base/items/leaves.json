@@ -1,0 +1,7 @@
+{
+  "type": "item",
+  "name": "base:leaves",
+  "maxStackSize": 64,
+  "placesBlock": "base:leaves",
+  "displayName": "Листва"
+}

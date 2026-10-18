@@ -77,9 +77,9 @@ public sealed class World : IDisposable
         {
             Seed = seed;
             _terrain = new TerrainGenerator(blocks, Seed);
-            var (sx, sz) = spawnColumn;
             // Позиция игрока — точка ног: стоит на верхнем блоке столбца. Тело (0,6) в середине столбца
-            // не задевает соседние, даже если они выше.
+            // не задевает соседние, даже если они выше. Столбец с деревом обходим: появились бы в стволе или листве.
+            var (sx, sz) = _terrain.SpawnColumnNear(spawnColumn.X, spawnColumn.Z);
             SpawnPosition = new Vector3d(sx + 0.5, _terrain.SurfaceHeight(sx, sz), sz + 0.5);
             DefaultMode = defaultMode;
             save?.Initialize(new WorldInfo(Seed, SpawnPosition, DefaultMode));

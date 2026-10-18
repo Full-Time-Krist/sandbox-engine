@@ -1,6 +1,6 @@
 {
   "type": "block",
-  "name": "example_mod:copper_ore",
+  "name": "base:copper_ore",
   "isOpaque": true,
   "textures": "copper_ore"
 }

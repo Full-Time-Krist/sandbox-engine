@@ -1,0 +1,6 @@
+{
+  "type": "block",
+  "name": "base:leaves",
+  "isOpaque": true,
+  "textures": "leaves"
+}
