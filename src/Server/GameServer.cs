@@ -1,7 +1,8 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Numerics;
-using Server.Items;
+using Api;
+using Server.Modding;
 using Server.Storage;
 using Shared;
 using Shared.Blocks;
@@ -39,6 +40,9 @@ public sealed class GameServer : IDisposable
     private readonly BlockRegistry _registry;
     private readonly BaseBlocks _blocks;
     private readonly ItemRegistry _items;
+
+    /// <summary>Поведение каждого предмета по номеру <see cref="ItemId"/>: связано с реестром предметов после загрузки модов.</summary>
+    private readonly IItemBehavior[] _behaviors;
     private readonly WorldEditor _editor;
     /// <summary>
     /// Сколько чанков отправлять одному игроку за тик. Иначе при входе клиент получил бы сотни чанков разом:
@@ -94,6 +98,7 @@ public sealed class GameServer : IDisposable
 
         _items = content.Items;
         _itemNames = [.. _items.All.Select(i => i.Name)];
+        _behaviors = LoadMods(content);
 
         if (savePath != null)
             _save = WorldSave.Open(savePath, registry, _items);
@@ -112,6 +117,17 @@ public sealed class GameServer : IDisposable
         }
 
         _editor = new WorldEditor(this);
+    }
+
+    /// <summary>
+    /// Подключает моды: каждый регистрирует свои поведения через <see cref="IModContext"/>. Пока мод один — встроенный
+    /// <c>base</c>; сторонние из папки модов появятся на шаге 5.3 и пойдут тем же путём.
+    /// </summary>
+    private static IItemBehavior[] LoadMods(ContentRegistries content)
+    {
+        var behaviors = new ItemBehaviorRegistry();
+        new BaseMod().Load(new ModContext(BaseMod.Id, content, behaviors));
+        return behaviors.Bind(content.Items);
     }
 
     private void LogOpened(bool isNew, int? seed, (int X, int Z)? spawnColumn, GameMode? defaultMode)
@@ -449,9 +465,8 @@ public sealed class GameServer : IDisposable
 
         // Сервер сам повторяет луч по своей копии мира: клиент не может указать произвольный блок.
         var target = VoxelRaycast.Cast(World.Chunks, use.EyePosition, use.LookDirection, GameRules.BlockReach);
-        var held = _items.Get(session.Inventory.Selected.Item);
-        ItemBehaviors.For(held).Use(use.Action,
-            new ItemUseContext(_editor, _items, session.Inventory, session.Mode, target, use.EyePosition));
+        _behaviors[session.Inventory.Selected.Item.Value].Use(use.Action,
+            new ItemUseContext(_editor, _items, session, target, use.EyePosition));
     }
 
     private static bool IsValidPosition(Vector3d position) =>
@@ -470,7 +485,7 @@ public sealed class GameServer : IDisposable
     }
 
     /// <summary>Единственная точка изменения блоков на сервере: меняет мир и сообщает игрокам.</summary>
-    private sealed class WorldEditor(GameServer server) : IBlockEditor
+    private sealed class WorldEditor(GameServer server) : IWorld
     {
         public BlockId GetBlock(BlockPos pos) => server.World.Chunks.GetBlock(pos);
 

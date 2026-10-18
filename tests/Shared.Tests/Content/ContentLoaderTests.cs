@@ -61,6 +61,8 @@ public class ContentLoaderTests
     [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"typo":false}""", "base/stone.json")]
     [InlineData("""{"type":"entity","name":"base:ghost"}""", "base/ghost.json")]
     [InlineData("""{"type":"item","name":"base:stick","maxStackSize":"64"}""", "base/stick.json")]
+    [InlineData("""{"type":"item","name":"base:stick","maxStackSize":64,"behavior":"wand"}""", "base/stick.json")]
+    [InlineData("""{"type":"item","name":"base:stick","maxStackSize":64,"behavior":42}""", "base/stick.json")]
     [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"textures":"../secret"}""", "base/stone.json")]
     [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"textures":42}""", "base/stone.json")]
     [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"textures":{"top":"a","side":"b"}}""", "base/stone.json")]
@@ -137,6 +139,19 @@ public class ContentLoaderTests
         Assert.Equal(new BlockTextures("stone", "stone", "stone"), content.BlockTextures["base:stone"]);
         Assert.Equal(new BlockTextures("grass_top", "grass_side", "dirt"), content.BlockTextures["base:grass"]);
         Assert.False(content.BlockTextures.ContainsKey("base:glass"));
+    }
+
+    [Fact]
+    public void Load_ItemBehavior_ExplicitOrDefault()
+    {
+        var content = ContentLoader.Load([
+            File("base/stone.json", """{"type":"block","name":"base:stone","isOpaque":true}"""),
+            File("base/stone_item.json", """{"type":"item","name":"base:stone","maxStackSize":64,"placesBlock":"base:stone"}"""),
+            File("base/wand.json", """{"type":"item","name":"base:wand","maxStackSize":1,"behavior":"base:wand"}""")
+        ]);
+
+        Assert.Equal(ItemRegistry.PlaceBlockBehavior, content.Items.Get("base:stone").Behavior);
+        Assert.Equal("base:wand", content.Items.Get("base:wand").Behavior);
     }
 
     [Fact]

@@ -1,4 +1,5 @@
 using System.Numerics;
+using Api;
 using Shared;
 using Shared.Items;
 using Shared.Networking;
@@ -7,8 +8,11 @@ using Shared.Protocol;
 namespace Server;
 
 /// <summary>Подключённый клиент с точки зрения сервера.</summary>
-internal sealed class ClientSession(IConnection<ServerMessage, ClientMessage> connection)
+internal sealed class ClientSession(IConnection<ServerMessage, ClientMessage> connection) : IPlayer
 {
+    string IPlayer.Name => PlayerName;
+    Vector3d IPlayer.Position => PlayerPosition;
+
     public IConnection<ServerMessage, ClientMessage> Connection { get; } = connection;
 
     public bool IsJoined { get; private set; }

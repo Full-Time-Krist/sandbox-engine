@@ -38,6 +38,16 @@ public class ItemRegistryTests
         Assert.Equal(_items.Get("base:stone").Id, _items.ForBlock(_base.Stone));
     }
 
+    [Fact]
+    public void Behavior_DefaultsToPlaceBlockForBlockItems_HandOtherwise_ExplicitWins()
+    {
+        Assert.Equal(ItemRegistry.HandBehavior, _items.Get(ItemId.Air).Behavior);
+        Assert.Equal(ItemRegistry.PlaceBlockBehavior, _items.Register("base:stone", 64, _base.Stone).Behavior);
+        Assert.Equal(ItemRegistry.HandBehavior, _items.Register("base:stick", 64).Behavior);
+        Assert.Equal("example_mod:wand", _items.Register("example_mod:wand", 1, behavior: "example_mod:wand").Behavior);
+        Assert.Throws<ArgumentException>(() => _items.Register("base:bad", 1, behavior: "wand"));
+    }
+
     [Theory]
     [InlineData("stone")]
     [InlineData("base:Stone")]

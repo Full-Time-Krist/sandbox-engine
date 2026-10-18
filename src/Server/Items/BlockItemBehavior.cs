@@ -1,13 +1,15 @@
+using Api;
 using Shared.Items;
 using Shared.Voxels;
 
 namespace Server.Items;
 
-/// <summary>Предмет-блок в руке: основное действие ломает блок под прицелом (как рукой), дополнительное ставит этот блок рядом.</summary>
+/// <summary>
+/// Предмет-блок в руке (<c>base:place_block</c>): основное действие ломает блок под прицелом (как рукой),
+/// дополнительное ставит этот блок рядом. Регистрирует встроенный мод <see cref="Modding.BaseMod"/>.
+/// </summary>
 internal sealed class BlockItemBehavior : IItemBehavior
 {
-    public static readonly BlockItemBehavior Instance = new();
-
     public void Use(ItemAction action, in ItemUseContext context)
     {
         switch (action)

@@ -130,7 +130,7 @@ public static partial class ContentLoader
                     break;
 
                 case "item":
-                    CheckProperties(root, file, "type", "name", "maxStackSize", "placesBlock");
+                    CheckProperties(root, file, "type", "name", "maxStackSize", "placesBlock", "behavior");
                     if (name == ItemRegistry.AirName)
                         throw Error(file, $"имя '{name}' зарезервировано для пустого предмета и не должно объявляться в JSON.");
                     if (!itemNames.Add(name))
@@ -141,7 +141,10 @@ public static partial class ContentLoader
                     var placesBlock = OptionalString(root, "placesBlock", file);
                     if (placesBlock is not null && !ContentNames.IsValid(placesBlock))
                         throw Error(file, $"placesBlock '{placesBlock}' должен иметь вид 'namespace:name'.");
-                    items.Add(new ItemJson(file.Path, name, maxStackSize, placesBlock));
+                    var behavior = OptionalString(root, "behavior", file);
+                    if (behavior is not null && !ContentNames.IsValid(behavior))
+                        throw Error(file, $"behavior '{behavior}' должен иметь вид 'namespace:name'.");
+                    items.Add(new ItemJson(file.Path, name, maxStackSize, placesBlock, behavior));
                     break;
 
                 default:
@@ -173,7 +176,7 @@ public static partial class ContentLoader
                 placedBlock = definition.Id;
             }
 
-            itemRegistry.Register(item.Name, item.MaxStackSize, placedBlock);
+            itemRegistry.Register(item.Name, item.MaxStackSize, placedBlock, item.Behavior);
         }
 
         blockRegistry.Freeze();
@@ -316,5 +319,5 @@ public static partial class ContentLoader
         new($"Файл '{file.Path}': {message}");
 
     private sealed record BlockJson(string Path, string Name, bool IsOpaque, bool IsSolid, BlockTextures? Textures);
-    private sealed record ItemJson(string Path, string Name, int MaxStackSize, string? PlacesBlock);
+    private sealed record ItemJson(string Path, string Name, int MaxStackSize, string? PlacesBlock, string? Behavior);
 }

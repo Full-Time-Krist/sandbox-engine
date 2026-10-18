@@ -15,6 +15,12 @@ public sealed class ItemRegistry
     /// <summary>Пустой слот — предмет «воздух», одноимённый блоку-воздуху.</summary>
     public const string AirName = BlockRegistry.AirName;
 
+    /// <summary>Поведение по умолчанию: пустая рука (ломает блок). Его же получает пустой слот.</summary>
+    public const string HandBehavior = "base:hand";
+
+    /// <summary>Поведение по умолчанию для предмета, который ставит блок.</summary>
+    public const string PlaceBlockBehavior = "base:place_block";
+
     private readonly List<ItemDefinition> _byId = [];
     private readonly Dictionary<string, ItemDefinition> _byName = new(StringComparer.Ordinal);
 
@@ -29,12 +35,14 @@ public sealed class ItemRegistry
     {
         // Воздух всегда получает id 0: новый массив стопок заполнен нулями, то есть пустыми слотами.
         // Ничего не ставит и ни во что не складывается.
-        Add(new ItemDefinition(ItemId.Air, AirName, MaxStackSize: 0, Block: null));
+        Add(new ItemDefinition(ItemId.Air, AirName, MaxStackSize: 0, Block: null, HandBehavior));
     }
 
     /// <param name="block">Блок, который предмет ставит в мир. Первый предмет, зарегистрированный для блока,
     /// становится и добычей с него.</param>
-    public ItemDefinition Register(string name, int maxStackSize, BlockId? block = null)
+    /// <param name="behavior">Имя поведения; null — по умолчанию (<see cref="PlaceBlockBehavior"/> для предмета-блока,
+    /// иначе <see cref="HandBehavior"/>).</param>
+    public ItemDefinition Register(string name, int maxStackSize, BlockId? block = null, string? behavior = null)
     {
         if (IsFrozen)
             throw new InvalidOperationException($"Реестр заморожен, предмет '{name}' зарегистрировать нельзя.");
@@ -48,7 +56,11 @@ public sealed class ItemRegistry
         if (block is { IsAir: true })
             throw new ArgumentException($"Предмет '{name}' не может ставить воздух.", nameof(block));
 
-        var definition = new ItemDefinition(new ItemId((ushort)_byId.Count), name, maxStackSize, block);
+        if (behavior != null && !ContentNames.IsValid(behavior))
+            throw new ArgumentException($"Имя поведения '{behavior}' должно иметь вид 'namespace:name'.", nameof(behavior));
+
+        var definition = new ItemDefinition(new ItemId((ushort)_byId.Count), name, maxStackSize, block,
+            behavior ?? (block != null ? PlaceBlockBehavior : HandBehavior));
         Add(definition);
         if (block is { } placed)
             _byBlock.TryAdd(placed, definition.Id);
