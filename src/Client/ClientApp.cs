@@ -7,6 +7,7 @@ using Engine.Windowing;
 using Server;
 using Shared;
 using Shared.Blocks;
+using Shared.Content;
 using Shared.Items;
 using Shared.Networking;
 using Shared.Protocol;
@@ -89,17 +90,14 @@ internal sealed class ClientApp(
     {
         Gl.ClearColor(0.53f, 0.81f, 0.92f, 1f);
 
-        // Клиент собирает свои реестры и сверяет их с таблицами сервера при подключении (см. JoinAccepted).
-        _registry = new BlockRegistry();
-        BaseBlocks.Register(_registry);
-        _registry.Freeze();
-        _items = new ItemRegistry();
-        _items.RegisterBlockItems(_registry);
-        _items.Freeze();
+        // Клиент грузит тот же контент, что и сервер, и сверяет реестры с его таблицами при подключении (см. JoinAccepted).
+        var content = GameContent.Load();
+        _registry = content.Blocks;
+        _items = content.Items;
         _inventory = new Inventory(_items);
         UpdateStatusText();
 
-        var visuals = new BlockVisuals(_registry, BlockVisuals.BaseAppearances);
+        var visuals = new BlockVisuals(_registry, BlockVisuals.AppearancesFrom(content.BlockTextures));
         _blockTextures = LoadBlockTextures(visuals.TextureNames);
         _chunkRenderer = new ChunkRenderer(Gl, new ChunkMesher(visuals), MeshBuildQueue.DefaultWorkerCount);
 

@@ -1,4 +1,5 @@
 using Shared.Blocks;
+using Shared.Content;
 using Shared.Items;
 
 namespace Shared.Tests.Items;
@@ -18,10 +19,9 @@ public class InventoryTests
 
     public InventoryTests()
     {
-        var blocks = new BlockRegistry();
-        BaseBlocks.Register(blocks);
-        blocks.Freeze();
-        _items.RegisterBlockItems(blocks);
+        // Ванильные предметы плюс свой: реестр контента заморожен, поэтому предметы переписываются в новый.
+        foreach (var item in GameContent.Load().Items.All.Where(item => !item.Id.IsAir))
+            _items.Register(item.Name, item.MaxStackSize, item.Block);
         _pearl = _items.Register("test:pearl", 16).Id;
         _items.Freeze();
         _stone = _items.Get("base:stone").Id;

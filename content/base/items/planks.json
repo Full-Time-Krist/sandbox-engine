@@ -1,0 +1,6 @@
+{
+  "type": "item",
+  "name": "base:planks",
+  "maxStackSize": 64,
+  "placesBlock": "base:planks"
+}

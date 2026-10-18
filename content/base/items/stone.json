@@ -1,0 +1,6 @@
+{
+  "type": "item",
+  "name": "base:stone",
+  "maxStackSize": 64,
+  "placesBlock": "base:stone"
+}

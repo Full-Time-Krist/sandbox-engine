@@ -3,8 +3,7 @@ using Shared.Items;
 namespace Client.Ui;
 
 /// <summary>
-/// Названия предметов для игрока. Временно в коде, как внешний вид блоков (<see cref="Rendering.BlockVisuals"/>);
-/// на этапе 4 они переедут в файлы контента вместе с переводами.
+/// Названия предметов для игрока. Пока в коде; переедут в файлы контента (<c>content/</c>) вместе с переводами.
 /// </summary>
 internal static class ItemNames
 {

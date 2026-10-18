@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Shared.Blocks;
+using Shared.Content;
 using Shared.Voxels;
 
 namespace Server.Tests;
@@ -10,9 +11,8 @@ public class ChunkGeneratorTests
 
     public ChunkGeneratorTests()
     {
-        var registry = new BlockRegistry();
-        var blocks = BaseBlocks.Register(registry);
-        registry.Freeze();
+        var registry = GameContent.Load().Blocks;
+        var blocks = BaseBlocks.From(registry);
         _terrain = new TerrainGenerator(blocks, seed: 3);
     }
 

@@ -1,0 +1,6 @@
+{
+  "type": "block",
+  "name": "base:dirt",
+  "isOpaque": true,
+  "textures": "dirt"
+}

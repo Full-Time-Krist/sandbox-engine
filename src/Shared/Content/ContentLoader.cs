@@ -1,4 +1,6 @@
+using System.Collections.Immutable;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Shared.Blocks;
 using Shared.Items;
 
@@ -8,7 +10,15 @@ namespace Shared.Content;
 public sealed record ContentJsonFile(string Path, string Json);
 
 /// <summary>Реестры, построенные из одного набора определений.</summary>
-public sealed record ContentRegistries(BlockRegistry Blocks, ItemRegistry Items);
+/// <param name="BlockTextures">
+/// Текстуры граней по имени блока. Логике мира они не нужны (реестр блоков их не хранит), их берёт только клиент.
+/// Блока без поля <c>textures</c> здесь нет.
+/// </param>
+public sealed record ContentRegistries(BlockRegistry Blocks, ItemRegistry Items,
+    ImmutableDictionary<string, BlockTextures> BlockTextures);
+
+/// <summary>Имена текстур граней блока: файлы <c>Textures/Blocks/{имя}.png</c> клиента.</summary>
+public sealed record BlockTextures(string Top, string Side, string Bottom);
 
 /// <summary>Ошибка описания контента. Сообщение всегда содержит путь к исходному файлу.</summary>
 public sealed class ContentLoadException : Exception
@@ -21,8 +31,12 @@ public sealed class ContentLoadException : Exception
 /// Загружает JSON-описания блоков и предметов в реестры. Числовые ID назначаются по строковым именам
 /// в ordinal-порядке, поэтому не зависят от порядка файлов в каталоге.
 /// </summary>
-public static class ContentLoader
+public static partial class ContentLoader
 {
+    /// <summary>Имя текстуры — имя файла без расширения: только a–z, 0–9 и _, чтобы из JSON нельзя было указать путь.</summary>
+    [GeneratedRegex("^[a-z0-9_]+$")]
+    private static partial Regex TextureNamePattern();
+
     public static ContentRegistries LoadDirectory(string directory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
@@ -69,14 +83,15 @@ public static class ContentLoader
             switch (type)
             {
                 case "block":
-                    CheckProperties(root, file, "type", "name", "isOpaque", "isSolid");
+                    CheckProperties(root, file, "type", "name", "isOpaque", "isSolid", "textures");
                     if (name == BlockRegistry.AirName)
                         throw Error(file, $"имя '{name}' зарезервировано для воздуха и не должно объявляться в JSON.");
                     if (!blockNames.Add(name))
                         throw Error(file, $"блок '{name}' объявлен более одного раза.");
                     blocks.Add(new BlockJson(file.Path, name,
                         RequiredBoolean(root, "isOpaque", file),
-                        OptionalBoolean(root, "isSolid", defaultValue: true, file)));
+                        OptionalBoolean(root, "isSolid", defaultValue: true, file),
+                        OptionalTextures(root, file)));
                     break;
 
                 case "item":
@@ -100,8 +115,13 @@ public static class ContentLoader
         }
 
         var blockRegistry = new BlockRegistry();
+        var textures = ImmutableDictionary.CreateBuilder<string, BlockTextures>(StringComparer.Ordinal);
         foreach (var block in blocks.OrderBy(block => block.Name, StringComparer.Ordinal))
+        {
             blockRegistry.Register(block.Name, block.IsOpaque, block.IsSolid);
+            if (block.Textures is not null)
+                textures.Add(block.Name, block.Textures);
+        }
 
         var itemRegistry = new ItemRegistry();
         foreach (var item in items.OrderBy(item => item.Name, StringComparer.Ordinal))
@@ -123,7 +143,7 @@ public static class ContentLoader
 
         blockRegistry.Freeze();
         itemRegistry.Freeze();
-        return new ContentRegistries(blockRegistry, itemRegistry);
+        return new ContentRegistries(blockRegistry, itemRegistry, textures.ToImmutable());
     }
 
     private static JsonDocument Parse(ContentJsonFile file)
@@ -155,6 +175,45 @@ public static class ContentLoader
         if (value.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(value.GetString()))
             throw Error(file, $"поле '{property}' должно быть непустой строкой.");
         return value.GetString();
+    }
+
+    /// <summary>
+    /// Поле <c>textures</c>: строка — одна текстура на все грани, объект — <c>top</c>, <c>side</c> и <c>bottom</c>
+    /// (все три обязательны).
+    /// </summary>
+    private static BlockTextures? OptionalTextures(JsonElement root, ContentJsonFile file)
+    {
+        if (!root.TryGetProperty("textures", out var value))
+            return null;
+
+        if (value.ValueKind == JsonValueKind.String)
+        {
+            var uniform = TextureName(value, "textures", file);
+            return new BlockTextures(uniform, uniform, uniform);
+        }
+
+        if (value.ValueKind != JsonValueKind.Object)
+            throw Error(file, "поле 'textures' должно быть строкой или объектом с полями top, side и bottom.");
+        CheckNoDuplicates(value, file);
+        foreach (var property in value.EnumerateObject())
+        {
+            if (property.Name is not ("top" or "side" or "bottom"))
+                throw Error(file, $"неизвестное поле 'textures.{property.Name}'; допустимы top, side и bottom.");
+        }
+
+        return new BlockTextures(FaceTexture("top"), FaceTexture("side"), FaceTexture("bottom"));
+
+        string FaceTexture(string face) => value.TryGetProperty(face, out var texture)
+            ? TextureName(texture, $"textures.{face}", file)
+            : throw Error(file, $"в 'textures' нет обязательного поля '{face}'.");
+    }
+
+    private static string TextureName(JsonElement value, string property, ContentJsonFile file)
+    {
+        var name = value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+        if (name is null || !TextureNamePattern().IsMatch(name))
+            throw Error(file, $"поле '{property}' должно быть именем текстуры (a–z, 0–9, _).");
+        return name;
     }
 
     private static bool RequiredBoolean(JsonElement root, string property, ContentJsonFile file)
@@ -206,6 +265,6 @@ public static class ContentLoader
     private static ContentLoadException Error(ContentJsonFile file, string message) =>
         new($"Файл '{file.Path}': {message}");
 
-    private sealed record BlockJson(string Path, string Name, bool IsOpaque, bool IsSolid);
+    private sealed record BlockJson(string Path, string Name, bool IsOpaque, bool IsSolid, BlockTextures? Textures);
     private sealed record ItemJson(string Path, string Name, int MaxStackSize, string? PlacesBlock);
 }

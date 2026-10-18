@@ -1,0 +1,6 @@
+{
+  "type": "block",
+  "name": "base:sand",
+  "isOpaque": true,
+  "textures": "sand"
+}

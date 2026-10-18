@@ -1,3 +1,4 @@
+using Shared.Content;
 using System.Buffers.Binary;
 using System.IO.Compression;
 using Shared.Blocks;
@@ -72,8 +73,7 @@ public class ChunkCodecTests
     [Fact]
     public void ChunkWithAllBaseBlocks_RoundTrips()
     {
-        var registry = new BlockRegistry();
-        BaseBlocks.Register(registry);
+        var registry = GameContent.Load().Blocks;
         var ids = registry.All.Select(b => b.Id.Value).ToArray();
         var chunk = ChunkOf(i => ids[i * 7919 % ids.Length]);
 

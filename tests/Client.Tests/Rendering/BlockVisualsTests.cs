@@ -1,5 +1,6 @@
 using Client.Rendering;
 using Shared.Blocks;
+using Shared.Content;
 
 namespace Client.Tests.Rendering;
 
@@ -7,12 +8,15 @@ public class BlockVisualsTests
 {
     private static int FaceIndex(FaceKind kind) => Array.FindIndex(BlockFace.All, f => f.Kind == kind);
 
+    private static IReadOnlyDictionary<string, BlockAppearance> Appearances =>
+        BlockVisuals.AppearancesFrom(GameContent.Load().BlockTextures);
+
     [Fact]
     public void RequiresFrozenRegistry()
     {
         var registry = new BlockRegistry();
 
-        Assert.Throws<InvalidOperationException>(() => new BlockVisuals(registry, BlockVisuals.BaseAppearances));
+        Assert.Throws<InvalidOperationException>(() => new BlockVisuals(registry, Appearances));
     }
 
     [Fact]
@@ -21,7 +25,7 @@ public class BlockVisualsTests
         var registry = new BlockRegistry();
         registry.Freeze();
 
-        var visuals = new BlockVisuals(registry, BlockVisuals.BaseAppearances);
+        var visuals = new BlockVisuals(registry, Appearances);
 
         Assert.Equal(BlockVisuals.MissingTexture, visuals.TextureNames[0]);
     }
@@ -29,11 +33,10 @@ public class BlockVisualsTests
     [Fact]
     public void Grass_HasDifferentTopSideAndBottom()
     {
-        var registry = new BlockRegistry();
-        var blocks = BaseBlocks.Register(registry);
-        registry.Freeze();
+        var registry = GameContent.Load().Blocks;
+        var blocks = BaseBlocks.From(registry);
 
-        var visuals = new BlockVisuals(registry, BlockVisuals.BaseAppearances);
+        var visuals = new BlockVisuals(registry, Appearances);
 
         string NameOf(FaceKind kind) => visuals.TextureNames[visuals.GetLayer(blocks.Grass, FaceIndex(kind))];
         Assert.Equal("grass_top", NameOf(FaceKind.Top));
@@ -44,11 +47,10 @@ public class BlockVisualsTests
     [Fact]
     public void AllSideFaces_ShareOneLayer()
     {
-        var registry = new BlockRegistry();
-        var blocks = BaseBlocks.Register(registry);
-        registry.Freeze();
+        var registry = GameContent.Load().Blocks;
+        var blocks = BaseBlocks.From(registry);
 
-        var visuals = new BlockVisuals(registry, BlockVisuals.BaseAppearances);
+        var visuals = new BlockVisuals(registry, Appearances);
 
         var sideLayers = Enumerable.Range(0, BlockFace.All.Length)
             .Where(f => BlockFace.All[f].Kind == FaceKind.Side)
@@ -60,11 +62,10 @@ public class BlockVisualsTests
     [Fact]
     public void SharedTexture_GetsOneLayer()
     {
-        var registry = new BlockRegistry();
-        var blocks = BaseBlocks.Register(registry);
-        registry.Freeze();
+        var registry = GameContent.Load().Blocks;
+        var blocks = BaseBlocks.From(registry);
 
-        var visuals = new BlockVisuals(registry, BlockVisuals.BaseAppearances);
+        var visuals = new BlockVisuals(registry, Appearances);
 
         // Низ травы и блок земли используют одну текстуру — и один слой.
         Assert.Equal(visuals.GetLayer(blocks.Dirt, 0), visuals.GetLayer(blocks.Grass, FaceIndex(FaceKind.Bottom)));
@@ -78,21 +79,19 @@ public class BlockVisualsTests
         var mystery = registry.Register("test:mystery", isOpaque: true).Id;
         registry.Freeze();
 
-        var visuals = new BlockVisuals(registry, BlockVisuals.BaseAppearances);
+        var visuals = new BlockVisuals(registry, Appearances);
 
         for (var f = 0; f < BlockFace.All.Length; f++)
             Assert.Equal(0, visuals.GetLayer(mystery, f));
     }
 
     [Fact]
-    public void BaseBlocks_AllHaveAppearance()
+    public void ContentTextures_AllHaveFiles()
     {
-        // Блок без описания внешнего вида будет в шахматку: тест не даст забыть его при добавлении нового блока.
-        var registry = new BlockRegistry();
-        BaseBlocks.Register(registry);
-        registry.Freeze();
+        // Текстура без файла рисуется шахматкой «missing» без ошибки: тест не даст опечататься в JSON блока.
+        var directory = Path.Combine(AppContext.BaseDirectory, "Assets", "Textures", "Blocks");
+        var textures = GameContent.Load().BlockTextures.Values.SelectMany(t => new[] { t.Top, t.Side, t.Bottom }).Distinct();
 
-        foreach (var definition in registry.All.Where(d => !d.Id.IsAir))
-            Assert.True(BlockVisuals.BaseAppearances.ContainsKey(definition.Name), $"Нет внешнего вида для {definition.Name}");
+        Assert.All(textures, name => Assert.True(File.Exists(Path.Combine(directory, name + ".png")), $"Нет файла текстуры '{name}'"));
     }
 }

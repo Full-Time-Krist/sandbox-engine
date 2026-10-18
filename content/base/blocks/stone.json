@@ -1,0 +1,6 @@
+{
+  "type": "block",
+  "name": "base:stone",
+  "isOpaque": true,
+  "textures": "stone"
+}

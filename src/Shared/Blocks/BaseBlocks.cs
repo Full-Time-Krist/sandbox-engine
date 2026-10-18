@@ -1,7 +1,8 @@
 namespace Shared.Blocks;
 
 /// <summary>
-/// Базовые блоки игры. Временно регистрируются в коде; на этапе 4 их место займут JSON-файлы встроенного мода.
+/// Ванильные блоки, на которые опирается код (генератор мира, тесты). Сами блоки описаны в JSON
+/// (<c>content/base/blocks</c>); здесь только их id, найденные в реестре по постоянным именам.
 /// </summary>
 public sealed class BaseBlocks
 {
@@ -14,13 +15,14 @@ public sealed class BaseBlocks
 
     private BaseBlocks(BlockRegistry registry)
     {
-        Stone = registry.Register("base:stone", isOpaque: true).Id;
-        Dirt = registry.Register("base:dirt", isOpaque: true).Id;
-        Grass = registry.Register("base:grass", isOpaque: true).Id;
-        Sand = registry.Register("base:sand", isOpaque: true).Id;
-        Log = registry.Register("base:log", isOpaque: true).Id;
-        Planks = registry.Register("base:planks", isOpaque: true).Id;
+        Stone = registry.Get("base:stone").Id;
+        Dirt = registry.Get("base:dirt").Id;
+        Grass = registry.Get("base:grass").Id;
+        Sand = registry.Get("base:sand").Id;
+        Log = registry.Get("base:log").Id;
+        Planks = registry.Get("base:planks").Id;
     }
 
-    public static BaseBlocks Register(BlockRegistry registry) => new(registry);
+    /// <exception cref="KeyNotFoundException">В реестре нет одного из ванильных блоков: контент неполный.</exception>
+    public static BaseBlocks From(BlockRegistry registry) => new(registry);
 }

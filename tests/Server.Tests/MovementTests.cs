@@ -1,3 +1,4 @@
+using Shared.Content;
 using System.Numerics;
 using Shared;
 using Shared.Blocks;
@@ -12,7 +13,7 @@ public sealed class MovementTests : IDisposable
 {
     private readonly GameServer _server = TestServers.Create();
     private readonly TestServers.TestClient _client;
-    private readonly BlockRegistry _registry = new();
+    private readonly BlockRegistry _registry = GameContent.Load().Blocks;
     private readonly BaseBlocks _blocks;
     private readonly Vector3d _spawn;
 
@@ -22,8 +23,7 @@ public sealed class MovementTests : IDisposable
     public MovementTests()
     {
         // Реестр с теми же блоками, что у сервера: id совпадают, физика клиента видит тот же мир.
-        _blocks = BaseBlocks.Register(_registry);
-        _registry.Freeze();
+        _blocks = BaseBlocks.From(_registry);
 
         var messages = new List<ServerMessage>();
         _client = TestServers.JoinAndLoad(_server, messages);

@@ -1,4 +1,5 @@
 using Shared.Blocks;
+using Shared.Content;
 using Shared.Voxels;
 
 namespace Server.Tests;
@@ -9,9 +10,8 @@ public class TerrainGeneratorTests
 
     public TerrainGeneratorTests()
     {
-        var registry = new BlockRegistry();
-        _blocks = BaseBlocks.Register(registry);
-        registry.Freeze();
+        var registry = GameContent.Load().Blocks;
+        _blocks = BaseBlocks.From(registry);
     }
 
     private TerrainGenerator Generator(int seed = 1) => new(_blocks, seed);

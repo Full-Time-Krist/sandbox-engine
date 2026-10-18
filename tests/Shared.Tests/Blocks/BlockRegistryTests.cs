@@ -90,19 +90,6 @@ public class BlockRegistryTests
     }
 
     [Fact]
-    public void BaseBlocks_RegistersSixDistinctOpaqueBlocks()
-    {
-        var registry = new BlockRegistry();
-        var blocks = BaseBlocks.Register(registry);
-
-        BlockId[] ids = [blocks.Stone, blocks.Dirt, blocks.Grass, blocks.Sand, blocks.Log, blocks.Planks];
-        Assert.Equal(7, registry.Count); // + воздух
-        Assert.Equal(ids.Length, ids.Distinct().Count());
-        Assert.All(ids, id => Assert.True(registry.Get(id).IsOpaque));
-        Assert.DoesNotContain(BlockId.Air, ids);
-    }
-
-    [Fact]
     public void BlockId_TakesTwoBytes()
     {
         // Массив блоков чанка хранит BlockId напрямую: лишнее поле удвоило бы память мира.

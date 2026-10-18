@@ -1,3 +1,4 @@
+using Shared.Content;
 using System.Numerics;
 using Client.Rendering;
 using Client.Ui;
@@ -9,19 +10,18 @@ namespace Client.Tests.Ui;
 
 public sealed class ItemIconsTests : IDisposable
 {
-    private readonly BlockRegistry _blocks = new();
-    private readonly ItemRegistry _items = new();
+    private readonly BlockRegistry _blocks;
+    private readonly ItemRegistry _items;
     private readonly BlockVisuals _visuals;
     private readonly TrueTypeFont _font = TrueTypeFont.Load(UiAtlasTests.FontPath);
     private readonly UiCanvas _canvas;
 
     public ItemIconsTests()
     {
-        BaseBlocks.Register(_blocks);
-        _blocks.Freeze();
-        _items.RegisterBlockItems(_blocks);
-        _items.Freeze();
-        _visuals = new BlockVisuals(_blocks, BlockVisuals.BaseAppearances);
+        var content = GameContent.Load();
+        _blocks = content.Blocks;
+        _items = content.Items;
+        _visuals = new BlockVisuals(_blocks, BlockVisuals.AppearancesFrom(content.BlockTextures));
         _canvas = new UiCanvas(UiAtlas.Build(_font, 7, UiAtlas.DefaultCharacters));
     }
 

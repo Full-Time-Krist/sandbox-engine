@@ -61,6 +61,10 @@ public class ContentLoaderTests
     [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"typo":false}""", "stone.json")]
     [InlineData("""{"type":"entity","name":"base:ghost"}""", "ghost.json")]
     [InlineData("""{"type":"item","name":"base:stick","maxStackSize":"64"}""", "stick.json")]
+    [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"textures":"../secret"}""", "stone.json")]
+    [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"textures":42}""", "stone.json")]
+    [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"textures":{"top":"a","side":"b"}}""", "stone.json")]
+    [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"textures":{"top":"a","side":"b","bottom":"c","front":"d"}}""", "stone.json")]
     [InlineData("""{"type":"item","name":"base:stick","maxStackSize":64.5}""", "stick.json")]
     public void Load_InvalidContent_ThrowsUsefulError(string json, string path)
     {
@@ -119,6 +123,49 @@ public class ContentLoaderTests
 
         Assert.Contains("'type'", exception.Message);
         Assert.Contains("несколько раз", exception.Message);
+    }
+
+    [Fact]
+    public void Load_Textures_StringIsUniform_ObjectIsPerFace_MissingIsAbsent()
+    {
+        var content = ContentLoader.Load([
+            File("stone.json", """{"type":"block","name":"base:stone","isOpaque":true,"textures":"stone"}"""),
+            File("grass.json", """{"type":"block","name":"base:grass","isOpaque":true,"textures":{"top":"grass_top","side":"grass_side","bottom":"dirt"}}"""),
+            File("glass.json", """{"type":"block","name":"base:glass","isOpaque":false}""")
+        ]);
+
+        Assert.Equal(new BlockTextures("stone", "stone", "stone"), content.BlockTextures["base:stone"]);
+        Assert.Equal(new BlockTextures("grass_top", "grass_side", "dirt"), content.BlockTextures["base:grass"]);
+        Assert.False(content.BlockTextures.ContainsKey("base:glass"));
+    }
+
+    [Fact]
+    public void LoadDirectory_ReadsNestedFiles_AndReportsRelativePath()
+    {
+        using var directory = new TempContentDirectory();
+        directory.Write("base/blocks/stone.json", """{"type":"block","name":"base:stone","isOpaque":true}""");
+        directory.Write("base/items/stone.json", """{"type":"item","name":"base:stone","maxStackSize":64,"placesBlock":"base:stone"}""");
+        directory.Write("base/items/bad.json", """{"type":"item","name":"base:bad"}""");
+
+        var exception = Assert.Throws<ContentLoadException>(() => ContentLoader.LoadDirectory(directory.Path));
+
+        Assert.Contains(System.IO.Path.Combine("base", "items", "bad.json"), exception.Message);
+        System.IO.File.Delete(System.IO.Path.Combine(directory.Path, "base", "items", "bad.json"));
+        Assert.Equal("base:stone", ContentLoader.LoadDirectory(directory.Path).Items.Get("base:stone").Name);
+    }
+
+    private sealed class TempContentDirectory : IDisposable
+    {
+        public string Path { get; } = Directory.CreateTempSubdirectory("content-test-").FullName;
+
+        public void Write(string relativePath, string json)
+        {
+            var path = System.IO.Path.Combine(Path, relativePath);
+            Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
+            System.IO.File.WriteAllText(path, json);
+        }
+
+        public void Dispose() => Directory.Delete(Path, recursive: true);
     }
 
     private static ContentJsonFile File(string path, string json) => new(path, json);

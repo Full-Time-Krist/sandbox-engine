@@ -2,6 +2,7 @@ using System.Numerics;
 using Server.Storage;
 using Shared;
 using Shared.Blocks;
+using Shared.Content;
 using Shared.Items;
 using Shared.Networking;
 using Shared.Protocol;
@@ -110,9 +111,7 @@ public sealed class SaveLoadTests : IDisposable
 
         // Игра ещё идёт, но изменение уже на диске: его видит второй читатель того же файла.
         server.Save!.Flush();
-        var registry = new BlockRegistry();
-        BaseBlocks.Register(registry);
-        registry.Freeze();
+        var registry = GameContent.Load().Blocks;
         using var reader = WorldSave.Open(_directory.SaveFile, registry, WorldSaveTests.ItemsFor(registry));
         Assert.True(reader.TryLoadChunk(surface.Chunk, out var saved));
         Assert.True(saved.Get(surface.Local).IsAir);

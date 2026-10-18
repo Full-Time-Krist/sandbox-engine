@@ -1,3 +1,4 @@
+using Shared.Content;
 using Shared.Blocks;
 using Shared.Items;
 
@@ -5,15 +6,8 @@ namespace Shared.Tests.Items;
 
 public class ItemRegistryTests
 {
-    private readonly BlockRegistry _blocks = new();
-    private readonly BaseBlocks _base;
+    private readonly BaseBlocks _base = BaseBlocks.From(GameContent.Load().Blocks);
     private readonly ItemRegistry _items = new();
-
-    public ItemRegistryTests()
-    {
-        _base = BaseBlocks.Register(_blocks);
-        _blocks.Freeze();
-    }
 
     [Fact]
     public void AirIsZero_AndIsEmptySlot()
@@ -26,21 +20,6 @@ public class ItemRegistryTests
     }
 
     [Fact]
-    public void EveryBlockExceptAir_GetsItemWithSameName_ThatPlacesIt()
-    {
-        _items.RegisterBlockItems(_blocks);
-
-        Assert.Equal(_blocks.Count, _items.Count); // воздух-предмет уже был, воздух-блок второго не дал
-        foreach (var block in _blocks.All.Where(b => !b.Id.IsAir))
-        {
-            var item = _items.Get(block.Name);
-            Assert.Equal(block.Id, item.Block);
-            Assert.Equal(ItemRegistry.BlockStackSize, item.MaxStackSize);
-            Assert.Equal(item.Id, _items.ForBlock(block.Id));
-        }
-    }
-
-    [Fact]
     public void ForBlock_WithoutItem_IsAir()
     {
         Assert.Equal(ItemId.Air, _items.ForBlock(_base.Stone));
@@ -50,7 +29,7 @@ public class ItemRegistryTests
     [Fact]
     public void ItemThatIsNotBlock_PlacesNothing_AndIsNotDropOfAnyBlock()
     {
-        _items.RegisterBlockItems(_blocks);
+        _items.Register("base:stone", 64, _base.Stone);
         var stick = _items.Register("base:stick", 64);
         // Второй предмет, ставящий камень, не перебивает добычу с камня.
         _items.Register("base:stone_brush", 1, _base.Stone);

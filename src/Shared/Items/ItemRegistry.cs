@@ -15,9 +15,6 @@ public sealed class ItemRegistry
     /// <summary>Пустой слот — предмет «воздух», одноимённый блоку-воздуху.</summary>
     public const string AirName = BlockRegistry.AirName;
 
-    /// <summary>Предел стопки предметов-блоков.</summary>
-    public const int BlockStackSize = 64;
-
     private readonly List<ItemDefinition> _byId = [];
     private readonly Dictionary<string, ItemDefinition> _byName = new(StringComparer.Ordinal);
 
@@ -56,19 +53,6 @@ public sealed class ItemRegistry
         if (block is { } placed)
             _byBlock.TryAdd(placed, definition.Id);
         return definition;
-    }
-
-    /// <summary>
-    /// Каждому блоку, кроме воздуха, — одноимённый предмет, который его ставит (<c>base:stone</c> ставит <c>base:stone</c>).
-    /// На этапе 4 предметы будут описаны в JSON, и этот метод заменит загрузка контента.
-    /// </summary>
-    public void RegisterBlockItems(BlockRegistry blocks)
-    {
-        foreach (var block in blocks.All)
-        {
-            if (!block.Id.IsAir)
-                Register(block.Name, BlockStackSize, block.Id);
-        }
     }
 
     private void Add(ItemDefinition definition)

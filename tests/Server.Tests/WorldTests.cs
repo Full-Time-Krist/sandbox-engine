@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Shared.Blocks;
+using Shared.Content;
 using Shared.Voxels;
 
 namespace Server.Tests;
@@ -10,9 +11,8 @@ public sealed class WorldTests : IDisposable
 
     public WorldTests()
     {
-        var registry = new BlockRegistry();
-        var blocks = BaseBlocks.Register(registry);
-        registry.Freeze();
+        var registry = GameContent.Load().Blocks;
+        var blocks = BaseBlocks.From(registry);
         _world = new World(blocks, seed: 1, generatorThreads: 2);
     }
 

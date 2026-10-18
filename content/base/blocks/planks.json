@@ -1,0 +1,6 @@
+{
+  "type": "block",
+  "name": "base:planks",
+  "isOpaque": true,
+  "textures": "planks"
+}

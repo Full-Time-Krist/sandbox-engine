@@ -5,6 +5,7 @@ using Server.Items;
 using Server.Storage;
 using Shared;
 using Shared.Blocks;
+using Shared.Content;
 using Shared.Items;
 using Shared.Physics;
 using Shared.Networking;
@@ -85,14 +86,13 @@ public sealed class GameServer : IDisposable
         _viewDistance = viewDistance;
         _verticalDistance = verticalDistance;
 
-        var registry = _registry = new BlockRegistry();
-        _blocks = BaseBlocks.Register(registry);
-        registry.Freeze();
+        // Блоки и предметы — из JSON-контента (GameContent); клиент грузит те же файлы и сверяет имена при подключении.
+        var content = GameContent.Load();
+        var registry = _registry = content.Blocks;
+        _blocks = BaseBlocks.From(registry);
         _blockNames = [.. registry.All.Select(b => b.Name)];
 
-        _items = new ItemRegistry();
-        _items.RegisterBlockItems(registry);
-        _items.Freeze();
+        _items = content.Items;
         _itemNames = [.. _items.All.Select(i => i.Name)];
 
         if (savePath != null)

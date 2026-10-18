@@ -21,7 +21,8 @@ public sealed class WorldSaveTests : IDisposable
     internal static ItemRegistry ItemsFor(BlockRegistry blocks)
     {
         var items = new ItemRegistry();
-        items.RegisterBlockItems(blocks);
+        foreach (var block in blocks.All.Where(block => !block.Id.IsAir))
+            items.Register(block.Name, 64, block.Id);
         items.Freeze();
         return items;
     }

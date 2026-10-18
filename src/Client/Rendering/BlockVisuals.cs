@@ -1,4 +1,5 @@
 using Shared.Blocks;
+using Shared.Content;
 
 namespace Client.Rendering;
 
@@ -12,15 +13,10 @@ internal sealed class BlockVisuals
     /// <summary>Слой 0 всегда «нет текстуры»: им отрисуются блоки без описания и текстуры без файла.</summary>
     public const string MissingTexture = "missing";
 
-    public static readonly IReadOnlyDictionary<string, BlockAppearance> BaseAppearances = new Dictionary<string, BlockAppearance>
-    {
-        ["base:stone"] = BlockAppearance.Uniform("stone"),
-        ["base:dirt"] = BlockAppearance.Uniform("dirt"),
-        ["base:grass"] = new("grass_top", "grass_side", "dirt"),
-        ["base:sand"] = BlockAppearance.Uniform("sand"),
-        ["base:log"] = new("log_top", "log_side", "log_top"),
-        ["base:planks"] = BlockAppearance.Uniform("planks"),
-    };
+    /// <summary>Внешний вид блоков по текстурам из контента (поле <c>textures</c> в JSON блока).</summary>
+    public static IReadOnlyDictionary<string, BlockAppearance> AppearancesFrom(IReadOnlyDictionary<string, BlockTextures> textures) =>
+        textures.ToDictionary(pair => pair.Key, pair => new BlockAppearance(pair.Value.Top, pair.Value.Side, pair.Value.Bottom),
+            StringComparer.Ordinal);
 
     private readonly bool[] _isOpaque;
     private readonly int[] _faceLayers;

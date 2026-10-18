@@ -1,6 +1,7 @@
 using System.Numerics;
 using Client.Rendering;
 using Shared.Blocks;
+using Shared.Content;
 using Shared.Voxels;
 
 namespace Client.Tests.Rendering;
@@ -16,10 +17,10 @@ public class ChunkMesherTests
 
     public ChunkMesherTests()
     {
-        var registry = new BlockRegistry();
-        _blocks = BaseBlocks.Register(registry);
-        registry.Freeze();
-        _visuals = new BlockVisuals(registry, BlockVisuals.BaseAppearances);
+        var content = GameContent.Load();
+        var registry = content.Blocks;
+        _blocks = BaseBlocks.From(registry);
+        _visuals = new BlockVisuals(registry, BlockVisuals.AppearancesFrom(content.BlockTextures));
         _mesher = new ChunkMesher(_visuals);
     }
 

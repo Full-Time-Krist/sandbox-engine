@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Client.Rendering;
 using Shared.Blocks;
+using Shared.Content;
 using Shared.Voxels;
 
 namespace Client.Tests.Rendering;
@@ -13,10 +14,10 @@ public class MeshBuildingTests
 
     public MeshBuildingTests()
     {
-        var registry = new BlockRegistry();
-        _blocks = BaseBlocks.Register(registry);
-        registry.Freeze();
-        _mesher = new ChunkMesher(new BlockVisuals(registry, BlockVisuals.BaseAppearances));
+        var content = GameContent.Load();
+        var registry = content.Blocks;
+        _blocks = BaseBlocks.From(registry);
+        _mesher = new ChunkMesher(new BlockVisuals(registry, BlockVisuals.AppearancesFrom(content.BlockTextures)));
     }
 
     /// <summary>Чанк, у которого блок зависит от координат: так видно, что каждый блок попал на своё место.</summary>

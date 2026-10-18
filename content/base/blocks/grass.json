@@ -1,0 +1,10 @@
+{
+  "type": "block",
+  "name": "base:grass",
+  "isOpaque": true,
+  "textures": {
+    "top": "grass_top",
+    "side": "grass_side",
+    "bottom": "dirt"
+  }
+}

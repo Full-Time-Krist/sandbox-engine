@@ -1,3 +1,4 @@
+using Shared.Content;
 using System.Numerics;
 using Shared.Blocks;
 using Shared.Items;
@@ -23,9 +24,10 @@ public sealed class ItemUseTests : IDisposable
 
     private readonly GameServer _server = TestServers.Create();
     private readonly TestServers.TestClient _client;
-    private readonly BlockRegistry _registry = new();
-    private readonly ItemRegistry _items = new();
+    private readonly BlockRegistry _registry;
+    private readonly ItemRegistry _items;
     private readonly BaseBlocks _blocks;
+    private int PlanksStackSize => _items.Get("base:planks").MaxStackSize;
 
     /// <summary>Инвентарь игрока на сервере. Тест очищает его и кладёт то, что нужно.</summary>
     private readonly Inventory _inventory;
@@ -35,10 +37,11 @@ public sealed class ItemUseTests : IDisposable
 
     public ItemUseTests()
     {
-        _blocks = BaseBlocks.Register(_registry);
-        _registry.Freeze();
-        _items.RegisterBlockItems(_registry);
-        _items.Freeze();
+        // Тот же контент, что у сервера: id блоков и предметов совпадают.
+        var content = GameContent.Load();
+        _registry = content.Blocks;
+        _items = content.Items;
+        _blocks = BaseBlocks.From(_registry);
         _client = TestServers.JoinAndLoad(_server);
         _surface = TestServers.TopBlock(_server.World, 0, 0);
         _aboveSurface = _surface + new BlockPos(0, 1, 0);
@@ -126,7 +129,7 @@ public sealed class ItemUseTests : IDisposable
         var surfaceBlock = BlockAt(_surface);
         Assert.NotEqual(_blocks.Planks, surfaceBlock);
         for (var slot = 0; slot < Inventory.Size; slot++)
-            _inventory.Set(slot, Stack(_blocks.Planks, ItemRegistry.BlockStackSize));
+            _inventory.Set(slot, Stack(_blocks.Planks, PlanksStackSize));
         _inventory.TakeChanges();
 
         var changes = BreakSurface();
@@ -141,7 +144,7 @@ public sealed class ItemUseTests : IDisposable
     {
         var surfaceBlock = BlockAt(_surface);
         for (var slot = 0; slot < Inventory.Size; slot++)
-            _inventory.Set(slot, Stack(_blocks.Planks, ItemRegistry.BlockStackSize));
+            _inventory.Set(slot, Stack(_blocks.Planks, PlanksStackSize));
         _inventory.Set(30, Stack(surfaceBlock, 63));
 
         Assert.Single(BreakSurface());
@@ -209,7 +212,7 @@ public sealed class ItemUseTests : IDisposable
     {
         _server.SetGameMode(_client.PlayerId, GameMode.Creative);
         for (var slot = 0; slot < Inventory.Size; slot++)
-            _inventory.Set(slot, Stack(_blocks.Planks, ItemRegistry.BlockStackSize));
+            _inventory.Set(slot, Stack(_blocks.Planks, PlanksStackSize));
 
         Assert.Single(BreakSurface());
     }
