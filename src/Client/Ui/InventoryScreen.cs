@@ -25,7 +25,7 @@ internal sealed class InventoryScreen : IDisposable
     private readonly SpriteBatch _batch;
     private readonly TrueTypeFont _font;
     private readonly TextureArray _textures;
-    private readonly BlockVisuals _visuals;
+    private readonly ItemVisuals _visuals;
     private readonly ItemRegistry _items;
     private readonly ItemNames _names;
     private UiAtlas _atlas = null!;
@@ -39,7 +39,7 @@ internal sealed class InventoryScreen : IDisposable
     private readonly List<int> _dragTargets = [];
 
     public InventoryScreen(GL gl, string fontPath, Vector2D<int> screen, TextureArray textures,
-        BlockVisuals visuals, ItemRegistry items, ItemNames names)
+        ItemVisuals visuals, ItemRegistry items, ItemNames names)
     {
         _gl = gl;
         _textures = textures;

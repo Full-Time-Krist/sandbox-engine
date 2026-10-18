@@ -26,8 +26,13 @@ public sealed record ContentPack(string Name, string Directory, IReadOnlyCollect
 /// Блока без поля <c>textures</c> здесь нет.
 /// </param>
 /// <param name="ItemDisplayNames">Названия предметов для игрока (поле <c>displayName</c>); предмета без названия здесь нет.</param>
+/// <param name="ItemIcons">
+/// Картинки предметов (поле <c>icon</c>) — полные имена текстур <c>пакет:имя</c>, как у блоков; предмета без картинки
+/// здесь нет (предмет-блок тогда рисуется кубиком).
+/// </param>
 public sealed record ContentRegistries(BlockRegistry Blocks, ItemRegistry Items,
-    ImmutableDictionary<string, BlockTextures> BlockTextures, ImmutableDictionary<string, string> ItemDisplayNames);
+    ImmutableDictionary<string, BlockTextures> BlockTextures, ImmutableDictionary<string, string> ItemDisplayNames,
+    ImmutableDictionary<string, string> ItemIcons);
 
 /// <summary>
 /// Текстуры граней блока — полные имена <c>пакет:имя</c>. В JSON можно писать коротко (<c>"stone"</c>): имя дополняется
@@ -187,7 +192,7 @@ public static partial class ContentLoader
                     break;
 
                 case "item":
-                    CheckProperties(root, file, "type", "name", "maxStackSize", "placesBlock", "behavior", "displayName", "override");
+                    CheckProperties(root, file, "type", "name", "maxStackSize", "placesBlock", "behavior", "displayName", "icon", "override");
                     if (name == ItemRegistry.AirName)
                         throw Error(file, $"имя '{name}' зарезервировано для пустого предмета и не должно объявляться в JSON.");
                     if (!isOverride && !itemNames.Add(name))
@@ -201,8 +206,9 @@ public static partial class ContentLoader
                     var behavior = OptionalString(root, "behavior", file);
                     if (behavior is not null && !ContentNames.IsValid(behavior))
                         throw Error(file, $"behavior '{behavior}' должен иметь вид 'namespace:name'.");
+                    var icon = root.TryGetProperty("icon", out var iconValue) ? TextureName(iconValue, "icon", pack, file) : null;
                     (isOverride ? itemOverrides : items).Add(new ItemJson(file.Path, pack, name, maxStackSize, placesBlock, behavior,
-                        OptionalString(root, "displayName", file)));
+                        OptionalString(root, "displayName", file), icon));
                     break;
 
                 default:
@@ -224,6 +230,7 @@ public static partial class ContentLoader
 
         var itemRegistry = new ItemRegistry();
         var displayNames = ImmutableDictionary.CreateBuilder<string, string>(StringComparer.Ordinal);
+        var icons = ImmutableDictionary.CreateBuilder<string, string>(StringComparer.Ordinal);
         foreach (var item in items.OrderBy(item => item.Name, StringComparer.Ordinal))
         {
             BlockId? placedBlock = null;
@@ -241,11 +248,13 @@ public static partial class ContentLoader
             itemRegistry.Register(item.Name, item.MaxStackSize, placedBlock, item.Behavior);
             if (item.DisplayName is not null)
                 displayNames.Add(item.Name, item.DisplayName);
+            if (item.Icon is not null)
+                icons.Add(item.Name, item.Icon);
         }
 
         blockRegistry.Freeze();
         itemRegistry.Freeze();
-        return new ContentRegistries(blockRegistry, itemRegistry, textures.ToImmutable(), displayNames.ToImmutable());
+        return new ContentRegistries(blockRegistry, itemRegistry, textures.ToImmutable(), displayNames.ToImmutable(), icons.ToImmutable());
     }
 
     /// <summary>
@@ -418,5 +427,5 @@ public static partial class ContentLoader
 
     private sealed record BlockJson(string Path, string Pack, string Name, bool IsOpaque, bool IsSolid, BlockTextures? Textures);
     private sealed record ItemJson(string Path, string Pack, string Name, int MaxStackSize, string? PlacesBlock, string? Behavior,
-        string? DisplayName);
+        string? DisplayName, string? Icon);
 }

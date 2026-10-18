@@ -62,6 +62,9 @@ public sealed class ExampleModTests : IDisposable
             content.BlockTextures["example_mod:copper_ore"]);
         Assert.Equal("Волшебная палочка", content.ItemDisplayNames["example_mod:wand"]);
         Assert.True(File.Exists(Path.Combine(ExampleMod().BlockTextureDirectory, "copper_ore.png")));
+        // Картинка предмета — из textures/items мода.
+        Assert.Equal("example_mod:wand", content.ItemIcons["example_mod:wand"]);
+        Assert.True(File.Exists(Path.Combine(ExampleMod().ItemTextureDirectory, "wand.png")));
         // Замена ванильного определения: песок с текстурой мода.
         Assert.Equal("example_mod:sand_rippled", content.BlockTextures["base:sand"].Top);
         Assert.True(File.Exists(Path.Combine(ExampleMod().BlockTextureDirectory, "sand_rippled.png")));

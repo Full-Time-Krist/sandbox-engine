@@ -6,9 +6,10 @@ using Shared.Items;
 namespace Client.Ui;
 
 /// <summary>
-/// Иконки предметов: блок рисуется изометрическим кубиком прямо из массива текстур блоков — три грани
-/// (верх, южная слева, восточная справа) с той же яркостью, что в мире. Без отдельного рендера в текстуру
-/// и без файлов: новый блок сразу получает иконку.
+/// Иконки предметов. Предмет со своей картинкой (<c>icon</c> в JSON) рисуется плоским квадратом из её слоя.
+/// Предмет-блок без картинки — изометрическим кубиком прямо из массива текстур блоков: три грани (верх, южная слева,
+/// восточная справа) с той же яркостью, что в мире; новый блок сразу получает иконку без своих файлов.
+/// Остальные — квадратом «нет текстуры».
 /// </summary>
 internal static class ItemIcons
 {
@@ -21,16 +22,17 @@ internal static class ItemIcons
     private const int South = 4;
 
     /// <summary>Иконка с левым верхним углом в (<paramref name="x"/>, <paramref name="y"/>), сторона — <see cref="Size"/> × масштаб.</summary>
-    public static void Draw(UiCanvas canvas, ItemDefinition item, BlockVisuals visuals, float x, float y, int scale)
+    public static void Draw(UiCanvas canvas, ItemDefinition item, ItemVisuals visuals, float x, float y, int scale)
     {
         var s = (float)Size * scale;
         var origin = new Vector2(x, y);
 
-        if (item.Block is not { } block)
+        var icon = visuals.IconLayer(item.Id);
+        if (icon != ItemVisuals.NoIcon || item.Block is not { } block)
         {
-            // Своих картинок у предметов пока нет: предмет-не-блок рисуется квадратом «нет текстуры».
+            // Своя картинка или, у предмета-не-блока без неё, слой 0 — «нет текстуры».
             canvas.DrawTexturedQuad(origin, origin + new Vector2(s, 0), origin + new Vector2(s, s), origin + new Vector2(0, s),
-                Vector2.Zero, Vector2.UnitX, Vector2.One, Vector2.UnitY, 0, UiColor.White);
+                Vector2.Zero, Vector2.UnitX, Vector2.One, Vector2.UnitY, Math.Max(icon, 0), UiColor.White);
             return;
         }
 
@@ -53,6 +55,6 @@ internal static class ItemIcons
 
         void Face(int face, Vector2 a, Vector2 b, Vector2 c, Vector2 d) =>
             canvas.DrawTexturedQuad(a, b, c, d, Vector2.Zero, Vector2.UnitX, Vector2.One, Vector2.UnitY,
-                visuals.GetLayer(block, face), UiColor.White.Shade(BlockFace.All[face].Brightness));
+                visuals.Blocks.GetLayer(block, face), UiColor.White.Shade(BlockFace.All[face].Brightness));
     }
 }

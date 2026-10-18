@@ -12,7 +12,7 @@ public sealed class ItemIconsTests : IDisposable
 {
     private readonly BlockRegistry _blocks;
     private readonly ItemRegistry _items;
-    private readonly BlockVisuals _visuals;
+    private readonly ItemVisuals _visuals;
     private readonly TrueTypeFont _font = TrueTypeFont.Load(UiAtlasTests.FontPath);
     private readonly UiCanvas _canvas;
 
@@ -21,13 +21,13 @@ public sealed class ItemIconsTests : IDisposable
         var content = GameContent.Load();
         _blocks = content.Blocks;
         _items = content.Items;
-        _visuals = new BlockVisuals(_blocks, BlockVisuals.AppearancesFrom(content.BlockTextures));
+        _visuals = new ItemVisuals(new BlockVisuals(_blocks, BlockVisuals.AppearancesFrom(content.BlockTextures)), _items, content.ItemIcons);
         _canvas = new UiCanvas(UiAtlas.Build(_font, 7, UiAtlas.DefaultCharacters));
     }
 
     public void Dispose() => _font.Dispose();
 
-    private int Layer(string texture) => _visuals.TextureNames.ToList().IndexOf(texture);
+    private int Layer(string texture) => _visuals.Blocks.TextureNames.ToList().IndexOf(texture);
 
     private UiVertex[] DrawGrass(int scale, float x = 100, float y = 50)
     {
@@ -87,14 +87,55 @@ public sealed class ItemIconsTests : IDisposable
     }
 
     [Fact]
-    public void NotBlockItem_IsMissingTextureSquare()
+    public void NotBlockItem_WithoutIcon_IsMissingTextureSquare()
     {
         var items = new ItemRegistry();
         var stick = items.Register("base:stick", 64);
+        items.Freeze();
 
-        ItemIcons.Draw(_canvas, stick, _visuals, 0, 0, 2);
+        ItemIcons.Draw(_canvas, stick, new ItemVisuals(_visuals.Blocks, items, new Dictionary<string, string>()), 0, 0, 2);
 
         Assert.Equal(1, _canvas.QuadCount);
         Assert.All(_canvas.Vertices.ToArray(), v => Assert.Equal(0, v.Layer));
+    }
+
+    /// <summary>Своя картинка важнее кубика: и у предмета-не-блока, и у предмета-блока — один плоский квадрат её слоя.</summary>
+    [Fact]
+    public void ItemWithIcon_IsFlatSquareOfItsLayer_EvenIfItPlacesBlock()
+    {
+        var items = new ItemRegistry();
+        var pickaxe = items.Register("base:pickaxe", 1);
+        var stone = items.Register("base:stone", 64, _blocks.Get("base:stone").Id);
+        items.Freeze();
+        var visuals = new ItemVisuals(_visuals.Blocks, items,
+            new Dictionary<string, string> { ["base:pickaxe"] = "base:pickaxe", ["base:stone"] = "base:stone_icon" });
+
+        ItemIcons.Draw(_canvas, pickaxe, visuals, 0, 0, 3);
+        ItemIcons.Draw(_canvas, stone, visuals, 100, 0, 3);
+
+        Assert.Equal(2, _canvas.QuadCount);
+        var vertices = _canvas.Vertices.ToArray();
+        Assert.All(vertices[..4], v => Assert.Equal(_visuals.Blocks.TextureNames.Count, v.Layer));
+        Assert.All(vertices[4..], v => Assert.Equal(_visuals.Blocks.TextureNames.Count + 1, v.Layer));
+        // Сторона — Size × масштаб, без растяжения: пиксель картинки ложится на целый квадрат 3 × 3.
+        Assert.Equal(ItemIcons.Size * 3, vertices[2].Position.X - vertices[0].Position.X);
+    }
+
+    [Fact]
+    public void SameIcon_SharesOneLayer_AfterBlockLayers()
+    {
+        var items = new ItemRegistry();
+        var a = items.Register("base:a", 1);
+        var b = items.Register("base:b", 1);
+        var c = items.Register("base:c", 1);
+        items.Freeze();
+
+        var visuals = new ItemVisuals(_visuals.Blocks, items,
+            new Dictionary<string, string> { ["base:a"] = "base:shared", ["base:b"] = "base:shared" });
+
+        Assert.Equal(["base:shared"], visuals.TextureNames);
+        Assert.Equal(_visuals.Blocks.TextureNames.Count, visuals.IconLayer(a.Id));
+        Assert.Equal(visuals.IconLayer(a.Id), visuals.IconLayer(b.Id));
+        Assert.Equal(ItemVisuals.NoIcon, visuals.IconLayer(c.Id));
     }
 }

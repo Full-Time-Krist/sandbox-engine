@@ -166,6 +166,23 @@ public class ContentLoaderTests
     }
 
     [Fact]
+    public void Load_Icon_ShortNameGetsOwnPack_InvalidIsError()
+    {
+        var content = ContentLoader.Load([
+            File("base/pickaxe.json", """{"type":"item","name":"base:pickaxe","maxStackSize":1,"icon":"pickaxe"}"""),
+            File("base/rock.json", """{"type":"item","name":"base:rock","maxStackSize":64,"icon":"other_mod:rock"}"""),
+            File("base/stick.json", """{"type":"item","name":"base:stick","maxStackSize":64}""")
+        ]);
+
+        Assert.Equal("base:pickaxe", content.ItemIcons["base:pickaxe"]);
+        Assert.Equal("other_mod:rock", content.ItemIcons["base:rock"]);
+        Assert.False(content.ItemIcons.ContainsKey("base:stick"));
+        var exception = Assert.Throws<ContentLoadException>(() => ContentLoader.Load([
+            File("base/bad.json", """{"type":"item","name":"base:bad","maxStackSize":1,"icon":"../bad"}""")]));
+        Assert.Contains("'icon'", exception.Message);
+    }
+
+    [Fact]
     public void Load_DisplayName_IsOptional()
     {
         var content = ContentLoader.Load([

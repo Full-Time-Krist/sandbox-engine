@@ -16,6 +16,9 @@ public sealed record ModInfo(string Id, string Name, Version Version, IReadOnlyD
     /// <summary>Текстуры блоков мода: <c>textures/blocks/&lt;имя&gt;.png</c>.</summary>
     public string BlockTextureDirectory => Path.Combine(Directory, "textures", "blocks");
 
+    /// <summary>Картинки предметов мода: <c>textures/items/&lt;имя&gt;.png</c>.</summary>
+    public string ItemTextureDirectory => Path.Combine(Directory, "textures", "items");
+
     public string? AssemblyPath => AssemblyFile is null ? null : Path.Combine(Directory, AssemblyFile);
 
     public override string ToString() => $"{Id} {Version}";

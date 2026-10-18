@@ -31,7 +31,7 @@ internal sealed class Hud : IDisposable
     private readonly SpriteBatch _batch;
     private readonly TrueTypeFont _font;
     private readonly TextureArray _blockTextures;
-    private readonly BlockVisuals _visuals;
+    private readonly ItemVisuals _visuals;
     private readonly ItemRegistry _items;
     private readonly ItemNames _names;
     private readonly GL _gl;
@@ -50,7 +50,7 @@ internal sealed class Hud : IDisposable
     /// <param name="fontPath">TTF-шрифт интерфейса; растеризуется при запуске и при смене масштаба.</param>
     /// <param name="screen">Размер кадра при запуске: атлас под него строится сразу.</param>
     /// <param name="blockTextures">Массив текстур блоков: из него рисуются иконки. Им владеет вызывающий.</param>
-    public Hud(GL gl, string fontPath, Vector2D<int> screen, TextureArray blockTextures, BlockVisuals visuals, ItemRegistry items,
+    public Hud(GL gl, string fontPath, Vector2D<int> screen, TextureArray blockTextures, ItemVisuals visuals, ItemRegistry items,
         ItemNames names)
     {
         _gl = gl;

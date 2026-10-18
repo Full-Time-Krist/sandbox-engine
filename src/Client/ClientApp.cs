@@ -100,7 +100,8 @@ internal sealed class ClientApp(
         UpdateStatusText();
 
         var visuals = new BlockVisuals(_registry, BlockVisuals.AppearancesFrom(content.BlockTextures));
-        _blockTextures = LoadBlockTextures(visuals.TextureNames, new BlockTextureFiles(mods));
+        var itemVisuals = new ItemVisuals(visuals, _items, content.ItemIcons);
+        _blockTextures = LoadTextures(visuals.TextureNames, itemVisuals.TextureNames, new TextureFiles(mods));
         var names = new ItemNames(content.ItemDisplayNames);
         _chunkRenderer = new ChunkRenderer(Gl, new ChunkMesher(visuals), MeshBuildQueue.DefaultWorkerCount);
 
@@ -110,9 +111,9 @@ internal sealed class ClientApp(
         _lineShader = ShaderProgram.FromFiles(Gl, Path.Combine(shaders, "basic"));
         _selectionBox = LineGeometry.CreateBoxOutline(Gl, new Vector3(0.05f));
         _hud = new Hud(Gl, Path.Combine(AppContext.BaseDirectory, "Assets", "Fonts", "ui.ttf"), Window.FramebufferSize,
-            _blockTextures, visuals, _items, names);
+            _blockTextures, itemVisuals, _items, names);
         _inventoryScreen = new InventoryScreen(Gl, Path.Combine(AppContext.BaseDirectory, "Assets", "Fonts", "ui.ttf"),
-            Window.FramebufferSize, _blockTextures, visuals, _items, names);
+            Window.FramebufferSize, _blockTextures, itemVisuals, _items, names);
 
         // Позицию задаст сервер в JoinAccepted. До неё чанков нет, и тело стоит на месте.
         _controller = new PlayerController(_camera, _world.Chunks, _registry);
@@ -121,31 +122,36 @@ internal sealed class ClientApp(
         connection.Send(new JoinRequest("Player"));
     }
 
-    private TextureArray LoadBlockTextures(IReadOnlyList<string> names, BlockTextureFiles files)
+    /// <summary>Массив текстур: сначала текстуры блоков (по слоям <see cref="BlockVisuals"/>), за ними картинки предметов.</summary>
+    private TextureArray LoadTextures(IReadOnlyList<string> blockNames, IReadOnlyList<string> itemNames, TextureFiles files)
     {
         const int MissingSize = 16;
-        var images = new List<Image>(names.Count);
+        var images = new List<Image>(blockNames.Count + itemNames.Count);
 
-        foreach (var name in names)
-        {
-            if (name == BlockVisuals.MissingTexture)
-            {
-                images.Add(Image.CreateMissing(MissingSize, MissingSize));
-            }
-            else if (files.PathFor(name) is var path && File.Exists(path))
-            {
-                images.Add(Image.Load(path));
-            }
-            else
-            {
-                // Нет файла — не повод падать: блок будет в шахматку, а в логе видно, чего не хватает.
-                Console.WriteLine($"[Client] Нет текстуры {name}: {files.PathFor(name)}");
-                images.Add(Image.CreateMissing(MissingSize, MissingSize));
-            }
-        }
+        foreach (var name in blockNames)
+            images.Add(name == BlockVisuals.MissingTexture ? Image.CreateMissing(MissingSize, MissingSize) : Load(name, TextureKind.Block));
+        foreach (var name in itemNames)
+            images.Add(Load(name, TextureKind.Item));
 
-        Console.WriteLine($"[Client] Текстуры блоков: {images.Count} слоёв");
+        Console.WriteLine($"[Client] Текстуры: {blockNames.Count} слоёв блоков, {itemNames.Count} картинок предметов");
         return new TextureArray(Gl, images);
+
+        Image Load(string name, TextureKind kind)
+        {
+            // Нет файла или не тот размер (все слои массива одного размера) — не повод падать: будет шахматка,
+            // а в логе видно, что не так. Картинку чужого размера могла положить и опечатка, и мод.
+            var path = files.PathFor(name, kind);
+            if (!File.Exists(path))
+            {
+                Console.WriteLine($"[Client] Нет текстуры {name}: {path}");
+                return Image.CreateMissing(MissingSize, MissingSize);
+            }
+            var image = Image.Load(path);
+            if (image.Width == MissingSize && image.Height == MissingSize)
+                return image;
+            Console.WriteLine($"[Client] Текстура {name} — {image.Width}×{image.Height}, нужна {MissingSize}×{MissingSize}: {path}");
+            return Image.CreateMissing(MissingSize, MissingSize);
+        }
     }
 
     protected override void OnTick()

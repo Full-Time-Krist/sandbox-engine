@@ -89,9 +89,11 @@ public class BlockVisualsTests
     public void ContentTextures_AllHaveFiles()
     {
         // Текстура без файла рисуется шахматкой «missing» без ошибки: тест не даст опечататься в JSON блока.
-        var files = new BlockTextureFiles([]);
-        var textures = GameContent.Load().BlockTextures.Values.SelectMany(t => new[] { t.Top, t.Side, t.Bottom }).Distinct();
+        var files = new TextureFiles([]);
+        var content = GameContent.Load();
+        var textures = content.BlockTextures.Values.SelectMany(t => new[] { t.Top, t.Side, t.Bottom }).Distinct();
 
-        Assert.All(textures, name => Assert.True(File.Exists(files.PathFor(name)), $"Нет файла текстуры '{name}'"));
+        Assert.All(textures, name => Assert.True(File.Exists(files.PathFor(name, TextureKind.Block)), $"Нет файла текстуры '{name}'"));
+        Assert.All(content.ItemIcons.Values, name => Assert.True(File.Exists(files.PathFor(name, TextureKind.Item)), $"Нет картинки предмета '{name}'"));
     }
 }
