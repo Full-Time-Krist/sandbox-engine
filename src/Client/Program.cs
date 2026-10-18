@@ -4,6 +4,7 @@ using Client;
 using Engine.Windowing;
 using Server;
 using Shared;
+using Shared.Content;
 using Shared.Networking;
 using Shared.Protocol;
 
@@ -37,7 +38,9 @@ if (StringArgument("--mode") is { } modeName)
 
 // Одиночная игра: встроенный сервер в том же процессе, в своём потоке, связь через очереди в памяти.
 // Для мультиплеера здесь будет сетевое соединение вместо LocalConnection и null вместо сервера.
-using var server = new GameServer(seed, spawnColumn: spawnColumn, savePath: savePath, defaultMode: defaultMode);
+using var server = CreateServer();
+if (server == null)
+    return 1;
 var (clientConnection, serverConnection) = LocalConnection.CreatePair<ClientMessage, ServerMessage>();
 server.Connect(serverConnection);
 
@@ -48,6 +51,21 @@ host.Start();
 
 using var app = new ClientApp(new WindowSettings { Title = product }, clientConnection, host);
 app.Run();
+return 0;
+
+// Сервер первым читает контент (GameContent): ошибку в JSON показываем одной строкой с файлом, а не стеком вызовов.
+GameServer? CreateServer()
+{
+    try
+    {
+        return new GameServer(seed, spawnColumn: spawnColumn, savePath: savePath, defaultMode: defaultMode);
+    }
+    catch (ContentLoadException exception)
+    {
+        Console.Error.WriteLine($"[Content] Ошибка в контенте игры: {exception.Message}");
+        return null;
+    }
+}
 
 // Строка после аргумента name, или null, если аргумента нет.
 string? StringArgument(string name)

@@ -10,8 +10,8 @@ public class ContentLoaderTests
     public void Load_RegistersAirAndBuildsFrozenRegistries()
     {
         var content = ContentLoader.Load([
-            File("stone.json", """{"type":"block","name":"base:stone","isOpaque":true}"""),
-            File("stone_item.json", """{"type":"item","name":"base:stone","maxStackSize":64,"placesBlock":"base:stone"}""")
+            File("base/stone.json", """{"type":"block","name":"base:stone","isOpaque":true}"""),
+            File("base/stone_item.json", """{"type":"item","name":"base:stone","maxStackSize":64,"placesBlock":"base:stone"}""")
         ]);
 
         Assert.True(content.Blocks.IsFrozen);
@@ -27,12 +27,12 @@ public class ContentLoaderTests
     public void Load_AssignsNumericIdsIndependentlyOfFileOrder()
     {
         var first = ContentLoader.Load([
-            File("z.json", """{"type":"block","name":"base:stone","isOpaque":true}"""),
-            File("a.json", """{"type":"block","name":"base:dirt","isOpaque":true}""")
+            File("base/z.json", """{"type":"block","name":"base:stone","isOpaque":true}"""),
+            File("base/a.json", """{"type":"block","name":"base:dirt","isOpaque":true}""")
         ]);
         var second = ContentLoader.Load([
-            File("a.json", """{"type":"block","name":"base:dirt","isOpaque":true}"""),
-            File("z.json", """{"type":"block","name":"base:stone","isOpaque":true}""")
+            File("base/a.json", """{"type":"block","name":"base:dirt","isOpaque":true}"""),
+            File("base/z.json", """{"type":"block","name":"base:stone","isOpaque":true}""")
         ]);
 
         Assert.Equal(first.Blocks.Get("base:dirt").Id, second.Blocks.Get("base:dirt").Id);
@@ -45,7 +45,7 @@ public class ContentLoaderTests
     public void Load_RegistersNonBlockItem()
     {
         var content = ContentLoader.Load([
-            File("stick.json", """{"type":"item","name":"base:stick","maxStackSize":16}""")
+            File("base/stick.json", """{"type":"item","name":"base:stick","maxStackSize":16}""")
         ]);
 
         var stick = content.Items.Get("base:stick");
@@ -54,18 +54,18 @@ public class ContentLoaderTests
     }
 
     [Theory]
-    [InlineData("""{"type":"block","name":"stone","isOpaque":true}""", "stone.json")]
-    [InlineData("""{"type":"block","name":"base:stone"}""", "stone.json")]
-    [InlineData("""{"type":"item","name":"base:stick","maxStackSize":0}""", "stick.json")]
-    [InlineData("""{"type":"item","name":"base:stick","maxStackSize":64,"placesBlock":"base:missing"}""", "stick.json")]
-    [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"typo":false}""", "stone.json")]
-    [InlineData("""{"type":"entity","name":"base:ghost"}""", "ghost.json")]
-    [InlineData("""{"type":"item","name":"base:stick","maxStackSize":"64"}""", "stick.json")]
-    [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"textures":"../secret"}""", "stone.json")]
-    [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"textures":42}""", "stone.json")]
-    [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"textures":{"top":"a","side":"b"}}""", "stone.json")]
-    [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"textures":{"top":"a","side":"b","bottom":"c","front":"d"}}""", "stone.json")]
-    [InlineData("""{"type":"item","name":"base:stick","maxStackSize":64.5}""", "stick.json")]
+    [InlineData("""{"type":"block","name":"stone","isOpaque":true}""", "base/stone.json")]
+    [InlineData("""{"type":"block","name":"base:stone"}""", "base/stone.json")]
+    [InlineData("""{"type":"item","name":"base:stick","maxStackSize":0}""", "base/stick.json")]
+    [InlineData("""{"type":"item","name":"base:stick","maxStackSize":64,"placesBlock":"base:missing"}""", "base/stick.json")]
+    [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"typo":false}""", "base/stone.json")]
+    [InlineData("""{"type":"entity","name":"base:ghost"}""", "base/ghost.json")]
+    [InlineData("""{"type":"item","name":"base:stick","maxStackSize":"64"}""", "base/stick.json")]
+    [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"textures":"../secret"}""", "base/stone.json")]
+    [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"textures":42}""", "base/stone.json")]
+    [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"textures":{"top":"a","side":"b"}}""", "base/stone.json")]
+    [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"textures":{"top":"a","side":"b","bottom":"c","front":"d"}}""", "base/stone.json")]
+    [InlineData("""{"type":"item","name":"base:stick","maxStackSize":64.5}""", "base/stick.json")]
     public void Load_InvalidContent_ThrowsUsefulError(string json, string path)
     {
         var exception = Assert.Throws<ContentLoadException>(() => ContentLoader.Load([File(path, json)]));
@@ -77,8 +77,8 @@ public class ContentLoaderTests
     public void Load_DuplicateBlockNames_Throws()
     {
         var exception = Assert.Throws<ContentLoadException>(() => ContentLoader.Load([
-            File("one.json", """{"type":"block","name":"base:stone","isOpaque":true}"""),
-            File("two.json", """{"type":"block","name":"base:stone","isOpaque":false}""")
+            File("base/one.json", """{"type":"block","name":"base:stone","isOpaque":true}"""),
+            File("base/two.json", """{"type":"block","name":"base:stone","isOpaque":false}""")
         ]));
 
         Assert.Contains("base:stone", exception.Message);
@@ -89,8 +89,8 @@ public class ContentLoaderTests
     public void Load_DuplicateItemNames_Throws()
     {
         Assert.Throws<ContentLoadException>(() => ContentLoader.Load([
-            File("one.json", """{"type":"item","name":"base:stick","maxStackSize":64}"""),
-            File("two.json", """{"type":"item","name":"base:stick","maxStackSize":16}""")
+            File("base/one.json", """{"type":"item","name":"base:stick","maxStackSize":64}"""),
+            File("base/two.json", """{"type":"item","name":"base:stick","maxStackSize":16}""")
         ]));
     }
 
@@ -98,7 +98,7 @@ public class ContentLoaderTests
     public void Load_MalformedJson_ReportsPath()
     {
         var exception = Assert.Throws<ContentLoadException>(() =>
-            ContentLoader.Load([File("broken.json", """{"type":"block", """)]));
+            ContentLoader.Load([File("base/broken.json", """{"type":"block", """)]));
 
         Assert.Contains("broken.json", exception.Message);
     }
@@ -107,7 +107,7 @@ public class ContentLoaderTests
     public void Load_RejectsAirAsPlacedBlock()
     {
         var exception = Assert.Throws<ContentLoadException>(() => ContentLoader.Load([
-            File("air_item.json", """{"type":"item","name":"base:empty","maxStackSize":1,"placesBlock":"base:air"}""")
+            File("base/air_item.json", """{"type":"item","name":"base:empty","maxStackSize":1,"placesBlock":"base:air"}""")
         ]));
 
         Assert.Contains("base:air", exception.Message);
@@ -118,7 +118,7 @@ public class ContentLoaderTests
     {
         // Без ранней проверки читалось последнее "type", и ошибка ругалась на "isOpaque".
         var exception = Assert.Throws<ContentLoadException>(() => ContentLoader.Load([
-            File("stone.json", """{"type":"block","name":"base:stone","isOpaque":true,"type":"item"}""")
+            File("base/stone.json", """{"type":"block","name":"base:stone","isOpaque":true,"type":"item"}""")
         ]));
 
         Assert.Contains("'type'", exception.Message);
@@ -129,9 +129,9 @@ public class ContentLoaderTests
     public void Load_Textures_StringIsUniform_ObjectIsPerFace_MissingIsAbsent()
     {
         var content = ContentLoader.Load([
-            File("stone.json", """{"type":"block","name":"base:stone","isOpaque":true,"textures":"stone"}"""),
-            File("grass.json", """{"type":"block","name":"base:grass","isOpaque":true,"textures":{"top":"grass_top","side":"grass_side","bottom":"dirt"}}"""),
-            File("glass.json", """{"type":"block","name":"base:glass","isOpaque":false}""")
+            File("base/stone.json", """{"type":"block","name":"base:stone","isOpaque":true,"textures":"stone"}"""),
+            File("base/grass.json", """{"type":"block","name":"base:grass","isOpaque":true,"textures":{"top":"grass_top","side":"grass_side","bottom":"dirt"}}"""),
+            File("base/glass.json", """{"type":"block","name":"base:glass","isOpaque":false}""")
         ]);
 
         Assert.Equal(new BlockTextures("stone", "stone", "stone"), content.BlockTextures["base:stone"]);
@@ -149,9 +149,76 @@ public class ContentLoaderTests
 
         var exception = Assert.Throws<ContentLoadException>(() => ContentLoader.LoadDirectory(directory.Path));
 
-        Assert.Contains(System.IO.Path.Combine("base", "items", "bad.json"), exception.Message);
+        Assert.Contains("base/items/bad.json", exception.Message); // разделитель — '/' на любой ОС
         System.IO.File.Delete(System.IO.Path.Combine(directory.Path, "base", "items", "bad.json"));
         Assert.Equal("base:stone", ContentLoader.LoadDirectory(directory.Path).Items.Get("base:stone").Name);
+    }
+
+    [Theory]
+    [InlineData("stone.json", "папке пакета")]
+    [InlineData("Base/stone.json", "имя пакета 'Base'")]
+    [InlineData("my-pack/stone.json", "имя пакета 'my-pack'")]
+    [InlineData("other/stone.json", "не из пространства имён пакета 'other'")]
+    public void Load_DefinitionOutsideItsPackNamespace_Throws(string path, string expected)
+    {
+        var exception = Assert.Throws<ContentLoadException>(() => ContentLoader.Load([
+            File(path, """{"type":"block","name":"base:stone","isOpaque":true}""")
+        ]));
+
+        Assert.Contains(path, exception.Message);
+        Assert.Contains(expected, exception.Message);
+    }
+
+    [Fact]
+    public void Load_ItemMayPlaceBlockOfAnotherPack()
+    {
+        var content = ContentLoader.Load([
+            File("base/stone.json", """{"type":"block","name":"base:stone","isOpaque":true}"""),
+            File("example_mod/stone_brush.json", """{"type":"item","name":"example_mod:stone_brush","maxStackSize":1,"placesBlock":"base:stone"}""")
+        ]);
+
+        Assert.Equal(content.Blocks.Get("base:stone").Id, content.Items.Get("example_mod:stone_brush").Block);
+    }
+
+    [Fact]
+    public void LoadDirectories_MergesPacksFromSeveralRoots()
+    {
+        using var game = new TempContentDirectory();
+        using var mods = new TempContentDirectory();
+        game.Write("base/blocks/stone.json", """{"type":"block","name":"base:stone","isOpaque":true}""");
+        mods.Write("example_mod/items/stone_brush.json",
+            """{"type":"item","name":"example_mod:stone_brush","maxStackSize":1,"placesBlock":"base:stone"}""");
+
+        var content = ContentLoader.LoadDirectories([game.Path, mods.Path]);
+
+        Assert.Equal(content.Blocks.Get("base:stone").Id, content.Items.Get("example_mod:stone_brush").Block);
+    }
+
+    [Fact]
+    public void LoadDirectories_SamePackInTwoRoots_Throws()
+    {
+        using var game = new TempContentDirectory();
+        using var mods = new TempContentDirectory();
+        game.Write("base/blocks/stone.json", """{"type":"block","name":"base:stone","isOpaque":true}""");
+        mods.Write("base/blocks/dirt.json", """{"type":"block","name":"base:dirt","isOpaque":true}""");
+
+        var exception = Assert.Throws<ContentLoadException>(() => ContentLoader.LoadDirectories([game.Path, mods.Path]));
+
+        Assert.Contains("'base'", exception.Message);
+        Assert.Contains(game.Path, exception.Message);
+        Assert.Contains(mods.Path, exception.Message);
+    }
+
+    [Fact]
+    public void LoadDirectory_JsonOutsidePack_Throws()
+    {
+        using var directory = new TempContentDirectory();
+        directory.Write("base/blocks/stone.json", """{"type":"block","name":"base:stone","isOpaque":true}""");
+        directory.Write("stray.json", """{"type":"block","name":"base:dirt","isOpaque":true}""");
+
+        var exception = Assert.Throws<ContentLoadException>(() => ContentLoader.LoadDirectory(directory.Path));
+
+        Assert.Contains("stray.json", exception.Message);
     }
 
     private sealed class TempContentDirectory : IDisposable

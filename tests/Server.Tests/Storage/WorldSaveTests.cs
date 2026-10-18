@@ -3,6 +3,7 @@ using Microsoft.Data.Sqlite;
 using Server.Storage;
 using Shared;
 using Shared.Blocks;
+using Shared.Content;
 using Shared.Items;
 using Shared.Voxels;
 
@@ -185,6 +186,36 @@ public sealed class WorldSaveTests : IDisposable
 
         using var reopened = Open();
         Assert.Equal(GameMode.Creative, reopened.Info!.DefaultMode);
+    }
+
+    /// <summary>
+    /// Мир, сохранённый до шага 4.2 (блоки и предметы регистрировались кодом в порядке BaseBlocks), открывается
+    /// с реестрами из JSON-контента, где номера идут по алфавиту имён: все блоки и предметы на месте.
+    /// </summary>
+    [Fact]
+    public void SaveFromCodeRegistry_LoadsIntoContentRegistry()
+    {
+        string[] names = ["base:stone", "base:dirt", "base:grass", "base:sand", "base:log", "base:planks"];
+        var oldBlocks = BlockIdMapTests.Registry(names);
+        var oldItems = ItemsFor(oldBlocks);
+        var content = GameContent.Load();
+        Assert.NotEqual(oldBlocks.Get("base:stone").Id, content.Blocks.Get("base:stone").Id);
+        var position = new ChunkPos(0, 1, 0);
+        using (var save = Open(oldBlocks, items: oldItems))
+        {
+            save.SaveChunk(MixedChunk(position, oldBlocks, names));
+            save.SavePlayer("Player", new SavedPlayer(default, default, GameMode.Survival, 0,
+                Slots([.. names.Select((name, slot) => (slot, Stack(name, slot + 1, oldItems)))])));
+        }
+
+        using var reopened = Open(content.Blocks, items: content.Items);
+
+        Assert.Empty(reopened.BlockIds.UnknownNames);
+        Assert.Empty(reopened.ItemIds.UnknownNames);
+        Assert.True(MixedChunk(position, content.Blocks, names).Blocks.SequenceEqual(Load(reopened, position).Blocks));
+        var slots = reopened.LoadPlayer("Player")!.Slots;
+        for (var slot = 0; slot < names.Length; slot++)
+            Assert.Equal(Stack(names[slot], slot + 1, content.Items), slots[slot]);
     }
 
     [Fact]

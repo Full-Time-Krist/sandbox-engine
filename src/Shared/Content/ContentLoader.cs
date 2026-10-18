@@ -6,7 +6,11 @@ using Shared.Items;
 
 namespace Shared.Content;
 
-/// <summary>Один JSON-файл контента с путём для диагностики ошибок.</summary>
+/// <summary>Один JSON-файл контента.</summary>
+/// <param name="Path">
+/// Путь относительно корня контента: <c>&lt;пакет&gt;/…/файл.json</c> (разделитель <c>/</c> или <c>\</c>).
+/// Первая папка — пакет; она же пространство имён его определений. Путь попадает в сообщения об ошибках.
+/// </param>
 public sealed record ContentJsonFile(string Path, string Json);
 
 /// <summary>Реестры, построенные из одного набора определений.</summary>
@@ -31,21 +35,49 @@ public sealed class ContentLoadException : Exception
 /// Загружает JSON-описания блоков и предметов в реестры. Числовые ID назначаются по строковым именам
 /// в ordinal-порядке, поэтому не зависят от порядка файлов в каталоге.
 /// </summary>
+/// <remarks>
+/// Контент разбит на пакеты: папка верхнего уровня в корне контента — пакет, её имя — пространство имён,
+/// и пакет объявляет только имена <c>&lt;пакет&gt;:…</c> (ссылаться, например через <c>placesBlock</c>, может на любые).
+/// Так два пакета не могут занять одно имя, а по имени сразу видно, какой пакет его объявил.
+/// </remarks>
 public static partial class ContentLoader
 {
     /// <summary>Имя текстуры — имя файла без расширения: только a–z, 0–9 и _, чтобы из JSON нельзя было указать путь.</summary>
     [GeneratedRegex("^[a-z0-9_]+$")]
     private static partial Regex TextureNamePattern();
 
-    public static ContentRegistries LoadDirectory(string directory)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(directory);
-        if (!Directory.Exists(directory))
-            throw new DirectoryNotFoundException($"Каталог контента не найден: '{directory}'.");
+    public static ContentRegistries LoadDirectory(string directory) => LoadDirectories([directory]);
 
-        var files = Directory.GetFiles(directory, "*.json", SearchOption.AllDirectories)
-            .Order(StringComparer.Ordinal)
-            .Select(path => new ContentJsonFile(Path.GetRelativePath(directory, path), File.ReadAllText(path)));
+    /// <summary>
+    /// Загружает пакеты из нескольких корней контента (игра, позже — папка модов) в одни реестры.
+    /// Пакет с одним именем в двух корнях — ошибка: иначе неясно, какой из них настоящий.
+    /// </summary>
+    public static ContentRegistries LoadDirectories(IEnumerable<string> roots)
+    {
+        ArgumentNullException.ThrowIfNull(roots);
+
+        var packRoots = new Dictionary<string, string>(StringComparer.Ordinal);
+        var files = new List<ContentJsonFile>();
+        foreach (var root in roots)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(root);
+            if (!Directory.Exists(root))
+                throw new DirectoryNotFoundException($"Каталог контента не найден: '{root}'.");
+
+            if (Directory.GetFiles(root, "*.json").FirstOrDefault() is { } loose)
+                throw new ContentLoadException($"Файл '{loose}': контент должен лежать в папке пакета, а не в корне '{root}'.");
+
+            foreach (var packDirectory in Directory.GetDirectories(root))
+            {
+                var pack = Path.GetFileName(packDirectory);
+                if (!packRoots.TryAdd(pack, root))
+                    throw new ContentLoadException($"Пакет '{pack}' найден дважды: в '{packRoots[pack]}' и в '{root}'.");
+
+                files.AddRange(Directory.GetFiles(packDirectory, "*.json", SearchOption.AllDirectories)
+                    .Select(path => new ContentJsonFile(
+                        Path.GetRelativePath(root, path).Replace(Path.DirectorySeparatorChar, '/'), File.ReadAllText(path))));
+            }
+        }
 
         return Load(files);
     }
@@ -68,6 +100,7 @@ public static partial class ContentLoader
             if (string.IsNullOrWhiteSpace(file.Path))
                 throw new ArgumentException("У файла контента должен быть указан путь.", nameof(files));
 
+            var pack = PackOf(file);
             using var document = Parse(file);
             var root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object)
@@ -79,6 +112,8 @@ public static partial class ContentLoader
             var name = RequiredString(root, "name", file);
             if (!ContentNames.IsValid(name))
                 throw Error(file, $"имя '{name}' должно иметь вид 'namespace:name' (a–z, 0–9, _).");
+            if (name[..name.IndexOf(':')] != pack)
+                throw Error(file, $"имя '{name}' не из пространства имён пакета '{pack}'; пакет объявляет только '{pack}:…'.");
 
             switch (type)
             {
@@ -145,6 +180,21 @@ public static partial class ContentLoader
         itemRegistry.Freeze();
         return new ContentRegistries(blockRegistry, itemRegistry, textures.ToImmutable());
     }
+
+    /// <summary>Пакет файла — первая папка пути. Его имя — пространство имён, поэтому правила те же: a–z, 0–9, _.</summary>
+    private static string PackOf(ContentJsonFile file)
+    {
+        var separator = file.Path.IndexOfAny(['/', '\\']);
+        if (separator < 0)
+            throw Error(file, "файл должен лежать в папке пакета: '<пакет>/…/файл.json'.");
+        var pack = file.Path[..separator];
+        if (!PackNamePattern().IsMatch(pack))
+            throw Error(file, $"имя пакета '{pack}' должно состоять из a–z, 0–9 и _: оно же пространство имён.");
+        return pack;
+    }
+
+    [GeneratedRegex("^[a-z0-9_]+$")]
+    private static partial Regex PackNamePattern();
 
     private static JsonDocument Parse(ContentJsonFile file)
     {
