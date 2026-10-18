@@ -66,18 +66,40 @@ public class ChunkGeneratorTests
         Assert.Equal(1, generator.Pending);
     }
 
+    /// <summary>
+    /// Dispose не дорабатывает очередь: доделывается только чанк, который уже генерируется. Проверяется без часов
+    /// (раньше — «Dispose быстрее 500 мс», и тест падал, когда первый чанк с JIT-компиляцией шума шёл под нагрузкой):
+    /// первый чанк держим, пока Dispose не очистит очередь и не встанет ждать поток, и считаем, сколько чанков сделано.
+    /// </summary>
     [Fact]
-    public void Dispose_DropsQueuedRequests_AndReturnsQuickly()
+    public void Dispose_DropsQueuedRequests_FinishesOnlyChunkInProgress()
     {
-        var generator = new ChunkGenerator(_terrain.Generate, workerCount: 1);
-        // Тысячи чанков у поверхности — это секунды работы. Dispose не должен их дожидаться.
+        var produced = 0;
+        using var firstStarted = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var generator = new ChunkGenerator(position =>
+        {
+            if (Interlocked.Increment(ref produced) == 1)
+            {
+                firstStarted.Set();
+                release.Wait(TestContext.Current.CancellationToken);
+            }
+            return _terrain.Generate(position);
+        }, workerCount: 1);
         for (var i = 0; i < 5000; i++)
             generator.Request(new ChunkPos(i, 0, 0));
+        Assert.True(firstStarted.Wait(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken), "Генерация первого чанка не началась");
 
+        var disposer = new Thread(generator.Dispose);
+        disposer.Start();
+        // Dispose дошёл до ожидания потока (Join), значит, очередь уже очищена: теперь отпускаем первый чанк.
         var clock = Stopwatch.StartNew();
-        generator.Dispose();
+        while ((disposer.ThreadState & System.Threading.ThreadState.WaitSleepJoin) == 0 && clock.Elapsed < TimeSpan.FromSeconds(10))
+            Thread.Sleep(1);
+        release.Set();
 
-        Assert.True(clock.ElapsedMilliseconds < 500, $"Dispose занял {clock.ElapsedMilliseconds} мс");
+        Assert.True(disposer.Join(TimeSpan.FromSeconds(10)), "Dispose не завершился");
+        Assert.Equal(1, Volatile.Read(ref produced));
     }
 
     [Fact]

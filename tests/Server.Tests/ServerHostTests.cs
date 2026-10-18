@@ -44,13 +44,43 @@ public class ServerHostTests
 
         Thread.Sleep(1000);
         var ticks = host.Ticks;
-        var seconds = clock.Elapsed.TotalSeconds;
+        var seconds = clock.Elapsed.TotalSeconds - host.SkippedSeconds;
 
-        // Первый тик сразу при старте, дальше каждые 50 мс. Снизу допуск — 15%: при полном прогоне три тестовые сборки
-        // идут параллельно, и планировщик ОС изредка задерживает поток сервера (с фиксированными −3 тест иногда падал).
-        // Неверную частоту (10 или 40 TPS) он по-прежнему ловит. Сверху строго: лишние тики — настоящая ошибка.
+        // Первый тик сразу при старте, дальше каждые 50 мс. Под нагрузкой (параллельные тесты занимают все ядра)
+        // сервер по своим правилам отстаёт: отставание больше MaxLagSeconds пропускается — это время не считаем
+        // (SkippedSeconds), а меньшее догоняется потом, так что в момент чтения может не хватать до MaxLagSeconds × 20
+        // тиков и ещё одного. Это граница из устройства ServerHost, а не подобранный допуск; частоту 10 вместо 20 она ловит.
         var expected = 1 + seconds * 20;
-        Assert.InRange(ticks, expected * 0.85, expected + 1);
+        Assert.InRange(ticks, expected - (ServerHost.MaxLagSeconds * 20 + 1), expected + 1);
+    }
+
+    /// <summary>
+    /// Долгий тик (дольше MaxLagSeconds) не догоняется пачкой тиков: отставание пропускается и учитывается в SkippedSeconds,
+    /// а дальше тики снова идут раз в 50 мс.
+    /// </summary>
+    [Fact]
+    public void LongTick_IsSkippedNotCaughtUp_AndCounted()
+    {
+        var first = true;
+        using var host = new ServerHost(() =>
+        {
+            if (!first)
+                return;
+            first = false;
+            Thread.Sleep(1000);
+        }, ticksPerSecond: 20, logStats: false);
+        var clock = Stopwatch.StartNew();
+        host.Start();
+
+        Assert.True(WaitUntil(() => host.Ticks >= 2, timeoutMs: 5000));
+        // Первый тик начался в 0 и закончился около 1 с; следующий по расписанию — в 0,05 с: пропущено около 0,95 с.
+        Assert.InRange(host.SkippedSeconds, 0.85, 0.95 + clock.Elapsed.TotalSeconds - 1.0 + 0.1);
+
+        Thread.Sleep(500);
+        var ticks = host.Ticks;
+        var seconds = clock.Elapsed.TotalSeconds - host.SkippedSeconds;
+        // Без пропуска здесь было бы около 31 тика сразу после долгого (догоняли бы); с пропуском — по времени без него.
+        Assert.InRange(ticks, 1 + seconds * 20 - 3, 1 + seconds * 20 + 1);
     }
 
     [Fact]

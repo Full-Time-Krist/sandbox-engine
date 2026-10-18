@@ -18,7 +18,7 @@ public sealed class ServerHost : IDisposable
     /// Если сервер отстал сильнее (тик длился долго, сработал отладчик), он не догоняет пропущенные тики,
     /// а продолжает с текущего момента. То же правило, что у цикла клиента: иначе «спираль смерти».
     /// </summary>
-    private const double MaxLagSeconds = 0.25;
+    internal const double MaxLagSeconds = 0.25;
 
     /// <summary>Как часто писать в лог статистику тиков.</summary>
     private const double StatsIntervalSeconds = 10;
@@ -47,6 +47,13 @@ public sealed class ServerHost : IDisposable
 
     /// <summary>Сколько тиков выполнено с запуска. Можно читать из любого потока.</summary>
     public long Ticks => Interlocked.Read(ref _ticks);
+
+    /// <summary>
+    /// Сколько секунд расписания пропущено без тиков: после отставания больше <see cref="MaxLagSeconds"/> сервер не
+    /// догоняет пропущенное, а начинает отсчёт заново. Ожидаемое число тиков — по времени без этих секунд.
+    /// </summary>
+    public double SkippedSeconds => Volatile.Read(ref _skippedSeconds);
+    private double _skippedSeconds;
 
     /// <summary>Работает ли поток сервера.</summary>
     public bool IsRunning => _thread is { IsAlive: true };
@@ -129,6 +136,7 @@ public sealed class ServerHost : IDisposable
             if (tickEnd - nextTick > MaxLagSeconds)
             {
                 Console.WriteLine($"[Server] Отставание {(tickEnd - nextTick) * 1000:F0} мс, пропущенные тики не догоняем");
+                Volatile.Write(ref _skippedSeconds, _skippedSeconds + (tickEnd - nextTick));
                 nextTick = tickEnd;
             }
 
