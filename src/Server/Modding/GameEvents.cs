@@ -21,6 +21,7 @@ internal sealed class GameEvents(Action<string> log)
     private readonly List<(string ModId, Action<PlayerJoined> Handler)> _playerJoined = [];
     private readonly List<(string ModId, Action<ItemCrafted> Handler)> _itemCrafted = [];
     private readonly List<(string ModId, Action<QuestCompleted> Handler)> _questCompleted = [];
+    private readonly List<(string ModId, Action<ItemPickedUp> Handler)> _itemPickedUp = [];
     private readonly Queue<Action> _pending = new();
 
     /// <summary>Подписки закрыты: моды загружены.</summary>
@@ -36,6 +37,7 @@ internal sealed class GameEvents(Action<string> log)
     public void Raise(PlayerJoined e) => Enqueue(_playerJoined, e, nameof(PlayerJoined));
     public void Raise(ItemCrafted e) => Enqueue(_itemCrafted, e, nameof(ItemCrafted));
     public void Raise(QuestCompleted e) => Enqueue(_questCompleted, e, nameof(QuestCompleted));
+    public void Raise(ItemPickedUp e) => Enqueue(_itemPickedUp, e, nameof(ItemPickedUp));
 
     /// <summary>Вызывает обработчики всех событий в очереди, включая появившиеся по ходу. Только из потока сервера.</summary>
     public void Dispatch()
@@ -91,5 +93,6 @@ internal sealed class GameEvents(Action<string> log)
         public void OnPlayerJoined(Action<PlayerJoined> handler) => events.Subscribe(events._playerJoined, modId, handler);
         public void OnItemCrafted(Action<ItemCrafted> handler) => events.Subscribe(events._itemCrafted, modId, handler);
         public void OnQuestCompleted(Action<QuestCompleted> handler) => events.Subscribe(events._questCompleted, modId, handler);
+        public void OnItemPickedUp(Action<ItemPickedUp> handler) => events.Subscribe(events._itemPickedUp, modId, handler);
     }
 }

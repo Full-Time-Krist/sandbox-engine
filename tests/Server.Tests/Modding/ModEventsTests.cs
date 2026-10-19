@@ -22,8 +22,13 @@ public sealed class ModEventsTests : IDisposable
     private readonly List<BlockPlaced> _placed = [];
     private readonly List<PlayerJoined> _joined = [];
 
-    /// <summary>Сколько добычи было в инвентаре, когда пришло событие ломания: обработчик должен видеть действие законченным.</summary>
-    private readonly List<int> _dropsSeenByHandler = [];
+    private readonly List<ItemPickedUp> _pickedUp = [];
+
+    /// <summary>Пусто ли на месте блока, когда пришло событие ломания: обработчик должен видеть действие законченным.</summary>
+    private readonly List<bool> _airSeenByHandler = [];
+
+    /// <summary>Сколько штук подобранного предмета было в инвентаре, когда пришло событие подбора.</summary>
+    private readonly List<int> _countSeenOnPickup = [];
 
     private GameServer _server = null!;
     private TestServers.TestClient _client = null!;
@@ -43,10 +48,15 @@ public sealed class ModEventsTests : IDisposable
         context.Events.OnBlockBroken(e =>
         {
             _broken.Add(e);
-            _dropsSeenByHandler.Add(e.Player.Inventory[0].Count);
+            _airSeenByHandler.Add(e.World.GetBlock(e.Position).IsAir);
         });
         context.Events.OnBlockPlaced(_placed.Add);
         context.Events.OnPlayerJoined(_joined.Add);
+        context.Events.OnItemPickedUp(e =>
+        {
+            _pickedUp.Add(e);
+            _countSeenOnPickup.Add(e.Player.Inventory.Count(e.Stack.Item));
+        });
     });
 
     private void Start(params (string Id, IMod Mod)[] mods)
@@ -73,7 +83,7 @@ public sealed class ModEventsTests : IDisposable
     private BlockId BlockAt(BlockPos pos) => _server.World.Chunks.GetBlock(pos);
 
     [Fact]
-    public void Break_RaisesBlockBrokenOnce_AfterDropIsInInventory()
+    public void Break_RaisesBlockBrokenOnce_AfterBlockIsGone()
     {
         Start(("test_mod", Recorder()));
         var surfaceBlock = BlockAt(_surface);
@@ -84,12 +94,28 @@ public sealed class ModEventsTests : IDisposable
         Assert.Equal(_surface, e.Position);
         Assert.Equal(surfaceBlock, e.Block);
         Assert.Equal("Tester", e.Player.Name);
-        Assert.Equal([1], _dropsSeenByHandler);
+        Assert.Equal([true], _airSeenByHandler);
         Assert.Empty(_placed);
     }
 
+    /// <summary>Подбор добычи — событие с подобранной стопкой; обработчик видит её уже в инвентаре.</summary>
     [Fact]
-    public void Break_InventoryFull_NoEvent()
+    public void PickUp_RaisesItemPickedUp_AfterItemIsInInventory()
+    {
+        Start(("test_mod", Recorder()));
+        var drop = _content.Items.ForBlock(BlockAt(_surface));
+
+        Use(ItemAction.Primary);
+        TestServers.TickUntilPickedUp(_server);
+
+        var e = Assert.Single(_pickedUp);
+        Assert.Equal(new ItemStack(drop, 1), e.Stack);
+        Assert.Equal("Tester", e.Player.Name);
+        Assert.Equal([1], _countSeenOnPickup);
+    }
+
+    [Fact]
+    public void Break_InventoryFull_StillBreaks_WithEvent()
     {
         Start(("test_mod", Recorder()));
         var planks = _content.Items.Get("base:planks");
@@ -98,8 +124,9 @@ public sealed class ModEventsTests : IDisposable
 
         Use(ItemAction.Primary);
 
-        Assert.False(BlockAt(_surface).IsAir);
-        Assert.Empty(_broken);
+        // С шага 7.3 добыча падает на землю, поэтому полный инвентарь ломанию не мешает.
+        Assert.True(BlockAt(_surface).IsAir);
+        Assert.Single(_broken);
     }
 
     [Fact]

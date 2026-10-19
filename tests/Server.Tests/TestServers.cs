@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using Api;
 using System.Diagnostics.CodeAnalysis;
+using Server.Entities;
 using Shared;
+using Shared.Items;
 using Shared.Networking;
 using Shared.Protocol;
 using Shared.Voxels;
@@ -103,6 +105,32 @@ internal static class TestServers
 
         return client;
     }
+
+    /// <summary>Сколько штук предмета лежит на земле (с шага 7.3 добыча падает предметом, а не сразу в инвентарь).</summary>
+    public static int OnGround(GameServer server, ItemId item)
+    {
+        var count = 0;
+        foreach (var entity in server.Entities.Query<DroppedItem>())
+        {
+            var stack = server.Entities.Get<DroppedItem>(entity).Stack;
+            if (stack.Item == item)
+                count += stack.Count;
+        }
+        return count;
+    }
+
+    /// <summary>Стопки предметов, лежащих на земле.</summary>
+    public static List<ItemStack> ItemsOnGround(GameServer server)
+    {
+        var stacks = new List<ItemStack>();
+        foreach (var entity in server.Entities.Query<DroppedItem>())
+            stacks.Add(server.Entities.Get<DroppedItem>(entity).Stack);
+        return stacks;
+    }
+
+    /// <summary>Тикает, пока всё лежащее на земле не подберётся: игрок должен стоять рядом с добычей.</summary>
+    public static void TickUntilPickedUp(GameServer server) =>
+        TickUntil(server, () => ItemsOnGround(server).Count == 0, "добыча подберётся");
 
     /// <summary>Верхний непустой блок столбца среди загруженных чанков.</summary>
     public static BlockPos TopBlock(World world, int x, int z)

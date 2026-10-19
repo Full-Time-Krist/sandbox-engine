@@ -131,7 +131,7 @@ public sealed class ItemUseTests : IDisposable
     }
 
     [Fact]
-    public void Primary_InventoryFull_BlockIsNotBroken()
+    public void Primary_InventoryFull_BreaksAnyway_DropStaysOnGround()
     {
         var surfaceBlock = BlockAt(_surface);
         Assert.NotEqual(_blocks.Planks, surfaceBlock);
@@ -141,9 +141,9 @@ public sealed class ItemUseTests : IDisposable
 
         var changes = BreakSurface();
 
-        Assert.Empty(changes);
-        Assert.Equal(surfaceBlock, BlockAt(_surface));
+        Assert.Equal([new BlockChanged(_surface, BlockId.Air)], changes);
         Assert.Empty(_inventoryChanges);
+        Assert.Equal(Stack(surfaceBlock, 1), Assert.Single(TestServers.ItemsOnGround(_server)));
     }
 
     [Fact]
@@ -333,13 +333,20 @@ public sealed class ItemUseTests : IDisposable
     public void BlockChange_IsSentToEveryPlayer()
     {
         var second = TestServers.JoinAndLoad(_server);
+        // Второй стоит рядом с добычей: в творческом он её не подбирает, и в его сообщениях — только рассылка мира.
+        _server.SetGameMode(second.PlayerId, GameMode.Creative);
+        _server.Tick();
+        while (second.TryReceive(out _)) { }
 
         BreakSurface();
 
         Assert.True(second.TryReceive(out var message));
         Assert.Equal(new BlockChanged(_surface, BlockId.Air), message);
-        // Добыча — только в инвентарь того, кто ломал.
-        Assert.False(second.TryReceive(out _));
+        // Дальше — только выпавшая добыча: её видят все, у кого есть чанк.
+        var rest = new List<ServerMessage>();
+        while (second.TryReceive(out var next))
+            rest.Add(next);
+        Assert.All(rest, m => Assert.True(m is EntitySpawned or EntitiesMoved or EntityRemoved, m.GetType().Name));
     }
 
     // --- Клики по инвентарю ---

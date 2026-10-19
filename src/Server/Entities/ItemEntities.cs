@@ -3,6 +3,7 @@ using Shared;
 using Shared.Entities;
 using Shared.Items;
 using Shared.Physics;
+using Shared.Voxels;
 
 namespace Server.Entities;
 
@@ -23,14 +24,35 @@ internal static class ItemEntities
     /// <summary>Насколько ниже глаз вылетает брошенный предмет (верх короба — у груди).</summary>
     public const double ThrowDrop = 0.3;
 
-    public static EntityId Spawn(EntityWorld entities, Vector3d position, Vector3 velocity, ItemStack stack)
+    /// <summary>Задержка подбора добычи сломанного блока: 0,5 с — чтобы выпавший предмет было видно.</summary>
+    public const int DropPickupDelay = GameTime.TicksPerSecond / 2;
+
+    /// <summary>Задержка подбора выброшенного: 2 с — иначе он сразу вернулся бы к бросившему.</summary>
+    public const int ThrowPickupDelay = GameTime.TicksPerSecond * 2;
+
+    /// <summary>Лежащий предмет исчезает через 5 минут: тысячи предметов от добычи не копятся бесконечно.</summary>
+    public const int LifetimeTicks = GameTime.TicksPerSecond * 60 * 5;
+
+    // Разлёт добычи из сломанного блока, блоков в секунду: немного в сторону и вверх.
+    private const float DropSpread = 1f;
+    private const float DropLift = 3f;
+
+    public static EntityId Spawn(EntityWorld entities, Vector3d position, Vector3 velocity, ItemStack stack, int pickupDelay = 0)
     {
         var entity = entities.Create();
         entities.Set(entity, new Position { Value = position });
         entities.Set(entity, new Body { Velocity = velocity, Shape = Shape });
-        entities.Set(entity, new DroppedItem { Stack = stack });
+        entities.Set(entity, new DroppedItem { Stack = stack, PickupDelay = pickupDelay });
         entities.Set(entity, new Synced { SentPosition = position });
         return entity;
+    }
+
+    /// <summary>Добыча сломанного блока: из его центра, с небольшим случайным разлётом.</summary>
+    public static EntityId SpawnDrop(EntityWorld entities, BlockPos block, ItemStack stack, Random random)
+    {
+        var position = new Vector3d(block.X + 0.5, block.Y + 0.5 - Shape.Height / 2, block.Z + 0.5);
+        var velocity = new Vector3((random.NextSingle() * 2 - 1) * DropSpread, DropLift, (random.NextSingle() * 2 - 1) * DropSpread);
+        return Spawn(entities, position, velocity, stack, DropPickupDelay);
     }
 
     /// <summary>

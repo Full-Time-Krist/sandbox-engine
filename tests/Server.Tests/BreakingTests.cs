@@ -49,8 +49,10 @@ public sealed class BreakingTests : IDisposable
         return Mining.BreakTicks(_content.Blocks.Get(block).Mining, held == null ? null : Item(held).Tool);
     }
 
+    /// <summary>Добыча: в инвентаре или ещё на земле (она падает предметом и подбирается не сразу).</summary>
     private int CountOf(string item) =>
-        Enumerable.Range(0, Inventory.Size).Where(s => _inventory[s].Item == Item(item).Id).Sum(s => _inventory[s].Count);
+        Enumerable.Range(0, Inventory.Size).Where(s => _inventory[s].Item == Item(item).Id).Sum(s => _inventory[s].Count)
+        + TestServers.OnGround(_server, Item(item).Id);
 
     [Fact]
     public void Grass_BreaksExactlyAfterItsTicks_NotEarlier()

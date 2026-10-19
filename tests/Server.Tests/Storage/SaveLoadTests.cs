@@ -5,6 +5,7 @@ using Shared.Blocks;
 using Shared.Content;
 using Shared.Items;
 using Shared.Networking;
+using Shared.Physics;
 using Shared.Protocol;
 using Shared.Voxels;
 
@@ -23,10 +24,12 @@ public sealed class SaveLoadTests : IDisposable
     private static BlockPos BreakSurface(GameServer server, TestServers.TestClient client)
     {
         var surface = TestServers.TopBlock(server.World, 0, 0);
-        var eye = new Vector3d(0.5, surface.Y + 3.5, 0.5);
-        TestServers.Teleport(server, client, eye);
-        client.Send(new UseItem(ItemAction.Primary, eye, -Vector3.UnitY));
+        // Игрок стоит на ломаемом блоке: добыча падает к его ногам и подбирается.
+        var feet = new Vector3d(0.5, surface.Y + 1, 0.5);
+        TestServers.Teleport(server, client, feet);
+        client.Send(new UseItem(ItemAction.Primary, feet + new Vector3d(0, PlayerPhysics.EyeHeight, 0), -Vector3.UnitY));
         TestServers.Tick(server, TestServers.HoldBreakTicks);
+        TestServers.TickUntilPickedUp(server);
 
         Assert.True(server.World.Chunks.GetBlock(surface).IsAir);
         return surface;

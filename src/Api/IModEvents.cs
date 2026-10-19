@@ -10,7 +10,7 @@ namespace Api;
 /// </summary>
 /// <remarks>
 /// События сообщают об уже случившемся, отменить их нельзя. Обработчики вызываются в потоке сервера
-/// после того, как действие закончено целиком (например, добыча уже в инвентаре), в порядке загрузки модов.
+/// после того, как действие закончено целиком (например, блок уже сломан и добыча выпала), в порядке загрузки модов.
 /// Исключение в обработчике пишется в лог с id мода и не мешает ни игре, ни другим обработчикам.
 /// </remarks>
 public interface IModEvents
@@ -29,6 +29,9 @@ public interface IModEvents
 
     /// <summary>Игрок выполнил задание (только в выживании): клиенту уже ушло сообщение о нём.</summary>
     void OnQuestCompleted(Action<QuestCompleted> handler);
+
+    /// <summary>Игрок подобрал предмет с земли: подобранное уже в инвентаре (остаток, если не влез, лежит дальше).</summary>
+    void OnItemPickedUp(Action<ItemPickedUp> handler);
 }
 
 /// <param name="Block">Блок, который был на месте до ломания.</param>
@@ -46,3 +49,6 @@ public readonly record struct PlayerJoined(IWorld World, IPlayer Player);
 public readonly record struct ItemCrafted(IWorld World, IPlayer Player, Recipe Recipe, int Times);
 
 public readonly record struct QuestCompleted(IWorld World, IPlayer Player, Quest Quest);
+
+/// <param name="Stack">Сколько подобрано этим касанием.</param>
+public readonly record struct ItemPickedUp(IWorld World, IPlayer Player, ItemStack Stack);

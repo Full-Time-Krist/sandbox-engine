@@ -89,6 +89,10 @@ public sealed class GameServer : IDisposable
     internal EntityWorld Entities { get; } = new();
 
     private readonly EntitySync _entitySync = new();
+    private readonly ItemSystem _itemSystem;
+
+    /// <summary>Разлёт добычи. Без сида: на исход игры он не влияет, тесты проверяют не точку, а что предмет есть.</summary>
+    private readonly Random _random = new();
 
     /// <summary>Сохранение мира или null, если мир только в памяти. Для тестов: дождаться записи на диск.</summary>
     internal WorldSave? Save => _save;
@@ -129,6 +133,7 @@ public sealed class GameServer : IDisposable
         _blockNames = [.. registry.All.Select(b => b.Name)];
 
         _items = content.Items;
+        _itemSystem = new ItemSystem(_items);
         _itemNames = [.. _items.All.Select(i => i.Name)];
         _recipes = content.Recipes;
         _events = new GameEvents(modLog);
@@ -261,9 +266,15 @@ public sealed class GameServer : IDisposable
         }
         _events.Dispatch();
 
-        // Системы сущностей — здесь, после действий игроков, по порядку: движение (с шага 7.3 — потом подбор).
-        // Рассылка сущностей — после рассылки чанков, удалённые убираются в конце тика (EntityWorld.FlushDestroyed).
+        // Системы сущностей — здесь, после действий игроков, по порядку. Притяжение задаёт скорость до движения,
+        // подбор и слияние смотрят на положения после него. Рассылка сущностей — после рассылки чанков,
+        // удалённые убираются в конце тика (EntityWorld.FlushDestroyed).
+        _itemSystem.Age(Entities);
+        _itemSystem.Attract(Entities, _sessions);
         MovementSystem.Run(Entities, World.Chunks, _registry);
+        _itemSystem.PickUp(Entities, _sessions, (session, stack) => _events.Raise(new ItemPickedUp(_editor, session, stack)));
+        _itemSystem.Merge(Entities);
+        _events.Dispatch();
 
         World.CollectGenerated();
         foreach (var session in _sessions)
@@ -423,7 +434,7 @@ public sealed class GameServer : IDisposable
                 break;
 
             case ReturnInventoryCursor when session.IsJoined:
-                session.Inventory.ReturnCursor();
+                ReturnCursorOrThrow(session);
                 break;
 
             case InventoryDragDistribute drag when session.IsJoined:
@@ -472,8 +483,27 @@ public sealed class GameServer : IDisposable
 
         var count = wholeStack ? held.Count : 1;
         session.Inventory.Remove(slot, count);
+        Throw(session, new ItemStack(held.Item, count));
+    }
+
+    /// <summary>
+    /// Экран инвентаря закрыт: предмет с курсора возвращается в слоты, а что не влезло, выбрасывается перед игроком —
+    /// иначе оно осталось бы на невидимом курсоре.
+    /// </summary>
+    private void ReturnCursorOrThrow(ClientSession session)
+    {
+        session.Inventory.ReturnCursor();
+        var left = session.Inventory.Cursor;
+        if (left.IsEmpty)
+            return;
+        session.Inventory.Set(Inventory.CursorSlot, ItemStack.Empty);
+        Throw(session, left);
+    }
+
+    private void Throw(ClientSession session, ItemStack stack)
+    {
         var (position, velocity) = ItemEntities.Throw(session.PlayerPosition, session.Look);
-        ItemEntities.Spawn(Entities, position, velocity, new ItemStack(held.Item, count));
+        ItemEntities.Spawn(Entities, position, velocity, stack, ItemEntities.ThrowPickupDelay);
     }
 
     /// <summary>
@@ -697,12 +727,12 @@ public sealed class GameServer : IDisposable
             return;
         }
 
-        var harvest = Mining.CanHarvest(_registry.Get(breaking.Block).Mining, _items.Get(breaking.Held).Tool);
-        var drop = harvest ? new ItemStack(_items.ForBlock(breaking.Block), 1) : ItemStack.Empty;
-        if (!session.Inventory.CanAdd(drop))
+        // Блок ломается всегда, добыча падает предметом (с шага 7.3) — даже при полном инвентаре она не пропадает.
+        if (!_editor.TryBreakBlock(breaking.Position, session))
             return;
-        if (_editor.TryBreakBlock(breaking.Position, session))
-            session.Inventory.Add(drop);
+        var drop = _items.ForBlock(breaking.Block);
+        if (!drop.IsAir && Mining.CanHarvest(_registry.Get(breaking.Block).Mining, _items.Get(breaking.Held).Tool))
+            ItemEntities.SpawnDrop(Entities, breaking.Position, new ItemStack(drop, 1), _random);
     }
 
     /// <summary>Ломание от имени игрока для поведений предметов (<see cref="ItemUseContext.Breaker"/>).</summary>

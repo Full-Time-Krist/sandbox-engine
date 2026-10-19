@@ -16,6 +16,9 @@ public sealed class ItemEntityTests : IDisposable
     private static readonly ItemRegistry Items = GameContent.Load().Items;
     private static readonly ItemId Dirt = Items.Get("base:dirt").Id;
 
+    /// <summary>Задержка подбора для предметов в тестах видимости: игроки в выживании иначе подобрали бы их.</summary>
+    private const int NoPickup = 1_000_000;
+
     private readonly GameServer _server = Create();
 
     public void Dispose() => _server.Dispose();
@@ -144,9 +147,9 @@ public sealed class ItemEntityTests : IDisposable
     public void Visibility_FollowsChunksSentToClient()
     {
         var client = JoinAndLoad(_server);
-        var far = ItemEntities.Spawn(_server.Entities, FarAway, Vector3.Zero, new ItemStack(Dirt, 3));
+        var far = ItemEntities.Spawn(_server.Entities, FarAway, Vector3.Zero, new ItemStack(Dirt, 3), NoPickup);
         var home = PlayerFeet(client);
-        var near = ItemEntities.Spawn(_server.Entities, home + new Vector3d(0, 1, 0), Vector3.Zero, new ItemStack(Dirt, 1));
+        var near = ItemEntities.Spawn(_server.Entities, home + new Vector3d(0, 1, 0), Vector3.Zero, new ItemStack(Dirt, 1), NoPickup);
         Tick(_server, 2);
         var first = Drain(client);
         Assert.Equal([near], first.OfType<EntitySpawned>().Select(s => s.Entity));
@@ -184,7 +187,7 @@ public sealed class ItemEntityTests : IDisposable
         TickUntil(_server, () => Drain(second).OfType<ChunkData>().Any(c => c.Position == farChunk), "второй игрок получит свой чанк");
         Drain(first);
 
-        var nearFirst = ItemEntities.Spawn(_server.Entities, PlayerFeet(first) + new Vector3d(0, 1, 0), Vector3.Zero, new ItemStack(Dirt, 1));
+        var nearFirst = ItemEntities.Spawn(_server.Entities, PlayerFeet(first) + new Vector3d(0, 1, 0), Vector3.Zero, new ItemStack(Dirt, 1), NoPickup);
         _server.Tick();
 
         Assert.Equal([nearFirst], Drain(first).OfType<EntitySpawned>().Select(s => s.Entity));
