@@ -1,12 +1,12 @@
-using Shared.Voxels;
-
-namespace Server;
+namespace Shared.Voxels;
 
 /// <summary>
 /// Область чанков вокруг точки: цилиндр с радиусом <see cref="Horizontal"/> по горизонтали (круг, а не квадрат:
 /// углы квадрата дальше дальности прорисовки, их всё равно не видно) и ±<see cref="Vertical"/> по высоте.
+/// Сервер так выбирает, какие чанки слать игроку, а клиент (область приходит в <see cref="Protocol.JoinAccepted"/>) —
+/// каких соседей чанка ждать не нужно: за областью они не придут.
 /// </summary>
-internal readonly record struct ChunkArea(int Horizontal, int Vertical)
+public readonly record struct ChunkArea(int Horizontal, int Vertical)
 {
     public bool Contains(ChunkPos center, ChunkPos position)
     {

@@ -20,8 +20,12 @@ public abstract record ServerMessage;
 /// одинаковые числа означали бы разные блоки. В мультиплеере клиент будет строить таблицу по этому списку.
 /// </param>
 /// <param name="ItemNames">Имена предметов по порядку числовых id: сверяются так же, как блоки.</param>
+/// <param name="LoadArea">
+/// Какие чанки сервер шлёт вокруг чанка игрока. Клиенту — чтобы не ждать соседей чанка, которые за этой областью
+/// не придут (меш у края области строится сразу).
+/// </param>
 public sealed record JoinAccepted(int PlayerId, Vector3d StartPosition, LookAngles StartLook, GameMode Mode,
-    ImmutableArray<string> BlockNames, ImmutableArray<string> ItemNames) : ServerMessage;
+    ImmutableArray<string> BlockNames, ImmutableArray<string> ItemNames, ChunkArea LoadArea) : ServerMessage;
 
 /// <summary>
 /// Режим игрока сменился. При переходе в выживание следом приходит <see cref="PlayerTeleport"/> на текущее место:

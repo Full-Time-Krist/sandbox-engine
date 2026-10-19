@@ -11,17 +11,20 @@ layout(location = 5) in vec3 i_Offset;  // точка предмета отно�
 layout(location = 6) in float i_Yaw;
 layout(location = 7) in vec3 i_Layers;  // слои верха, бока, низа
 layout(location = 8) in float i_Sprite;
+layout(location = 9) in vec2 i_Light;   // свет блока, где лежит предмет: небесный и блочный
 
 uniform mat4 u_ViewProjection;
 
 out vec2 v_Uv;
 flat out float v_Layer;
 out float v_Shade;
+flat out vec2 v_Light;
 
 void main()
 {
     v_Uv = a_Uv;
     v_Shade = a_Shade;
+    v_Light = i_Light;
     v_Layer = a_Face < 0.5 ? i_Layers.x : (a_Face < 1.5 ? i_Layers.y : i_Layers.z);
 
     // Не та часть меша: все её вершины в одной точке за экраном — треугольники нулевой площади отбрасываются.

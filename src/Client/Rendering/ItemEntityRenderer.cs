@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using Engine.Graphics;
 using Shared;
 using Shared.Items;
+using Shared.Voxels;
 using Silk.NET.OpenGL;
 
 namespace Client.Rendering;
@@ -20,9 +21,9 @@ internal readonly struct ItemVertex(Vector3 position, Vector2 uv, float face, fl
     public readonly float Sprite = sprite;
 }
 
-/// <summary>Данные одного предмета для отрисовки — по одному на экземпляр (instancing), 32 байта.</summary>
+/// <summary>Данные одного предмета для отрисовки — по одному на экземпляр (instancing), 40 байт.</summary>
 [StructLayout(LayoutKind.Sequential)]
-internal readonly struct ItemInstance(Vector3 offset, float yaw, Vector3 layers, float sprite)
+internal readonly struct ItemInstance(Vector3 offset, float yaw, Vector3 layers, float sprite, Vector2 light)
 {
     /// <summary>Точка предмета относительно глаза (рендер относительно камеры).</summary>
     public readonly Vector3 Offset = offset;
@@ -31,6 +32,8 @@ internal readonly struct ItemInstance(Vector3 offset, float yaw, Vector3 layers,
     /// <summary>Слои массива текстур: верх, бок, низ кубика; у картинки — три раза её слой.</summary>
     public readonly Vector3 Layers = layers;
     public readonly float Sprite = sprite;
+    /// <summary>Свет блока, где лежит предмет: небесный и блочный, 0–15.</summary>
+    public readonly Vector2 Light = light;
 }
 
 /// <summary>Как выглядит предмет на земле: кубик со слоями граней блока или плоская картинка.</summary>
@@ -109,6 +112,7 @@ internal sealed class ItemEntityRenderer : IDisposable
         _vao.SetAttribute(6, 1, VertexAttribType.Float, (uint)Marshal.OffsetOf<ItemInstance>(nameof(ItemInstance.Yaw)), binding: 1);
         _vao.SetAttribute(7, 3, VertexAttribType.Float, (uint)Marshal.OffsetOf<ItemInstance>(nameof(ItemInstance.Layers)), binding: 1);
         _vao.SetAttribute(8, 1, VertexAttribType.Float, (uint)Marshal.OffsetOf<ItemInstance>(nameof(ItemInstance.Sprite)), binding: 1);
+        _vao.SetAttribute(9, 2, VertexAttribType.Float, (uint)Marshal.OffsetOf<ItemInstance>(nameof(ItemInstance.Light)), binding: 1);
     }
 
     /// <summary>Сколько предметов нарисовано в последнем кадре.</summary>
@@ -140,7 +144,10 @@ internal sealed class ItemEntityRenderer : IDisposable
     /// <param name="eye">Глаз камеры: смещения предметов считаются от него в double.</param>
     /// <param name="alpha">Доля пройденного тика — для интерполяции положений.</param>
     /// <param name="seconds">Время с запуска — для вращения и покачивания.</param>
-    public void Draw(Matrix4x4 viewProjection, Vector3d eye, ClientEntities entities, float alpha, double seconds)
+    /// <param name="world">Откуда брать свет: предмет освещён светом блока, в котором лежит.</param>
+    /// <param name="skyBrightness">Яркость неба, как у чанков (<c>u_SkyBrightness</c>).</param>
+    public void Draw(Matrix4x4 viewProjection, Vector3d eye, ClientEntities entities, float alpha, double seconds,
+        ClientWorld world, float skyBrightness)
     {
         _frame.Clear();
         foreach (var (id, entity) in entities.All)
@@ -151,9 +158,10 @@ internal sealed class ItemEntityRenderer : IDisposable
             // Фаза от номера: лежащие рядом предметы качаются вразнобой.
             var phase = id.Index * 1.7f;
             var bob = Hover + BobHeight * MathF.Sin((float)(seconds * BobPerSecond) + phase);
-            var offset = (entity.At(alpha) - eye).ToVector3() + new Vector3(0, bob, 0);
+            var position = entity.At(alpha);
+            var offset = (position - eye).ToVector3() + new Vector3(0, bob, 0);
             var yaw = (float)(seconds * SpinPerSecond) + phase;
-            _frame.Add(new ItemInstance(offset, yaw, look.Layers, look.Sprite ? 1 : 0));
+            _frame.Add(new ItemInstance(offset, yaw, look.Layers, look.Sprite ? 1 : 0, LightOf(world, position)));
         }
 
         Drawn = _frame.Count;
@@ -163,7 +171,18 @@ internal sealed class ItemEntityRenderer : IDisposable
         _instances.SetData(CollectionsMarshal.AsSpan(_frame), BufferUsageARB.StreamDraw);
         _shader.Use();
         _shader.SetUniform("u_ViewProjection", viewProjection);
+        _shader.SetUniform("u_SkyBrightness", skyBrightness);
         _vao.DrawArraysInstanced(PrimitiveType.Triangles, _vertexCount, _frame.Count);
+    }
+
+    /// <summary>
+    /// Свет блока, где лежит предмет. Точка тела — низ короба, на опоре она ровно на верхней грани блока под ним;
+    /// погрешность могла бы опустить её в непрозрачный блок (там темно), поэтому берём чуть выше.
+    /// </summary>
+    internal static Vector2 LightOf(ClientWorld world, Vector3d position)
+    {
+        var packed = world.LightAt(BlockPos.Containing(position + new Vector3d(0, 0.1, 0)));
+        return new Vector2(packed >> 4, packed & 0x0F);
     }
 
     public void Dispose()

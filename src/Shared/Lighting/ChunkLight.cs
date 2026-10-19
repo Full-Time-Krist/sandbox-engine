@@ -73,6 +73,15 @@ public sealed class ChunkLight
         source.CopyTo(_values);
     }
 
+    /// <summary>Копирует свет блоков с индексами от <paramref name="start"/> подряд — по длине <paramref name="destination"/>.</summary>
+    public void CopyTo(int start, Span<byte> destination)
+    {
+        if (_values is { } values)
+            values.AsSpan(start, destination.Length).CopyTo(destination);
+        else
+            destination.Fill(_uniform);
+    }
+
     /// <summary>Копирует свет всех блоков в <paramref name="destination"/> (длина — <see cref="ChunkMath.Volume"/>).</summary>
     public void CopyTo(Span<byte> destination)
     {

@@ -66,6 +66,9 @@ public sealed class GameServerTests : IDisposable
         var view = ViewAt(accepted.StartPosition);
         Assert.Equal(TestServers.AreaSize(), clientChunks.Count);
         Assert.All(clientChunks, p => Assert.True(view.LoadArea.Contains(view.Center, p), $"{p} вне области загрузки"));
+        // Клиент знает область загрузки: соседей за ней он не ждёт.
+        Assert.Equal(view.LoadArea, accepted.LoadArea);
+        Assert.Equal(clientChunks.Count, clientChunks.Count(p => accepted.LoadArea.Contains(view.Center, p)));
     }
 
     [Fact]

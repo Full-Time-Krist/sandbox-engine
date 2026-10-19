@@ -15,7 +15,7 @@ internal readonly struct BlockFace(int dx, int dy, int dz, float brightness, Vec
     /// <summary>Смещение к соседнему блоку, который может закрыть эту грань. Совпадает с нормалью грани.</summary>
     public readonly int Dx = dx, Dy = dy, Dz = dz;
 
-    /// <summary>Постоянная яркость грани вместо освещения: так видно объём.</summary>
+    /// <summary>Постоянная яркость грани — множитель к свету и затенению (<see cref="ChunkVertex.Shade"/>): так видно объём.</summary>
     public readonly float Brightness = brightness;
 
     /// <summary>Углы единичного куба [0; 1]³ против часовой стрелки, если смотреть снаружи.</summary>

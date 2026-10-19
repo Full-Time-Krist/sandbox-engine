@@ -1,7 +1,10 @@
 using System.Numerics;
 using Client.Rendering;
 using Shared.Content;
+using Shared;
 using Shared.Items;
+using Shared.Lighting;
+using Shared.Voxels;
 
 namespace Client.Tests.Rendering;
 
@@ -90,5 +93,20 @@ public class ItemEntityRendererTests
         Assert.Equal(6, cube.Count(v => v.Face == 2));
         Assert.All(cube.Where(v => v.Face == 0), v => Assert.Equal(ItemEntityRenderer.CubeSize, v.Position.Y, 1e-6));
         Assert.All(cube.Where(v => v.Face == 2), v => Assert.Equal(0, v.Position.Y, 1e-6));
+    }
+
+    [Fact]
+    public void Light_IsOfBlockWhereItemLies()
+    {
+        // Предмет лежит на камне y = 4: точка тела ровно на его верхней грани, свет — воздуха над ним, а не камня.
+        var world = new ClientWorld();
+        var chunk = new Chunk(default);
+        chunk.Light.Fill(ChunkLight.Pack(0, 0));
+        chunk.Light.Set(new LocalPos(3, 5, 3).Index, ChunkLight.Pack(12, 6));
+        world.AddChunk(chunk);
+
+        Assert.Equal(new Vector2(12, 6), ItemEntityRenderer.LightOf(world, new Vector3d(3.5, 5, 3.5)));
+        Assert.Equal(new Vector2(12, 6), ItemEntityRenderer.LightOf(world, new Vector3d(3.5, 5 - 1e-9, 3.5)));
+        Assert.Equal(new Vector2(15, 0), ItemEntityRenderer.LightOf(world, new Vector3d(3.5, 500, 3.5)));
     }
 }

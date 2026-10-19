@@ -47,14 +47,28 @@ internal sealed class ChunkRenderer : IDisposable
     public const double SubmitBudgetMs = 2;
     public const double UploadBudgetMs = 2;
 
+    /// <summary>
+    /// Сколько чанк, у которого есть соседи по граням, но не все 26 (<see cref="ClientWorld.IsSurrounded"/>), ждёт
+    /// «успокоения» перед построением меша.
+    /// Свет и затенение у края читают соседей по рёбрам и углам, и каждый пришедший сосед перестраивает меш. При входе
+    /// сервер шлёт чанки от ближних к дальним, и соседи чанка на расстоянии d чанков приходят через ~0,3·d с: с ожиданием
+    /// 0,25 с меши поверхности строились в полтора раза чаще, с 1 с — по разу, как до шага 8.3 (замер шага 8.3).
+    /// Соседей за областью загрузки <see cref="ClientWorld.IsSurrounded"/> не ждёт, так что это запасной путь: на случай,
+    /// если центр области у клиента на тик разошёлся с серверным и сосед, которого ждали, не пришёл.
+    /// </summary>
+    public static readonly TimeSpan SettleTime = TimeSpan.FromMilliseconds(1000);
+
     private readonly GL _gl;
     private readonly MeshBuildQueue _queue;
     private readonly Dictionary<ChunkPos, ChunkRenderMesh> _meshes = new();
 
     private readonly MeshVersions _versions = new();
 
-    /// <summary>Чанки, которые нужно отправить в построение, но не хватило времени кадра.</summary>
-    private readonly HashSet<ChunkPos> _waiting = [];
+    /// <summary>
+    /// Чанки, которые нужно отправить в построение (не хватило времени кадра или ждут <see cref="SettleTime"/>),
+    /// и когда каждый последний раз менялся (<see cref="Stopwatch.GetTimestamp"/>).
+    /// </summary>
+    private readonly Dictionary<ChunkPos, long> _waiting = [];
     private readonly List<ChunkPos> _dirty = [];
     private readonly List<ChunkPos> _ordered = [];
 
@@ -94,27 +108,31 @@ internal sealed class ChunkRenderer : IDisposable
 
     private void SubmitDirty(ClientWorld world, ChunkPos cameraChunk, Stopwatch clock)
     {
+        var now = Stopwatch.GetTimestamp();
         world.TakeDirty(_dirty);
         foreach (var position in _dirty)
-            _waiting.Add(position);
+            _waiting[position] = now;
         _dirty.Clear();
         if (_waiting.Count == 0)
             return;
 
         _ordered.Clear();
-        _ordered.AddRange(_waiting);
+        _ordered.AddRange(_waiting.Keys);
         _ordered.Sort((a, b) => DistanceSquared(a, cameraChunk).CompareTo(DistanceSquared(b, cameraChunk)));
 
         foreach (var position in _ordered)
         {
             if (clock.Elapsed.TotalMilliseconds >= SubmitBudgetMs)
                 break;
+            var chunk = world.Chunks.Get(position);
+            if (chunk is not null && !ReadyToMesh(world, position, Stopwatch.GetElapsedTime(_waiting[position], now)))
+                continue;
             _waiting.Remove(position);
 
-            var chunk = world.Chunks.Get(position);
-            if (chunk is null)
+            if (chunk is null || chunk.IsEmpty)
             {
-                // Чанк выгружен: удаляем меш и забываем версию, чтобы строящийся меш не вернул его обратно.
+                // Чанк выгружен или пуст: меша у него нет. Удаляем старый и забываем версию, чтобы строящийся меш не
+                // вернул его обратно. Пустой в построение не отправляем: соседи помечают его десятки раз за вход.
                 if (_meshes.Remove(position, out var removed))
                     removed.Dispose();
                 _versions.Forget(position);
@@ -131,6 +149,13 @@ internal sealed class ChunkRenderer : IDisposable
             _queue.Submit(snapshot, version);
         }
     }
+
+    /// <summary>
+    /// Строить ли меш сейчас: чанк не менялся <see cref="SettleTime"/> (запасной путь) или у него есть все 26 соседей,
+    /// какие могут прийти (меш больше не изменится от их прихода). Дешёвая проверка — первой.
+    /// </summary>
+    internal static bool ReadyToMesh(ClientWorld world, ChunkPos position, TimeSpan quiet) =>
+        quiet >= SettleTime || world.IsSurrounded(position);
 
     /// <summary>Загружает готовый меш в видеопамять, если он не устарел. Возвращает, принят ли он.</summary>
     private bool Accept(MeshBuildResult result)

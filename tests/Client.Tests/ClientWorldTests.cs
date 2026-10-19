@@ -1,3 +1,4 @@
+using Client.Rendering;
 using Shared.Blocks;
 using Shared.Lighting;
 using Shared.Protocol;
@@ -29,17 +30,108 @@ public class ClientWorldTests
     public void AddChunk_MarksLoadedNeighborsDirty_ButNotOthers()
     {
         var world = new ClientWorld();
-        world.AddChunk(new Chunk(new ChunkPos(1, 0, 0)));  // сосед по +X
-        world.AddChunk(new Chunk(new ChunkPos(5, 0, 0)));  // далеко
-        world.AddChunk(new Chunk(new ChunkPos(1, 1, 0)));  // сосед по диагонали — не сосед по грани
+        world.AddChunk(new Chunk(new ChunkPos(1, 0, 0)));   // сосед по +X
+        world.AddChunk(new Chunk(new ChunkPos(1, 1, 0)));   // по ребру: его рамка тоже содержит край нового чанка
+        world.AddChunk(new Chunk(new ChunkPos(-1, 1, -1))); // по углу
+        world.AddChunk(new Chunk(new ChunkPos(2, 0, 0)));   // через один — не сосед
+        world.AddChunk(new Chunk(new ChunkPos(5, 0, 0)));   // далеко
         TakeDirty(world);
 
         world.AddChunk(new Chunk(new ChunkPos(0, 0, 0)));
 
-        var dirty = TakeDirty(world);
-        Assert.Equal(2, dirty.Count);
-        Assert.Contains(new ChunkPos(0, 0, 0), dirty);
-        Assert.Contains(new ChunkPos(1, 0, 0), dirty);
+        Assert.Equal(new HashSet<ChunkPos> { new(0, 0, 0), new(1, 0, 0), new(1, 1, 0), new(-1, 1, -1) }, TakeDirty(world).ToHashSet());
+    }
+
+    /// <summary>Чанк в начале координат и все 26 его соседей, «грязные» сброшены.</summary>
+    private static ClientWorld CreateWorldWithAllNeighbors()
+    {
+        var world = new ClientWorld();
+        for (var dx = -1; dx <= 1; dx++)
+        for (var dy = -1; dy <= 1; dy++)
+        for (var dz = -1; dz <= 1; dz++)
+            world.AddChunk(new Chunk(new ChunkPos(dx, dy, dz)));
+        TakeDirty(world);
+        return world;
+    }
+
+    [Fact]
+    public void SetBlock_OnEdge_MarksFaceAndEdgeNeighbors()
+    {
+        var world = CreateWorldWithAllNeighbors();
+
+        world.SetBlock(new BlockPos(31, 0, 10), new BlockId(1));
+
+        Assert.Equal(new HashSet<ChunkPos> { new(0, 0, 0), new(1, 0, 0), new(0, -1, 0), new(1, -1, 0) }, TakeDirty(world).ToHashSet());
+    }
+
+    [Fact]
+    public void SetBlock_InCorner_MarksSevenNeighbors()
+    {
+        var world = CreateWorldWithAllNeighbors();
+
+        world.SetBlock(new BlockPos(0, 31, 0), new BlockId(1));
+
+        var expected = new HashSet<ChunkPos>();
+        foreach (var dx in new[] { 0, -1 })
+        foreach (var dy in new[] { 0, 1 })
+        foreach (var dz in new[] { 0, -1 })
+            expected.Add(new ChunkPos(dx, dy, dz));
+        Assert.Equal(expected, TakeDirty(world).ToHashSet());
+    }
+
+    /// <summary>Свет чанка (0, 0, 0) с сервера: тот же, что сейчас, но с изменённым светом блока <paramref name="changed"/>.</summary>
+    private static ReadOnlyMemory<byte> LightWithChange(ClientWorld world, LocalPos changed)
+    {
+        var copy = new Chunk(new ChunkPos(0, 0, 0));
+        var values = new byte[ChunkMath.Volume];
+        world.Chunks.Get(new ChunkPos(0, 0, 0))!.Light.CopyTo(values);
+        copy.Light.CopyFrom(values);
+        copy.Light.SetSky(changed.Index, copy.Light.GetSky(changed.Index) == 7 ? 8 : 7);
+        return ChunkLightChanged.From(copy).Light.AsMemory();
+    }
+
+    [Fact]
+    public void SetLight_Inside_MarksOnlyItsChunk()
+    {
+        var world = CreateWorldWithAllNeighbors();
+
+        Assert.True(world.SetLight(new ChunkPos(0, 0, 0), LightWithChange(world, new LocalPos(10, 10, 10))));
+
+        Assert.Equal([new ChunkPos(0, 0, 0)], TakeDirty(world));
+        Assert.Equal(7, world.Chunks.Get(new ChunkPos(0, 0, 0))!.Light.GetSky(new LocalPos(10, 10, 10).Index));
+    }
+
+    [Fact]
+    public void SetLight_AtEdge_MarksNeighborsReadingThatEdge()
+    {
+        var world = CreateWorldWithAllNeighbors();
+
+        world.SetLight(new ChunkPos(0, 0, 0), LightWithChange(world, new LocalPos(10, 0, 31)));
+
+        Assert.Equal(new HashSet<ChunkPos> { new(0, 0, 0), new(0, -1, 0), new(0, 0, 1), new(0, -1, 1) }, TakeDirty(world).ToHashSet());
+    }
+
+    [Fact]
+    public void SetLight_Unchanged_MarksNothing()
+    {
+        var world = CreateWorldWithAllNeighbors();
+        var same = ChunkLightChanged.From(world.Chunks.Get(new ChunkPos(0, 0, 0))!).Light.AsMemory();
+
+        Assert.True(world.SetLight(new ChunkPos(0, 0, 0), same));
+
+        Assert.Equal(0, world.DirtyCount);
+    }
+
+    [Fact]
+    public void LightAt_ReadsChunkLight_OrFullSkyWithoutChunk()
+    {
+        var world = new ClientWorld();
+        var chunk = new Chunk(new ChunkPos(0, 0, 0));
+        chunk.Light.SetBlock(new LocalPos(1, 2, 3).Index, 9);
+        world.AddChunk(chunk);
+
+        Assert.Equal(ChunkLight.Pack(0, 9), world.LightAt(new BlockPos(1, 2, 3)));
+        Assert.Equal(ChunkLight.Pack(15, 0), world.LightAt(new BlockPos(100, 2, 3)));
     }
 
     private static ClientWorld CreateWorldAround(ChunkPos center)
@@ -81,15 +173,6 @@ public class ClientWorldTests
         Assert.Contains(new ChunkPos(nx, ny, nz), dirty);
     }
 
-    [Fact]
-    public void SetBlock_InCorner_MarksThreeNeighbors()
-    {
-        var world = CreateWorldAround(new ChunkPos(0, 0, 0));
-
-        world.SetBlock(new BlockPos(0, 0, 0), new BlockId(1));
-
-        Assert.Equal(4, TakeDirty(world).Count);
-    }
 
     [Fact]
     public void SetBlock_InMissingChunk_Fails()
@@ -239,5 +322,97 @@ public class ClientWorldTests
 
         Assert.False(world.SetLight(new ChunkPos(0, 0, 0), data.AsMemory()));
         Assert.Equal(0, world.Chunks.Count);
+    }
+
+    [Fact]
+    public void IsSurrounded_OnlyWithAll26Neighbors()
+    {
+        var world = new ClientWorld();
+        world.AddChunk(ChunkWithBlock(default));
+        var around = new List<ChunkPos>();
+        for (var dx = -1; dx <= 1; dx++)
+        for (var dy = -1; dy <= 1; dy++)
+        for (var dz = -1; dz <= 1; dz++)
+        {
+            if (dx != 0 || dy != 0 || dz != 0)
+                around.Add(new ChunkPos(dx, dy, dz));
+        }
+
+        // Соседи по граням — первыми: CanMesh уже да, а окружён ли — нет, пока не пришёл последний угол.
+        foreach (var position in around.OrderBy(p => Math.Abs(p.X) + Math.Abs(p.Y) + Math.Abs(p.Z)))
+        {
+            Assert.False(world.IsSurrounded(default), $"Окружён без соседа {position}");
+            world.AddChunk(new Chunk(position));
+        }
+
+        Assert.True(world.CanMesh(default));
+        Assert.True(world.IsSurrounded(default));
+        Assert.False(world.IsSurrounded(new ChunkPos(9, 9, 9)));
+    }
+
+    [Fact]
+    public void IsSurrounded_DoesNotWaitForNeighborsBeyondLoadArea()
+    {
+        // Область — цилиндр радиуса 2 и ±1 по высоте вокруг (0, 0, 0). Чанк (2, 1, 0) на её краю: его соседи
+        // с x = 3 или y = 2 за областью и не придут — ждать их незачем; соседи внутри области — ждём.
+        var area = new ChunkArea(2, 1);
+        var world = new ClientWorld { LoadArea = area, Center = default };
+        var edge = new ChunkPos(2, 1, 0);
+        world.AddChunk(ChunkWithBlock(edge));
+        var inside = new List<ChunkPos>();
+        for (var dx = -1; dx <= 1; dx++)
+        for (var dy = -1; dy <= 1; dy++)
+        for (var dz = -1; dz <= 1; dz++)
+        {
+            var neighbor = new ChunkPos(edge.X + dx, edge.Y + dy, edge.Z + dz);
+            if (neighbor != edge && area.Contains(default, neighbor))
+                inside.Add(neighbor);
+        }
+        Assert.True(inside.Count is > 0 and < 26);
+
+        foreach (var neighbor in inside)
+        {
+            Assert.False(world.IsSurrounded(edge), $"Окружён без соседа {neighbor} внутри области");
+            world.AddChunk(new Chunk(neighbor));
+        }
+        Assert.True(world.IsSurrounded(edge));
+
+        // Игрок ушёл: те же соседи теперь внутри области и снова нужны.
+        world.Center = new ChunkPos(2, 1, 0);
+        Assert.False(world.IsSurrounded(edge));
+    }
+
+    [Fact]
+    public void IsSurrounded_EmptyChunk_Always()
+    {
+        var world = new ClientWorld();
+        world.AddChunk(new Chunk(new ChunkPos(0, 3, 0)));
+
+        Assert.True(world.IsSurrounded(new ChunkPos(0, 3, 0)));
+    }
+
+    [Fact]
+    public void ReadyToMesh_WaitsForNeighbors_OrForQuiet()
+    {
+        var world = new ClientWorld();
+        world.AddChunk(ChunkWithBlock(default));
+        foreach (var side in Sides)
+            world.AddChunk(new Chunk(side));
+        var justChanged = TimeSpan.Zero;
+
+        // Соседи по граням есть, по рёбрам — нет: ждём, пока чанк не успокоится.
+        Assert.False(ChunkRenderer.ReadyToMesh(world, default, justChanged));
+        Assert.False(ChunkRenderer.ReadyToMesh(world, default, ChunkRenderer.SettleTime - TimeSpan.FromMilliseconds(1)));
+        Assert.True(ChunkRenderer.ReadyToMesh(world, default, ChunkRenderer.SettleTime));
+
+        // Окружённый — сразу.
+        for (var dx = -1; dx <= 1; dx++)
+        for (var dy = -1; dy <= 1; dy++)
+        for (var dz = -1; dz <= 1; dz++)
+        {
+            if (!world.Chunks.Contains(new ChunkPos(dx, dy, dz)))
+                world.AddChunk(new Chunk(new ChunkPos(dx, dy, dz)));
+        }
+        Assert.True(ChunkRenderer.ReadyToMesh(world, default, justChanged));
     }
 }

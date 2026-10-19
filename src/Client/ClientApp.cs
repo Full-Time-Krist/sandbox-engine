@@ -56,6 +56,9 @@ internal sealed class ClientApp(
     private float _scroll;
 
     private ShaderProgram _chunkShader = null!;
+
+    /// <summary>Яркость неба для шейдеров (множитель небесного света): пока всегда полдень, сутки — шаг 8.4.</summary>
+    private const float SkyBrightness = 1f;
     private ShaderProgram _lineShader = null!;
     private ColorMesh _selectionBox = null!;
     private ShaderProgram _crackShader = null!;
@@ -238,6 +241,8 @@ internal sealed class ClientApp(
             _lastSentPosition = _controller.Position;
             _lastSentLook = look;
         }
+        // Центр области загрузки — там же, где у сервера: чанк, в котором стоит игрок.
+        _world.Center = BlockPos.Containing(_controller.Position).Chunk;
     }
 
     private void ProcessServerMessages()
@@ -252,6 +257,8 @@ internal sealed class ClientApp(
                     _controller.Teleport(accepted.StartPosition);
                     _controller.LookAngles = accepted.StartLook;
                     _mode = accepted.Mode;
+                    _world.LoadArea = accepted.LoadArea;
+                    _world.Center = BlockPos.Containing(accepted.StartPosition).Chunk;
                     _joined = true;
                     UpdateStatusText();
                     Console.WriteLine($"[Client] Подключён к серверу, id игрока {accepted.PlayerId}, режим {_mode.ToName()}");
@@ -391,9 +398,10 @@ internal sealed class ClientApp(
         // считаются в double для каждого объекта. Так мир не дрожит и в миллионе блоков от центра.
         var viewProjection = _camera.ViewProjection;
         _chunkShader.SetUniform("u_ViewProjection", viewProjection);
+        _chunkShader.SetUniform("u_SkyBrightness", SkyBrightness);
         _blockTextures.Bind(0);
         _drawnChunks = _chunkRenderer.Draw(_chunkShader, eye, Frustum.FromMatrix(viewProjection));
-        _itemRenderer.Draw(viewProjection, eye, _entities, alpha, _clock.Elapsed.TotalSeconds);
+        _itemRenderer.Draw(viewProjection, eye, _entities, alpha, _clock.Elapsed.TotalSeconds, _world, SkyBrightness);
 
         DrawSelection(eye);
         DrawCracks(eye, viewProjection);

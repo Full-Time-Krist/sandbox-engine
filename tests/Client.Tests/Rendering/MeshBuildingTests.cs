@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Client.Rendering;
 using Shared.Blocks;
 using Shared.Content;
+using Shared.Lighting;
 using Shared.Voxels;
 
 namespace Client.Tests.Rendering;
@@ -73,6 +74,77 @@ public class MeshBuildingTests
             Assert.Equal(neighbors.PosY!.Get(new LocalPos(a, 0, b)), snapshot[a, S, b]);
             Assert.Equal(neighbors.NegZ!.Get(new LocalPos(a, b, L)), snapshot[a, b, -1]);
             Assert.Equal(neighbors.PosZ!.Get(new LocalPos(a, b, 0)), snapshot[a, b, S]);
+        }
+    }
+
+    /// <summary>Чанк с узором блоков и света, своим для каждого <paramref name="salt"/>.</summary>
+    private Chunk PatternedLit(ChunkPos position, int salt)
+    {
+        var chunk = Patterned(position, salt);
+        var light = new byte[ChunkMath.Volume];
+        for (var i = 0; i < light.Length; i++)
+            light[i] = (byte)((i * 13 + salt * 29) % 256);
+        chunk.Light.CopyFrom(light);
+        return chunk;
+    }
+
+    [Fact]
+    public void Snapshot_Frame_HoldsBlocksAndLightOfAll26Neighbors()
+    {
+        // Рёбра и углы рамки нужны плавному свету и затенению углов: проверяем состав — какой сосед и какой его блок.
+        var center = PatternedLit(default, salt: 0);
+        var map = new ChunkMap();
+        var salt = 1;
+        for (var dx = -1; dx <= 1; dx++)
+        for (var dy = -1; dy <= 1; dy++)
+        for (var dz = -1; dz <= 1; dz++)
+        {
+            if (dx != 0 || dy != 0 || dz != 0)
+                map.Set(PatternedLit(new ChunkPos(dx, dy, dz), salt++));
+        }
+        var snapshot = new ChunkSnapshot();
+
+        snapshot.Capture(center, ChunkNeighbors.Around(map, default));
+
+        static int Side(int c) => c < 0 ? -1 : c >= ChunkMath.Size ? 1 : 0;
+        var checkedFrame = 0;
+        for (var x = -1; x <= ChunkMath.Size; x++)
+        for (var y = -1; y <= ChunkMath.Size; y++)
+        for (var z = -1; z <= ChunkMath.Size; z++)
+        {
+            var (sx, sy, sz) = (Side(x), Side(y), Side(z));
+            var source = sx == 0 && sy == 0 && sz == 0 ? center : map.Get(new ChunkPos(sx, sy, sz))!;
+            var local = new LocalPos(x & ChunkMath.Mask, y & ChunkMath.Mask, z & ChunkMath.Mask);
+            var index = ChunkSnapshot.Index(x, y, z);
+            if (snapshot.Blocks[index] != source.Get(local) || snapshot.Light[index] != source.Light.Get(local.Index))
+                Assert.Fail($"Клетка ({x}, {y}, {z}) не из блока {local} чанка {source.Position}");
+            if (source != center)
+                checkedFrame++;
+        }
+        Assert.Equal(ChunkSnapshot.Volume - ChunkMath.Volume, checkedFrame);
+    }
+
+    [Fact]
+    public void Snapshot_MissingNeighbor_IsAirUnderFullSky()
+    {
+        var center = PatternedLit(default, salt: 0);
+        var full = PatternedLit(new ChunkPos(1, 0, 0), salt: 1);
+        var snapshot = new ChunkSnapshot();
+        // Сначала со всеми соседями: снимок из пула не должен сохранить старую рамку.
+        var map = new ChunkMap();
+        for (var dx = -1; dx <= 1; dx++)
+        for (var dy = -1; dy <= 1; dy++)
+        for (var dz = -1; dz <= 1; dz++)
+            map.Set(PatternedLit(new ChunkPos(dx, dy, dz), 5));
+        snapshot.Capture(center, ChunkNeighbors.Around(map, default));
+
+        snapshot.Capture(center, new ChunkNeighbors(null, full, null, null, null, null));
+
+        Assert.Equal(full.Get(new LocalPos(0, 3, 4)), snapshot[ChunkMath.Size, 3, 4]);
+        foreach (var (x, y, z) in new[] { (-1, 3, 4), (5, -1, 5), (32, 32, 4), (-1, -1, -1), (32, 32, 32) })
+        {
+            Assert.Equal(BlockId.Air, snapshot[x, y, z]);
+            Assert.Equal(ChunkLight.Pack(15, 0), snapshot.Light[ChunkSnapshot.Index(x, y, z)]);
         }
     }
 

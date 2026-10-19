@@ -22,6 +22,8 @@ internal sealed class ChunkRenderMesh : IDisposable
         _vao.SetAttribute(1, 2, VertexAttribType.Float, (uint)Marshal.OffsetOf<ChunkVertex>(nameof(ChunkVertex.Uv)));
         _vao.SetAttribute(2, 1, VertexAttribType.Float, (uint)Marshal.OffsetOf<ChunkVertex>(nameof(ChunkVertex.Layer)));
         _vao.SetAttribute(3, 1, VertexAttribType.Float, (uint)Marshal.OffsetOf<ChunkVertex>(nameof(ChunkVertex.Shade)));
+        _vao.SetAttribute(4, 1, VertexAttribType.Float, (uint)Marshal.OffsetOf<ChunkVertex>(nameof(ChunkVertex.Sky)));
+        _vao.SetAttribute(5, 1, VertexAttribType.Float, (uint)Marshal.OffsetOf<ChunkVertex>(nameof(ChunkVertex.BlockLight)));
         _vao.SetIndexBuffer(_indices);
     }
 

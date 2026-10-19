@@ -587,7 +587,7 @@ public sealed class GameServer : IDisposable
         Entities.Set(session.Entity, new Fall { HighestY = start.Y });
         session.Look = saved?.Look ?? default;
         // Чанки придут в следующих тиках (StreamChunks), начиная с ближайших.
-        session.Connection.Send(new JoinAccepted(session.PlayerId, start, session.Look, mode, _blockNames, _itemNames));
+        session.Connection.Send(new JoinAccepted(session.PlayerId, start, session.Look, mode, _blockNames, _itemNames, session.View.LoadArea));
         // Инвентарь уходит целиком, поэтому изменения от его заполнения отправлять не нужно.
         session.Connection.Send(new InventoryContents(inventory.CopySlots(), inventory.SelectedSlot));
         inventory.TakeChanges();

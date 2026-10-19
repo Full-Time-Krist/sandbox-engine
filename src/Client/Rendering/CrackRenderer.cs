@@ -29,14 +29,15 @@ internal sealed class CrackRenderer : IDisposable
         _firstLayer = firstLayer;
 
         // Те же грани и UV, что у блоков в мире: трещина ложится на грань так же, как текстура блока.
+        // Свет шейдер трещин не читает: они — тёмные линии поверх уже освещённого блока.
         var data = new ChunkMeshData();
         foreach (var face in BlockFace.All)
         {
             var first = (uint)data.Vertices.Count;
-            data.Vertices.Add(new ChunkVertex(face.A, face.UvA, 0, 1));
-            data.Vertices.Add(new ChunkVertex(face.B, face.UvB, 0, 1));
-            data.Vertices.Add(new ChunkVertex(face.C, face.UvC, 0, 1));
-            data.Vertices.Add(new ChunkVertex(face.D, face.UvD, 0, 1));
+            data.Vertices.Add(new ChunkVertex(face.A, face.UvA, 0, 1, 15, 0));
+            data.Vertices.Add(new ChunkVertex(face.B, face.UvB, 0, 1, 15, 0));
+            data.Vertices.Add(new ChunkVertex(face.C, face.UvC, 0, 1, 15, 0));
+            data.Vertices.Add(new ChunkVertex(face.D, face.UvD, 0, 1, 15, 0));
             data.Indices.AddRange([first, first + 1, first + 2, first, first + 2, first + 3]);
         }
         _cube = new ChunkRenderMesh(gl, data);
