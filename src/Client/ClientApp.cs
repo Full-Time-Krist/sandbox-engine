@@ -67,6 +67,14 @@ internal sealed class ClientApp(
     /// </summary>
     private (BlockPos Pos, BlockId Block, ItemId Held, int Slot, double Start, double Seconds)? _breaking;
     private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
+
+    /// <summary>
+    /// Повтор действий предмета при удержании: ЛКМ в творческом (в выживании темп ломания задаёт твёрдость блока)
+    /// и ПКМ. 0,2 с — как установка в Minecraft: быстро строить, но не залить полмира за секунду.
+    /// </summary>
+    private const double ItemRepeatSeconds = 0.2;
+    private readonly ButtonRepeat _primaryRepeat = new(ItemRepeatSeconds);
+    private readonly ButtonRepeat _secondaryRepeat = new(ItemRepeatSeconds);
     private Hud _hud = null!;
     private InventoryScreen _inventoryScreen = null!;
     private bool _inventoryOpen;
@@ -326,9 +334,16 @@ internal sealed class ClientApp(
         var eye = _controller.EyePosition;
         _target = VoxelRaycast.Cast(_world.Chunks, eye, _camera.Forward, GameRules.BlockReach);
         if (actionsAllowed)
+        {
             HandleItemActions();
+        }
         else
-            StopBreaking(); // открыли инвентарь или отпустили курсор — ломание прерывается
+        {
+            // Открыли инвентарь или отпустили курсор — ломание и повтор действий прерываются.
+            StopBreaking();
+            _primaryRepeat.Reset();
+            _secondaryRepeat.Reset();
+        }
 
         var stats = _chunkRenderer.Update(_world, eye);
         _meshStats.Add(stats);
@@ -514,18 +529,21 @@ internal sealed class ClientApp(
     /// </summary>
     private void HandleItemActions()
     {
-        // В творческом — по блоку на клик (ломается сразу, удержание снесло бы полмира); в выживании ЛКМ держат.
+        // В творческом блок ломается сразу, поэтому удержание ЛКМ повторяет действие с паузой; в выживании ЛКМ ломает
+        // удержанием, и темп задаёт твёрдость блока.
+        var now = _clock.Elapsed.TotalSeconds;
         if (_mode == GameMode.Creative)
         {
-            if (Input.WasMousePressed(MouseButton.Left))
+            if (_primaryRepeat.Update(Input.WasMousePressed(MouseButton.Left), Input.IsMouseDown(MouseButton.Left), now))
                 connection.Send(new UseItem(ItemAction.Primary, _controller.EyePosition, _camera.Forward));
         }
         else
         {
+            _primaryRepeat.Reset();
             UpdateBreaking();
         }
 
-        if (Input.WasMousePressed(MouseButton.Right))
+        if (_secondaryRepeat.Update(Input.WasMousePressed(MouseButton.Right), Input.IsMouseDown(MouseButton.Right), now))
             connection.Send(new UseItem(ItemAction.Secondary, _controller.EyePosition, _camera.Forward));
     }
 
