@@ -8,6 +8,7 @@ using Server.Storage;
 using Shared;
 using Shared.Blocks;
 using Shared.Content;
+using Shared.Entities;
 using Shared.Items;
 using Shared.Modding;
 using Shared.Physics;
@@ -79,6 +80,12 @@ public sealed class GameServer : IDisposable
     private int _unloadedSinceLog;
 
     public World World { get; }
+
+    /// <summary>
+    /// Сущности мира — всё, что движется и не является блоком (с этапа 7). Живут только на сервере; системы вызываются
+    /// в <see cref="Tick"/> по порядку, удалённые убираются в его конце.
+    /// </summary>
+    internal EntityWorld Entities { get; } = new();
 
     /// <summary>Сохранение мира или null, если мир только в памяти. Для тестов: дождаться записи на диск.</summary>
     internal WorldSave? Save => _save;
@@ -251,6 +258,9 @@ public sealed class GameServer : IDisposable
         }
         _events.Dispatch();
 
+        // Системы сущностей — здесь, после действий игроков и до рассылки чанков, в порядке вызова (с шага 7.2 —
+        // движение, потом подбор). Удалённые сущности убираются в конце тика (EntityWorld.FlushDestroyed).
+
         World.CollectGenerated();
         foreach (var session in _sessions)
         {
@@ -277,6 +287,9 @@ public sealed class GameServer : IDisposable
             if (session.IsJoined && session.Inventory.TakeChanges() is { IsEmpty: false } changes)
                 session.Connection.Send(new InventoryChanged(changes));
         }
+
+        // Последним: до конца тика номер удалённой сущности не переиспользуется, и всё, что в тике её удалило, уже прошло.
+        Entities.FlushDestroyed();
     }
 
     /// <summary>Ставит в очередь записи изменённые чанки и позиции игроков. Возвращает число чанков.</summary>
