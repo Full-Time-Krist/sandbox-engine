@@ -24,8 +24,19 @@ public abstract record ServerMessage;
 /// Какие чанки сервер шлёт вокруг чанка игрока. Клиенту — чтобы не ждать соседей чанка, которые за этой областью
 /// не придут (меш у края области строится сразу).
 /// </param>
+/// <param name="WorldTime">Тик мира (<see cref="DayCycle"/>): дальше клиент считает его сам, сверяясь с <see cref="TimeSync"/>.</param>
 public sealed record JoinAccepted(int PlayerId, Vector3d StartPosition, LookAngles StartLook, GameMode Mode,
-    ImmutableArray<string> BlockNames, ImmutableArray<string> ItemNames, ChunkArea LoadArea) : ServerMessage;
+    ImmutableArray<string> BlockNames, ImmutableArray<string> ItemNames, ChunkArea LoadArea, long WorldTime) : ServerMessage;
+
+/// <summary>
+/// Тик мира — сверка часов: раз в <see cref="TimeSync.IntervalTicks"/> и сразу, когда время перевели (<see cref="AdvanceTime"/>).
+/// Между сверками клиент прибавляет по тику сам.
+/// </summary>
+public sealed record TimeSync(long WorldTime) : ServerMessage
+{
+    /// <summary>Сверка раз в 10 секунд.</summary>
+    public const int IntervalTicks = 10 * GameTime.TicksPerSecond;
+}
 
 /// <summary>
 /// Режим игрока сменился. При переходе в выживание следом приходит <see cref="PlayerTeleport"/> на текущее место:

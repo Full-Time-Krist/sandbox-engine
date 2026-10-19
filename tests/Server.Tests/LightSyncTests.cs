@@ -91,13 +91,27 @@ public sealed class LightSyncTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// Тикает по одному тику, пока <paramref name="done"/> (сообщения этого тика) не вернёт true; падает по таймауту.
+    /// Не <see cref="TestServers.TickUntil"/>: тот сам тикает сервер между проверками, и сообщения двух тиков склеивались бы.
+    /// </summary>
+    private void RunUntil(Func<List<ServerMessage>, bool> done, string what)
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        while (!done(Tick()))
+        {
+            if (clock.Elapsed > TimeSpan.FromSeconds(20))
+                throw new TimeoutException($"Не дождались за 20 с: {what}");
+            Thread.Sleep(1);
+        }
+    }
+
     /// <summary>Тикает, сверяя свет после каждого тика, пока генерация не утихнет и чанки не перестанут приходить.</summary>
     private void TickUntilSettled(string what)
     {
         var quiet = 0;
-        TestServers.TickUntil(_server, () =>
+        RunUntil(messages =>
         {
-            var messages = Tick();
             AssertClientLightMatchesServer(what);
             quiet = _server.World.GeneratingCount == 0 && !messages.Any(m => m is ChunkData) && _clientChunks.Count > 0 ? quiet + 1 : 0;
             return quiet >= 10;
@@ -110,9 +124,8 @@ public sealed class LightSyncTests : IDisposable
         Join();
         var resent = 0;
 
-        TestServers.TickUntil(_server, () =>
+        RunUntil(messages =>
         {
-            var messages = Tick();
             AssertClientLightMatchesServer("вход");
             // Свет чанка, отправленного в этом же тике, уже в ChunkData: повторять его незачем.
             var sent = messages.OfType<ChunkData>().Select(m => m.Position).ToHashSet();

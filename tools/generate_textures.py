@@ -1,5 +1,5 @@
 """Генерирует текстуры-заглушки 16×16: блоки — в src/Client/Assets/Textures/Blocks, картинки предметов — в …/Items,
-стадии трещин при ломании — в …/Effects.
+стадии трещин при ломании — в …/Effects, солнце и луна — в …/Sky.
 
 Без зависимостей (PNG пишется вручную через zlib), seed фиксирован: результат всегда одинаковый.
 Запуск из корня репозитория: python tools/generate_textures.py
@@ -16,6 +16,7 @@ TEXTURES_DIR = Path(__file__).resolve().parent.parent / "src" / "Client" / "Asse
 OUT_DIR = TEXTURES_DIR / "Blocks"
 ITEMS_DIR = TEXTURES_DIR / "Items"
 EFFECTS_DIR = TEXTURES_DIR / "Effects"
+SKY_DIR = TEXTURES_DIR / "Sky"
 CLEAR = (0, 0, 0, 0)
 
 
@@ -297,6 +298,38 @@ def crack(stage, paths):
     return px
 
 
+# --- Небо: солнце и луна — квадраты на небесной сфере (шаг 8.4). Углы прозрачные: так они кажутся круглее. ---
+
+def sky_disc(color, edge, rng, craters=()):
+    px = blank()
+    for y in range(SIZE):
+        for x in range(SIZE):
+            dx, dy = x - 7.5, y - 7.5
+            r = (dx * dx + dy * dy) ** 0.5
+            if r > 8.2:
+                continue
+            base = edge if r > 6.2 else color
+            d = rng.randint(-6, 6)
+            px[y][x] = (clamp(base[0] + d), clamp(base[1] + d), clamp(base[2] + d), 255)
+    for cx, cy, size in craters:
+        for y in range(cy, cy + size):
+            for x in range(cx, cx + size):
+                r, g, b, a = px[y][x]
+                px[y][x] = (clamp(r - 45), clamp(g - 45), clamp(b - 40), a)
+    return px
+
+
+def sun(rng):
+    return sky_disc((255, 246, 200), (255, 214, 120), rng)
+
+
+def moon(rng):
+    return sky_disc((214, 220, 232), (176, 184, 200), rng, craters=((4, 5, 3), (9, 3, 2), (8, 9, 3), (4, 11, 2)))
+
+
+SKY = {"sun": sun, "moon": moon}
+
+
 def main() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     for name, generate in TEXTURES.items():
@@ -314,6 +347,11 @@ def main() -> None:
     for stage in range(10):
         write_png(EFFECTS_DIR / f"destroy_{stage}.png", crack(stage, paths))
     print("Effects/destroy_0..9.png")
+
+    SKY_DIR.mkdir(parents=True, exist_ok=True)
+    for name, generate in SKY.items():
+        write_png(SKY_DIR / f"{name}.png", generate(random.Random(name)))
+        print(f"Sky/{name}.png")
 
 
 if __name__ == "__main__":

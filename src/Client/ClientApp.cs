@@ -9,6 +9,7 @@ using Shared;
 using Shared.Blocks;
 using Shared.Content;
 using Shared.Items;
+using Shared.Lighting;
 using Shared.Modding;
 using Shared.Networking;
 using Shared.Protocol;
@@ -56,9 +57,11 @@ internal sealed class ClientApp(
     private float _scroll;
 
     private ShaderProgram _chunkShader = null!;
+    private ShaderProgram _skyShader = null!;
+    private SkyRenderer _sky = null!;
 
-    /// <summary>Яркость неба для шейдеров (множитель небесного света): пока всегда полдень, сутки — шаг 8.4.</summary>
-    private const float SkyBrightness = 1f;
+    /// <summary>Часы мира: время суток от сервера, между сверками — свои тики.</summary>
+    private readonly WorldClock _worldClock = new();
     private ShaderProgram _lineShader = null!;
     private ColorMesh _selectionBox = null!;
     private ShaderProgram _crackShader = null!;
@@ -129,7 +132,8 @@ internal sealed class ClientApp(
 
     protected override void OnLoad()
     {
-        Gl.ClearColor(0.53f, 0.81f, 0.92f, 1f);
+        // Цвет неба меняется по времени суток: выставляется каждый кадр (Atmosphere).
+        Gl.ClearColor(Atmosphere.DayColor.X, Atmosphere.DayColor.Y, Atmosphere.DayColor.Z, 1f);
 
         // Клиент грузит тот же контент, что и сервер, и сверяет реестры с его таблицами при подключении (см. JoinAccepted).
         var content = GameContent.Load(mods);
@@ -143,6 +147,7 @@ internal sealed class ClientApp(
         var itemVisuals = new ItemVisuals(visuals, _items, content.ItemIcons);
         _blockTextures = LoadTextures(visuals.TextureNames, itemVisuals.TextureNames, new TextureFiles(mods));
         var crackLayer = visuals.TextureNames.Count + itemVisuals.TextureNames.Count;
+        var sunLayer = crackLayer + CrackRenderer.Stages;
         var names = new ItemNames(content.ItemDisplayNames);
         _chunkRenderer = new ChunkRenderer(Gl, new ChunkMesher(visuals), MeshBuildQueue.DefaultWorkerCount);
 
@@ -157,6 +162,9 @@ internal sealed class ClientApp(
         _itemShader = ShaderProgram.FromFiles(Gl, Path.Combine(shaders, "item"));
         _itemShader.SetUniform("u_Textures", 0);
         _itemRenderer = new ItemEntityRenderer(Gl, _itemShader, itemVisuals, _items);
+        _skyShader = ShaderProgram.FromFiles(Gl, Path.Combine(shaders, "sky"));
+        _skyShader.SetUniform("u_Textures", 0);
+        _sky = new SkyRenderer(Gl, _skyShader, sunLayer, sunLayer + 1);
         _hud = new Hud(Gl, Path.Combine(AppContext.BaseDirectory, "Assets", "Fonts", "ui.ttf"), Window.FramebufferSize,
             _blockTextures, itemVisuals, _items, names, content.Quests);
         _journal = new JournalScreen(Gl, Path.Combine(AppContext.BaseDirectory, "Assets", "Fonts", "ui.ttf"), Window.FramebufferSize,
@@ -173,7 +181,7 @@ internal sealed class ClientApp(
 
     /// <summary>
     /// Массив текстур: сначала текстуры блоков (по слоям <see cref="BlockVisuals"/>), за ними картинки предметов
-    /// (<see cref="ItemVisuals"/>), последними — стадии трещин (<see cref="CrackRenderer"/>).
+    /// (<see cref="ItemVisuals"/>), за ними — стадии трещин (<see cref="CrackRenderer"/>), последними — солнце и луна (<see cref="SkyRenderer"/>).
     /// </summary>
     private TextureArray LoadTextures(IReadOnlyList<string> blockNames, IReadOnlyList<string> itemNames, TextureFiles files)
     {
@@ -187,8 +195,11 @@ internal sealed class ClientApp(
         var effects = Path.Combine(AppContext.BaseDirectory, "Assets", "Textures", "Effects");
         for (var stage = 0; stage < CrackRenderer.Stages; stage++)
             images.Add(Load($"destroy_{stage}", Path.Combine(effects, $"destroy_{stage}.png")));
+        var sky = Path.Combine(AppContext.BaseDirectory, "Assets", "Textures", "Sky");
+        images.Add(Load("sun", Path.Combine(sky, "sun.png")));
+        images.Add(Load("moon", Path.Combine(sky, "moon.png")));
 
-        Console.WriteLine($"[Client] Текстуры: {blockNames.Count} слоёв блоков, {itemNames.Count} картинок предметов, {CrackRenderer.Stages} стадий трещин");
+        Console.WriteLine($"[Client] Текстуры: {blockNames.Count} слоёв блоков, {itemNames.Count} картинок предметов, {CrackRenderer.Stages} стадий трещин, солнце и луна");
         return new TextureArray(Gl, images);
 
         Image Load(string name, string path)
@@ -216,6 +227,8 @@ internal sealed class ClientApp(
 
         // Положения сущностей до сообщений этого тика становятся «прошлыми»: между ними и новыми идёт интерполяция.
         _entities.BeginTick();
+        // Часы — до сообщений: сверка, пришедшая в этом тике, уже учитывает его (сервер прибавляет тик в конце своего).
+        _worldClock.Tick();
         ProcessServerMessages();
 
         _controller.Tick(Input, controlsEnabled: Input.IsCursorCaptured);
@@ -258,6 +271,7 @@ internal sealed class ClientApp(
                     _controller.LookAngles = accepted.StartLook;
                     _mode = accepted.Mode;
                     _world.LoadArea = accepted.LoadArea;
+                    _worldClock.Sync(accepted.WorldTime);
                     _world.Center = BlockPos.Containing(accepted.StartPosition).Chunk;
                     _joined = true;
                     UpdateStatusText();
@@ -278,6 +292,10 @@ internal sealed class ClientApp(
                     _controller.Teleport(teleport.Position);
                     _teleportId = teleport.TeleportId;
                     Console.WriteLine($"[Client] Сервер перенёс игрока в {teleport.Position}");
+                    break;
+
+                case TimeSync sync:
+                    _worldClock.Sync(sync.WorldTime);
                     break;
 
                 case ChunkData data:
@@ -391,17 +409,22 @@ internal sealed class ClientApp(
         var stats = _chunkRenderer.Update(_world, eye);
         _meshStats.Add(stats);
 
+        // Время суток: цвет неба (фон и туман), яркость неба, солнце и луна. До входа — утро нового мира.
+        var worldTime = _worldClock.IsKnown ? _worldClock.At(alpha) : DayCycle.NewWorldTime;
+        var atmosphere = Atmosphere.At(worldTime, ViewDistanceBlocks);
+        Gl.ClearColor(atmosphere.SkyColor.X, atmosphere.SkyColor.Y, atmosphere.SkyColor.Z, 1f);
         Gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+        _blockTextures.Bind(0);
+        _sky.Draw(_camera.ViewProjection, worldTime);
 
         _chunkShader.Use();
         // Камера в начале координат: матрица содержит только поворот и проекцию, а смещения от камеры
         // считаются в double для каждого объекта. Так мир не дрожит и в миллионе блоков от центра.
         var viewProjection = _camera.ViewProjection;
         _chunkShader.SetUniform("u_ViewProjection", viewProjection);
-        _chunkShader.SetUniform("u_SkyBrightness", SkyBrightness);
-        _blockTextures.Bind(0);
+        atmosphere.Apply(_chunkShader);
         _drawnChunks = _chunkRenderer.Draw(_chunkShader, eye, Frustum.FromMatrix(viewProjection));
-        _itemRenderer.Draw(viewProjection, eye, _entities, alpha, _clock.Elapsed.TotalSeconds, _world, SkyBrightness);
+        _itemRenderer.Draw(viewProjection, eye, _entities, alpha, _clock.Elapsed.TotalSeconds, _world, atmosphere);
 
         DrawSelection(eye);
         DrawCracks(eye, viewProjection);
@@ -552,6 +575,9 @@ internal sealed class ClientApp(
         // Временно, до команд и прав доступа (сейчас сервер разрешает её всем).
         if (Input.WasKeyPressed(Key.G) && _joined)
             connection.Send(new SetGameMode(_mode == GameMode.Creative ? GameMode.Survival : GameMode.Creative));
+        // T — время на «час» (1/24 суток) вперёд: для проверок, временно, как G. Переводит сервер, клиент узнает из TimeSync.
+        if (Input.WasKeyPressed(Key.T) && _joined)
+            connection.Send(new AdvanceTime());
 
         if (_inventoryReceived)
         {
@@ -663,6 +689,13 @@ internal sealed class ClientApp(
         _cracks.Draw(viewProjection, offset, CrackRenderer.StageFor(progress));
     }
 
+    /// <summary>
+    /// Дальность прорисовки в блоках — для тумана: меши есть у чанков, у которых пришли все соседи по граням, то есть
+    /// на кольцо ближе края области загрузки. До входа — дальность по умолчанию.
+    /// </summary>
+    private float ViewDistanceBlocks =>
+        ((_world.LoadArea?.Horizontal ?? GameServer.DefaultViewDistance + 1) - 1) * ChunkMath.Size;
+
     private void UpdateStatusText()
     {
         // Предмет в руке — до хотбара на экране (шаг 3.6) он виден только здесь.
@@ -672,7 +705,8 @@ internal sealed class ClientApp(
         var player = _controller is null ? "" : $"{_controller.Position}{(_controller.IsFlying ? " полёт" : "")} | ";
         var mode = _mode == GameMode.Creative ? "творческий" : "выживание";
         var health = _health is { } h ? $" | здоровье {h.Current}/{h.Max}" : "";
-        StatusText = $"{player}{mode}{health} | слот {_inventory.SelectedSlot + 1}: {item} | " +
+        var time = _worldClock.IsKnown ? $" | {DayCycle.Describe(_worldClock.Now)}" : "";
+        StatusText = $"{player}{mode}{health}{time} | слот {_inventory.SelectedSlot + 1}: {item} | " +
                      $"чанков {_world.Chunks.Count}, мешей {_chunkRenderer?.MeshCount ?? 0}, нарисовано {_drawnChunks}";
     }
 
@@ -685,6 +719,8 @@ internal sealed class ClientApp(
         _crackShader.Dispose();
         _itemRenderer.Dispose();
         _itemShader.Dispose();
+        _sky.Dispose();
+        _skyShader.Dispose();
         _hud.Dispose();
         _journal.Dispose();
         _selectionBox.Dispose();

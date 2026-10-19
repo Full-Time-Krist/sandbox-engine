@@ -11,6 +11,7 @@ using Shared.Blocks;
 using Shared.Content;
 using Shared.Entities;
 using Shared.Items;
+using Shared.Lighting;
 using Shared.Modding;
 using Shared.Physics;
 using Shared.Networking;
@@ -78,6 +79,9 @@ public sealed class GameServer : IDisposable
     private readonly int _verticalDistance;
     private int _nextPlayerId = 1;
     private long _tick;
+
+    /// <summary>Тик мира — часы суток (<see cref="DayCycle"/>): растёт каждый тик, хранится в сохранении, T переводит на «час».</summary>
+    private long _worldTime;
     private int _unloadedSinceLog;
 
     public World World { get; }
@@ -165,7 +169,12 @@ public sealed class GameServer : IDisposable
 
         _editor = new WorldEditor(this);
         _entityPersistence = new EntityPersistence(Entities, _save, _items);
+        // Мир прошлой версии (без времени в сохранении) и новый мир начинают утром.
+        _worldTime = _save?.LoadTime() ?? DayCycle.NewWorldTime;
     }
+
+    /// <summary>Тик мира (часы суток). Для тестов.</summary>
+    internal long WorldTime => _worldTime;
 
     /// <summary>
     /// Подключает моды: каждый регистрирует поведения и подписки через свой <see cref="IModContext"/>. Первым — встроенный
@@ -248,6 +257,10 @@ public sealed class GameServer : IDisposable
 
     public void Tick()
     {
+        // Часы мира — в начале тика: всё, что сервер шлёт за тик (JoinAccepted, TimeSync), несёт одно время, и клиент,
+        // прибавляющий по тику, совпадает с ним.
+        _worldTime++;
+
         while (_pendingConnections.TryDequeue(out var connection))
             _sessions.Add(new ClientSession(connection));
 
@@ -323,6 +336,10 @@ public sealed class GameServer : IDisposable
                 session.Connection.Send(new InventoryChanged(changes));
         }
 
+        // Сверка часов с клиентами — раз в 10 с, между сверками они считают сами.
+        if (_tick % TimeSync.IntervalTicks == 0)
+            BroadcastTime();
+
         // Последним: до конца тика номер удалённой сущности не переиспользуется, и всё, что в тике её удалило, уже прошло.
         Entities.FlushDestroyed();
     }
@@ -342,6 +359,7 @@ public sealed class GameServer : IDisposable
             }
         }
         _entityPersistence.SaveAll();
+        _save.SaveTime(_worldTime);
         return World.SaveDirty();
     }
 
@@ -469,6 +487,13 @@ public sealed class GameServer : IDisposable
                     Console.WriteLine($"[Server] {session.PlayerName}: неверный слот {select.Slot}");
                 break;
 
+            case AdvanceTime when session.IsJoined:
+                // Прав доступа пока нет, а игра одиночная: перевести время может любой игрок.
+                _worldTime += DayCycle.HourTicks;
+                BroadcastTime();
+                Console.WriteLine($"[Server] {session.PlayerName}: время +1/24 суток, {DayCycle.Describe(_worldTime)}");
+                break;
+
             case SetGameMode setMode when session.IsJoined:
                 // Прав доступа пока нет, а игра одиночная: сменить режим может любой игрок.
                 if (setMode.Mode.IsDefined())
@@ -587,7 +612,8 @@ public sealed class GameServer : IDisposable
         Entities.Set(session.Entity, new Fall { HighestY = start.Y });
         session.Look = saved?.Look ?? default;
         // Чанки придут в следующих тиках (StreamChunks), начиная с ближайших.
-        session.Connection.Send(new JoinAccepted(session.PlayerId, start, session.Look, mode, _blockNames, _itemNames, session.View.LoadArea));
+        session.Connection.Send(new JoinAccepted(session.PlayerId, start, session.Look, mode, _blockNames, _itemNames, session.View.LoadArea,
+            _worldTime));
         // Инвентарь уходит целиком, поэтому изменения от его заполнения отправлять не нужно.
         session.Connection.Send(new InventoryContents(inventory.CopySlots(), inventory.SelectedSlot));
         inventory.TakeChanges();
@@ -920,6 +946,17 @@ public sealed class GameServer : IDisposable
     private static bool IsValidPosition(Vector3d position) =>
         position.IsFinite
         && Math.Abs(position.X) < MaxCoordinate && Math.Abs(position.Y) < MaxCoordinate && Math.Abs(position.Z) < MaxCoordinate;
+
+    /// <summary>Сверка часов: тик мира — всем вошедшим.</summary>
+    private void BroadcastTime()
+    {
+        var sync = new TimeSync(_worldTime);
+        foreach (var session in _sessions)
+        {
+            if (session.IsJoined)
+                session.Connection.Send(sync);
+        }
+    }
 
     /// <summary>Сообщает об изменении блока игрокам, у которых есть этот чанк: остальным он не нужен.</summary>
     private void BroadcastBlockChange(BlockChanged change)

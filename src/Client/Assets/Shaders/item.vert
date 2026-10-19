@@ -19,6 +19,7 @@ out vec2 v_Uv;
 flat out float v_Layer;
 out float v_Shade;
 flat out vec2 v_Light;
+out float v_Distance;
 
 void main()
 {
@@ -51,4 +52,5 @@ void main()
     }
 
     gl_Position = u_ViewProjection * vec4(i_Offset + local, 1.0);
+    v_Distance = length(i_Offset + local);
 }

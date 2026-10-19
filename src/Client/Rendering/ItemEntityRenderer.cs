@@ -145,9 +145,9 @@ internal sealed class ItemEntityRenderer : IDisposable
     /// <param name="alpha">Доля пройденного тика — для интерполяции положений.</param>
     /// <param name="seconds">Время с запуска — для вращения и покачивания.</param>
     /// <param name="world">Откуда брать свет: предмет освещён светом блока, в котором лежит.</param>
-    /// <param name="skyBrightness">Яркость неба, как у чанков (<c>u_SkyBrightness</c>).</param>
+    /// <param name="atmosphere">Яркость неба и туман — как у чанков.</param>
     public void Draw(Matrix4x4 viewProjection, Vector3d eye, ClientEntities entities, float alpha, double seconds,
-        ClientWorld world, float skyBrightness)
+        ClientWorld world, in Atmosphere atmosphere)
     {
         _frame.Clear();
         foreach (var (id, entity) in entities.All)
@@ -171,7 +171,7 @@ internal sealed class ItemEntityRenderer : IDisposable
         _instances.SetData(CollectionsMarshal.AsSpan(_frame), BufferUsageARB.StreamDraw);
         _shader.Use();
         _shader.SetUniform("u_ViewProjection", viewProjection);
-        _shader.SetUniform("u_SkyBrightness", skyBrightness);
+        atmosphere.Apply(_shader);
         _vao.DrawArraysInstanced(PrimitiveType.Triangles, _vertexCount, _frame.Count);
     }
 

@@ -5,10 +5,16 @@ flat in float v_Layer;
 in float v_Shade;
 in float v_Sky;
 in float v_BlockLight;
+in float v_Distance;
 
 uniform sampler2DArray u_Textures;
-// Яркость неба: 1 — день, ночью меньше (сутки — шаг 8.4). Умножает уровень небесного света.
+// Яркость неба по времени суток (DayCycle.SkyBrightness): 1 днём, 4/15 ночью. Умножает уровень небесного света.
 uniform float u_SkyBrightness;
+
+// Туман — цвет неба по краю прорисовки (Atmosphere): прячет обрыв мира, вдали видны ночь и закат.
+uniform vec3 u_FogColor;
+uniform float u_FogStart;
+uniform float u_FogEnd;
 
 out vec4 o_Color;
 
@@ -26,5 +32,6 @@ void main()
 {
     vec3 albedo = texture(u_Textures, vec3(v_Uv, v_Layer)).rgb;
     vec3 light = max(vec3(Brightness(v_Sky * u_SkyBrightness)), Brightness(v_BlockLight) * BlockTint);
-    o_Color = vec4(albedo * light * v_Shade, 1.0);
+    vec3 color = albedo * light * v_Shade;
+    o_Color = vec4(mix(color, u_FogColor, smoothstep(u_FogStart, u_FogEnd, v_Distance)), 1.0);
 }

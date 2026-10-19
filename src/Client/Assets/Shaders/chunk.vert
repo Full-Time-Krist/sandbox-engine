@@ -17,10 +17,14 @@ out float v_Shade;
 // Уровни света (0–15) интерполируются по грани, кривая яркости — во фрагментном шейдере: так переход плавный.
 out float v_Sky;
 out float v_BlockLight;
+// Расстояние от глаза (камера в начале координат) — для тумана.
+out float v_Distance;
 
 void main()
 {
-    gl_Position = u_ViewProjection * u_Model * vec4(a_Position, 1.0);
+    vec4 position = u_Model * vec4(a_Position, 1.0);
+    gl_Position = u_ViewProjection * position;
+    v_Distance = length(position.xyz);
     v_Uv = a_Uv;
     v_Layer = a_Layer;
     v_Shade = a_Shade;

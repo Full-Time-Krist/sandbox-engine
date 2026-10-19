@@ -211,6 +211,32 @@ internal sealed class WorldSave : IDisposable
         }
     }
 
+    /// <summary>
+    /// Тик мира из сохранения (ключ <c>time</c> в <c>meta</c>, шаг 8.4); null — его нет (мир прошлой версии) или он
+    /// испорчен (строка в лог). Формат сохранения от ключа не меняется.
+    /// </summary>
+    public long? LoadTime()
+    {
+        using var connection = OpenConnection();
+        switch (ReadMeta(connection, "time"))
+        {
+            case null:
+                return null;
+            case long time and >= 0:
+                return time;
+            case var other:
+                Console.WriteLine($"[Server] Время мира в сохранении испорчено ('{other}'), будет утро");
+                return null;
+        }
+    }
+
+    /// <summary>Ставит тик мира в очередь записи (вместе с чанками и игроками при автосохранении и выходе).</summary>
+    public void SaveTime(long worldTime)
+    {
+        ThrowIfFaulted();
+        _queue.Add(new TimeWrite(worldTime));
+    }
+
     /// <summary>Моды (id → версия), с которыми мир открывали прошлый раз; пусто у нового мира и у мира без модов.</summary>
     public IReadOnlyDictionary<string, string> LoadModList()
     {
@@ -462,6 +488,10 @@ internal sealed class WorldSave : IDisposable
             var pquests = writePlayer.Parameters.Add("$quests", SqliteType.Text);
             var phealth = writePlayer.Parameters.Add("$health", SqliteType.Integer);
 
+            using var writeTime = _writeConnection.CreateCommand();
+            writeTime.CommandText = "INSERT OR REPLACE INTO meta (key, value) VALUES ('time', $value)";
+            var tvalue = writeTime.Parameters.Add("$value", SqliteType.Integer);
+
             var batch = new List<WriteItem>(MaxBatch);
             // Цикл завершается, когда Dispose закрывает очередь и всё поставленное записано.
             foreach (var first in _queue.GetConsumingEnumerable())
@@ -476,6 +506,7 @@ internal sealed class WorldSave : IDisposable
                     writeEntities.Transaction = transaction;
                     deleteEntities.Transaction = transaction;
                     writePlayer.Transaction = transaction;
+                    writeTime.Transaction = transaction;
                     foreach (var item in batch)
                     {
                         switch (item)
@@ -501,6 +532,10 @@ internal sealed class WorldSave : IDisposable
                                 pquests.Value = player.Quests ?? (object)DBNull.Value;
                                 phealth.Value = player.Health ?? (object)DBNull.Value;
                                 writePlayer.ExecuteNonQuery();
+                                break;
+                            case TimeWrite time:
+                                tvalue.Value = time.WorldTime;
+                                writeTime.ExecuteNonQuery();
                                 break;
                         }
                     }
@@ -696,4 +731,5 @@ internal sealed class WorldSave : IDisposable
     private sealed record PlayerWrite(string Name, Vector3d Position, LookAngles Look, GameMode? Mode, int SelectedSlot,
         byte[]? Inventory, string? Quests, int? Health) : WriteItem;
     private sealed record Barrier(ManualResetEventSlim Done) : WriteItem;
+    private sealed record TimeWrite(long WorldTime) : WriteItem;
 }

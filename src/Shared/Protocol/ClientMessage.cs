@@ -27,6 +27,12 @@ public sealed record PlayerMove(Vector3d Position, LookAngles Look, int Teleport
 /// </summary>
 public sealed record SetGameMode(GameMode Mode) : ClientMessage;
 
+/// <summary>
+/// Игрок переводит время на «час» вперёд — 1/24 суток (клавиша T, для проверок, временно, как G: до команд).
+/// Ответ всем — <see cref="TimeSync"/>.
+/// </summary>
+public sealed record AdvanceTime : ClientMessage;
+
 /// <summary>Игрок выбрал слот хотбара (клавиши 1–9 или колесо мыши).</summary>
 public sealed record SelectHotbarSlot(int Slot) : ClientMessage;
 

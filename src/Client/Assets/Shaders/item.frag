@@ -4,9 +4,15 @@ in vec2 v_Uv;
 flat in float v_Layer;
 in float v_Shade;
 flat in vec2 v_Light;
+in float v_Distance;
 
 uniform sampler2DArray u_Textures;
 uniform float u_SkyBrightness;
+
+// Туман — цвет неба по краю прорисовки (Atmosphere): прячет обрыв мира, вдали видны ночь и закат.
+uniform vec3 u_FogColor;
+uniform float u_FogStart;
+uniform float u_FogEnd;
 
 out vec4 o_Color;
 
@@ -26,5 +32,6 @@ void main()
     if (texel.a < 0.5)
         discard;
     vec3 light = max(vec3(Brightness(v_Light.x * u_SkyBrightness)), Brightness(v_Light.y) * BlockTint);
-    o_Color = vec4(texel.rgb * light * v_Shade, 1.0);
+    vec3 color = texel.rgb * light * v_Shade;
+    o_Color = vec4(mix(color, u_FogColor, smoothstep(u_FogStart, u_FogEnd, v_Distance)), 1.0);
 }
