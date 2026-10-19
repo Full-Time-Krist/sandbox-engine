@@ -1,4 +1,6 @@
 using Shared.Blocks;
+using Shared.Lighting;
+using Shared.Protocol;
 using Shared.Voxels;
 
 namespace Client.Tests;
@@ -194,5 +196,48 @@ public class ClientWorldTests
 
         Assert.Contains(center, TakeDirty(world));
         Assert.True(world.CanMesh(center));
+    }
+
+    [Fact]
+    public void ChunkData_BringsServerLight()
+    {
+        var server = new Chunk(new ChunkPos(0, 1, 0));
+        server.Light.SetSky(5, 15);
+        server.Light.SetBlock(6, 9);
+        var world = new ClientWorld();
+
+        world.AddChunk(ChunkData.From(server).ToChunk());
+
+        var light = world.Chunks.Get(server.Position)!.Light;
+        Assert.Equal(15, light.GetSky(5));
+        Assert.Equal(9, light.GetBlock(6));
+        Assert.Equal(0, light.Get(7));
+    }
+
+    [Fact]
+    public void SetLight_ReplacesLightOfChunk()
+    {
+        var position = new ChunkPos(2, 0, -1);
+        var world = new ClientWorld();
+        world.AddChunk(new Chunk(position));
+        var server = new Chunk(position);
+        server.Light.Fill(ChunkLight.Pack(15, 0));
+        server.Light.SetSky(100, 4);
+
+        Assert.True(world.SetLight(position, ChunkLightChanged.From(server).Light.AsMemory()));
+
+        var light = world.Chunks.Get(position)!.Light;
+        Assert.Equal(4, light.GetSky(100));
+        Assert.Equal(15, light.GetSky(101));
+    }
+
+    [Fact]
+    public void SetLight_ForMissingChunk_IsIgnored()
+    {
+        var world = new ClientWorld();
+        var data = ChunkLightChanged.From(new Chunk(new ChunkPos(0, 0, 0))).Light;
+
+        Assert.False(world.SetLight(new ChunkPos(0, 0, 0), data.AsMemory()));
+        Assert.Equal(0, world.Chunks.Count);
     }
 }

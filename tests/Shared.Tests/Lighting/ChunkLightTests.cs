@@ -43,4 +43,34 @@ public class ChunkLightTests
         light.CopyTo(copy);
         Assert.All(copy, b => Assert.Equal(0, b));
     }
+
+    [Fact]
+    public void CopyFrom_SameEverywhere_StaysUniform()
+    {
+        var light = new ChunkLight();
+        light.SetSky(7, 3);
+        var values = new byte[ChunkMath.Volume];
+        Array.Fill(values, ChunkLight.Pack(15, 2));
+
+        light.CopyFrom(values);
+
+        Assert.True(light.IsUniform);
+        Assert.Equal(ChunkLight.Pack(15, 2), light.UniformValue);
+    }
+
+    [Fact]
+    public void CopyFrom_Different_KeepsEveryValue()
+    {
+        var light = new ChunkLight();
+        var values = new byte[ChunkMath.Volume];
+        for (var i = 0; i < values.Length; i++)
+            values[i] = (byte)(i % 251);
+
+        light.CopyFrom(values);
+
+        Assert.False(light.IsUniform);
+        var copy = new byte[ChunkMath.Volume];
+        light.CopyTo(copy);
+        Assert.Equal(values, copy);
+    }
 }

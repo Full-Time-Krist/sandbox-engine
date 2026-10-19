@@ -1,5 +1,6 @@
 using Client.Rendering;
 using Shared.Blocks;
+using Shared.Lighting;
 using Shared.Voxels;
 
 namespace Client;
@@ -77,6 +78,19 @@ internal sealed class ClientWorld
         if (local.Y == ChunkMath.Mask) MarkIfLoaded(chunk with { Y = chunk.Y + 1 });
         if (local.Z == 0) MarkIfLoaded(chunk with { Z = chunk.Z - 1 });
         if (local.Z == ChunkMath.Mask) MarkIfLoaded(chunk with { Z = chunk.Z + 1 });
+        return true;
+    }
+
+    /// <summary>
+    /// Заменяет свет чанка присланным сервером (<see cref="LightCodec"/>). Клиент свет не считает. False — чанка нет.
+    /// Меши от света пока не зависят (он ещё не рисуется), поэтому не перестраиваются.
+    /// </summary>
+    /// <exception cref="InvalidDataException">Данные света повреждены; свет чанка тогда не меняется.</exception>
+    public bool SetLight(ChunkPos position, ReadOnlyMemory<byte> light)
+    {
+        if (Chunks.Get(position) is not { } chunk)
+            return false;
+        LightCodec.Decode(light, chunk.Light);
         return true;
     }
 

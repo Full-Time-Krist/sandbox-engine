@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using Shared.Blocks;
 using Shared.Entities;
 using Shared.Items;
+using Shared.Lighting;
 using Shared.Voxels;
 
 namespace Shared.Protocol;
@@ -38,18 +39,37 @@ public sealed record InventoryContents(ImmutableArray<ItemStack> Slots, int Sele
 /// </summary>
 public sealed record InventoryChanged(ImmutableArray<InventorySlot> Slots) : ServerMessage;
 
-/// <summary>Содержимое чанка, сжатое <see cref="ChunkCodec"/>.</summary>
+/// <summary>Содержимое чанка: блоки и свет, сжатые <see cref="ChunkCodec"/> и <see cref="LightCodec"/>.</summary>
 /// <param name="Data">
 /// Блоки чанка в формате <see cref="ChunkCodec"/>: обычно 1–3 КБ вместо 64 КБ, пустой чанк — 8 байт.
 /// ImmutableArray, а не массив: сообщения передаются по ссылке и должны быть неизменяемыми.
 /// </param>
-public sealed record ChunkData(ChunkPos Position, ImmutableArray<byte> Data) : ServerMessage
+/// <param name="Light">Свет чанка на момент отправки (<see cref="LightCodec"/>); дальше его изменения приходят <see cref="ChunkLightChanged"/>.</param>
+public sealed record ChunkData(ChunkPos Position, ImmutableArray<byte> Data, ImmutableArray<byte> Light) : ServerMessage
 {
     public static ChunkData From(Chunk chunk) =>
-        new(chunk.Position, ImmutableCollectionsMarshal.AsImmutableArray(ChunkCodec.Encode(chunk)));
+        new(chunk.Position, ImmutableCollectionsMarshal.AsImmutableArray(ChunkCodec.Encode(chunk)),
+            ImmutableCollectionsMarshal.AsImmutableArray(LightCodec.Encode(chunk.Light)));
 
-    /// <exception cref="InvalidDataException">Данные повреждены.</exception>
-    public Chunk ToChunk() => ChunkCodec.Decode(Position, Data.AsMemory());
+    /// <exception cref="InvalidDataException">Данные блоков или света повреждены.</exception>
+    public Chunk ToChunk()
+    {
+        var chunk = ChunkCodec.Decode(Position, Data.AsMemory());
+        LightCodec.Decode(Light.AsMemory(), chunk.Light);
+        return chunk;
+    }
+}
+
+/// <summary>
+/// Свет чанка изменился (поставили или сломали блок, рядом появился или ушёл чанк): весь свет чанка заново.
+/// Приходит только тем, у кого чанк есть, в том же тике, что и причина (<see cref="BlockChanged"/>).
+/// Клиент свет не считает — только хранит присланный.
+/// </summary>
+/// <param name="Light">Свет чанка в формате <see cref="LightCodec"/>.</param>
+public sealed record ChunkLightChanged(ChunkPos Position, ImmutableArray<byte> Light) : ServerMessage
+{
+    public static ChunkLightChanged From(Chunk chunk) =>
+        new(chunk.Position, ImmutableCollectionsMarshal.AsImmutableArray(LightCodec.Encode(chunk.Light)));
 }
 
 /// <summary>

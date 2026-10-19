@@ -197,22 +197,64 @@ public sealed class LightEngine
     }
 
     /// <summary>
-    /// Чанк только что убран из <see cref="ChunkMap"/>: свет, пришедший от него в соседей, пересчитывается, а верхний слой
-    /// чанка снизу снова берёт солнце по <see cref="ISkyAbove"/>.
+    /// Чанк <paramref name="removed"/> только что убран из <see cref="ChunkMap"/> (его свет — последний посчитанный).
+    /// Уходят сразу несколько — можно сначала убрать из <see cref="ChunkMap"/> все, затем вызвать это для каждого:
+    /// стороны между ушедшими пропускаются.
+    /// свет, пришедший от него в соседей, пересчитывается, а верхний слой чанка снизу снова берёт солнце по <see cref="ISkyAbove"/>.
     /// </summary>
-    public void ChunkRemoved(ChunkPos position)
+    /// <remarks>
+    /// Снимается только свет, который мог прийти из ушедшего чанка, — по тому же правилу, что при снятии в заливке:
+    /// у соседа меньше, чем у граничного блока ушедшего, или это столб солнца прямо под ним. Снимать все граничные блоки
+    /// подряд нельзя: столб солнца у соседа сбоку снимался бы до самой земли через несколько чанков и заливался заново —
+    /// в полёте, где за секунду уходит сотня чанков, это стоило до 0,9 с на проход выгрузки (замер шага 8.2).
+    /// </remarks>
+    public void ChunkRemoved(Chunk removed)
     {
         foreach (var sky in (ReadOnlySpan<bool>)[true, false])
         {
             for (var d = 0; d < Directions.Length; d++)
             {
-                if (Neighbor(position, d) is not { } neighbor)
+                if (Neighbor(removed.Position, d) is not { } neighbor)
                     continue;
                 foreach (var index in FacingLayer(Opposite(d)))
-                    Seed(neighbor, index, sky);
+                {
+                    var level = Level(neighbor, index, sky);
+                    var from = Level(removed, AcrossFrom(index, d), sky);
+                    var dependent = level > 0 && !IsOpaque(neighbor, index)
+                        && (level < from || (sky && d == Down && from == ChunkLight.Max && level == ChunkLight.Max));
+                    // Собственный свет (у верхнего слоя чанка снизу — теперь солнце по ISkyAbove) мог и вырасти.
+                    var intrinsic = Intrinsic(neighbor, index, sky);
+                    if (dependent && intrinsic < level)
+                    {
+                        SetLevel(neighbor, index, sky, 0);
+                        _remove.Enqueue(new Node(neighbor, index, level));
+                        Reseed(neighbor, index, sky);
+                    }
+                    else if (intrinsic > level)
+                    {
+                        SetLevel(neighbor, index, sky, intrinsic);
+                        _add.Enqueue(new Node(neighbor, index, 0));
+                    }
+                }
             }
             Propagate(sky);
         }
+    }
+
+    /// <summary>
+    /// Индекс блока соседнего чанка, от которого шаг в направлении <paramref name="d"/> ведёт в блок <paramref name="index"/>
+    /// (граничный слой этого чанка, обращённый против <paramref name="d"/>).
+    /// </summary>
+    private static int AcrossFrom(int index, int d)
+    {
+        const int Last = ChunkMath.Size - 1;
+        var stride = d switch
+        {
+            0 or 1 => 1,
+            2 or 3 => Layer,
+            _ => ChunkMath.Size,
+        };
+        return (d & 1) == 0 ? index + Last * stride : index - Last * stride;
     }
 
     /// <summary>Блок в <paramref name="pos"/> только что изменился: пересчитывает свет вокруг. В незагруженном чанке — ничего.</summary>

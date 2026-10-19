@@ -89,6 +89,9 @@ public sealed class GameServer : IDisposable
     internal EntityWorld Entities { get; } = new();
 
     private readonly EntitySync _entitySync = new();
+
+    /// <summary>Чанки, чей свет изменился с прошлой рассылки (<see cref="SendLightChanges"/>); список переиспользуется.</summary>
+    private readonly List<ChunkPos> _lightChanged = [];
     private readonly ItemSystem _itemSystem;
     private readonly EntityPersistence _entityPersistence;
 
@@ -146,7 +149,7 @@ public sealed class GameServer : IDisposable
         try
         {
             var isNew = _save?.Info == null;
-            World = new World(_blocks, seed ?? Random.Shared.Next(), generatorThreads ?? ChunkGenerator.DefaultWorkerCount,
+            World = new World(registry, _blocks, seed ?? Random.Shared.Next(), generatorThreads ?? ChunkGenerator.DefaultWorkerCount,
                 spawnColumn ?? default, _save, defaultMode ?? GameMode.Survival);
             if (_save != null)
             {
@@ -288,6 +291,8 @@ public sealed class GameServer : IDisposable
         World.CollectGenerated();
         while (World.TryTakeLoadedEntities(out var loadedChunk, out var entityData))
             _entityPersistence.Restore(loadedChunk, entityData);
+        // Свет, изменённый действиями и пришедшими чанками, — до рассылки чанков: новые чанки и так несут свежий свет.
+        SendLightChanges();
         foreach (var session in _sessions)
         {
             if (session.IsJoined)
@@ -307,6 +312,9 @@ public sealed class GameServer : IDisposable
                 _quests.CheckObtain(session, _editor);
         }
         _events.Dispatch();
+
+        // Свет, изменённый после рассылки чанков (выгрузка, обработчики модов), — в этом же тике.
+        SendLightChanges();
 
         // Изменения инвентаря за тик — одним сообщением, в конце: что бы ни меняло инвентарь в этом тике, оно уже учтено.
         foreach (var session in _sessions)
@@ -374,6 +382,28 @@ public sealed class GameServer : IDisposable
             if (budget == 0 && !canRequest)
                 break;
         }
+    }
+
+    /// <summary>
+    /// Шлёт весь свет каждого чанка, чей свет изменился, игрокам, у которых этот чанк есть. Остальные получат свет
+    /// вместе с чанком (<see cref="ChunkData"/>). Чанк сжимается один раз на всех игроков.
+    /// </summary>
+    private void SendLightChanges()
+    {
+        World.Light.TakeChanged(_lightChanged);
+        foreach (var position in _lightChanged)
+        {
+            // Свет соседей меняется и при выгрузке чанка; самого выгруженного уже нет.
+            if (World.Chunks.Get(position) is not { } chunk)
+                continue;
+            ChunkLightChanged? message = null;
+            foreach (var session in _sessions)
+            {
+                if (session.IsJoined && session.View.WasSent(position))
+                    session.Connection.Send(message ??= ChunkLightChanged.From(chunk));
+            }
+        }
+        _lightChanged.Clear();
     }
 
     /// <summary>Выгружает из памяти сервера чанки, которые не нужны ни одному игроку.</summary>

@@ -35,52 +35,93 @@ public class ServerHostTests
         Assert.NotEqual(Environment.CurrentManagedThreadId, thread);
     }
 
+    /// <summary>
+    /// Частота — 20 тиков в секунду. Проверка поведением, без часов в потоке теста: начало каждого тика и пропущенное
+    /// к этому моменту время записывает сам тик. Хост никогда не тикает раньше расписания — k-й тик начинается не раньше
+    /// «старт + k × 50 мс + пропущенное» (граница из устройства, нагрузка тики только задерживает). Слишком редкие тики
+    /// ловит медианное опоздание: при 10 тиках в секунду к двадцатому тику оно около 0,75 с, а у верного хоста опоздание
+    /// больше MaxLagSeconds пропускается, меньшее догоняется. Медиана не боится отдельных задержек потока под нагрузкой
+    /// (прошлая версия читала счётчик по часам теста и падала при полном прогоне под нагрузкой).
+    /// </summary>
     [Fact]
     public void TickRate_MatchesTicksPerSecond()
     {
-        using var host = new ServerHost(() => { }, ticksPerSecond: 20, logStats: false);
+        const double Period = 1.0 / 20;
+        const double Epsilon = 0.001;
+        var ticks = new List<(double Start, double Skipped)>();
         var clock = Stopwatch.StartNew();
-        host.Start();
+        ServerHost? host = null;
+        host = new ServerHost(() => ticks.Add((clock.Elapsed.TotalSeconds, host!.SkippedSeconds)), ticksPerSecond: 20, logStats: false);
+        using (host)
+        {
+            var hostStart = clock.Elapsed.TotalSeconds;
+            host.Start();
+            Assert.True(WaitUntil(() => host.Ticks >= 21, timeoutMs: 10_000), $"Выполнено {host.Ticks} тиков");
+            host.Stop();
 
-        Thread.Sleep(1000);
-        var ticks = host.Ticks;
-        var seconds = clock.Elapsed.TotalSeconds - host.SkippedSeconds;
-
-        // Первый тик сразу при старте, дальше каждые 50 мс. Под нагрузкой (параллельные тесты занимают все ядра)
-        // сервер по своим правилам отстаёт: отставание больше MaxLagSeconds пропускается — это время не считаем
-        // (SkippedSeconds), а меньшее догоняется потом, так что в момент чтения может не хватать до MaxLagSeconds × 20
-        // тиков и ещё одного. Это граница из устройства ServerHost, а не подобранный допуск; частоту 10 вместо 20 она ловит.
-        var expected = 1 + seconds * 20;
-        Assert.InRange(ticks, expected - (ServerHost.MaxLagSeconds * 20 + 1), expected + 1);
+            var lags = new List<double>();
+            for (var k = 0; k <= 20; k++)
+            {
+                var lag = ticks[k].Start - hostStart - ticks[k].Skipped - k * Period;
+                Assert.True(lag >= -Epsilon, $"Тик {k} начался на {-lag * 1000:F1} мс раньше расписания");
+                if (k > 0)
+                    lags.Add(lag);
+            }
+            lags.Sort();
+            Assert.True(lags[lags.Count / 2] < ServerHost.MaxLagSeconds, $"Медианное опоздание {lags[lags.Count / 2] * 1000:F0} мс: тики реже положенного");
+        }
     }
 
     /// <summary>
     /// Долгий тик (дольше MaxLagSeconds) не догоняется пачкой тиков: отставание пропускается и учитывается в SkippedSeconds,
-    /// а дальше тики снова идут раз в 50 мс.
+    /// а расписание начинается заново от конца долгого тика.
     /// </summary>
+    /// <remarks>
+    /// Проверка — поведением, без допусков на нагрузку. Хост никогда не тикает раньше расписания (ждёт, пока не наступит
+    /// время тика), а нагрузка может тики только задержать. Поэтому k-й тик после долгого начинается не раньше
+    /// «конец долгого + (k − 1) × 50 мс». Если бы хост догонял пропущенное, расписание осталось бы от старта, и около
+    /// двадцати тиков пошли бы сразу, без пауз. Прошлая версия считала тики по часам и падала под нагрузкой
+    /// параллельных тестов: опоздание меньше MaxLagSeconds догоняется позже, и в момент чтения тиков не хватало.
+    /// </remarks>
     [Fact]
     public void LongTick_IsSkippedNotCaughtUp_AndCounted()
     {
-        var first = true;
-        using var host = new ServerHost(() =>
-        {
-            if (!first)
-                return;
-            first = false;
-            Thread.Sleep(1000);
-        }, ticksPerSecond: 20, logStats: false);
+        const double Period = 1.0 / 20;
+        const double Epsilon = 0.001;
+        var starts = new List<double>();
+        var longEnd = 0.0;
+        var skippedAfterLong = double.NaN;
         var clock = Stopwatch.StartNew();
+        ServerHost? host = null;
+        host = new ServerHost(() =>
+        {
+            starts.Add(clock.Elapsed.TotalSeconds);
+            // Пропущенное — в первом тике после долгого: под нагрузкой хост может отстать и позже, и это тоже копится.
+            if (starts.Count == 2)
+                skippedAfterLong = host!.SkippedSeconds;
+            if (starts.Count != 1)
+                return;
+            Thread.Sleep(1000);
+            longEnd = clock.Elapsed.TotalSeconds;
+        }, ticksPerSecond: 20, logStats: false);
+        using var disposeHost = host;
+        var hostStart = clock.Elapsed.TotalSeconds;
         host.Start();
 
-        Assert.True(WaitUntil(() => host.Ticks >= 2, timeoutMs: 5000));
-        // Первый тик начался в 0 и закончился около 1 с; следующий по расписанию — в 0,05 с: пропущено около 0,95 с.
-        Assert.InRange(host.SkippedSeconds, 0.85, 0.95 + clock.Elapsed.TotalSeconds - 1.0 + 0.1);
+        Assert.True(WaitUntil(() => host.Ticks >= 8, timeoutMs: 10_000), $"Выполнено {host.Ticks} тиков");
+        host.Stop();
 
-        Thread.Sleep(500);
-        var ticks = host.Ticks;
-        var seconds = clock.Elapsed.TotalSeconds - host.SkippedSeconds;
-        // Без пропуска здесь было бы около 31 тика сразу после долгого (догоняли бы); с пропуском — по времени без него.
-        Assert.InRange(ticks, 1 + seconds * 20 - 3, 1 + seconds * 20 + 1);
+        // Тики после долгого: не раньше расписания, отсчитанного от его конца.
+        for (var k = 1; k < starts.Count; k++)
+        {
+            var earliest = longEnd + (k - 1) * Period;
+            Assert.True(starts[k] >= earliest - Epsilon,
+                $"Тик {k} после долгого начался в {starts[k]:F4} с, раньше расписания {earliest:F4} с: пропущенное догонялось");
+        }
+
+        // Пропущено «конец долгого тика − время следующего по расписанию (50 мс от старта)». Начало отсчёта хоста —
+        // между вызовом Start и первым тиком, конец долгого тика по часам хоста — между longEnd и началом следующего.
+        Assert.InRange(skippedAfterLong, longEnd - starts[0] - Period - Epsilon, starts[1] - hostStart - Period + Epsilon);
     }
 
     [Fact]

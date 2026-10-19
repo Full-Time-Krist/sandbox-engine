@@ -342,11 +342,12 @@ public sealed class ItemUseTests : IDisposable
 
         Assert.True(second.TryReceive(out var message));
         Assert.Equal(new BlockChanged(_surface, BlockId.Air), message);
-        // Дальше — только выпавшая добыча: её видят все, у кого есть чанк.
+        // Дальше — только свет вокруг ямы и выпавшая добыча: их видят все, у кого есть чанк.
         var rest = new List<ServerMessage>();
         while (second.TryReceive(out var next))
             rest.Add(next);
-        Assert.All(rest, m => Assert.True(m is EntitySpawned or EntitiesMoved or EntityRemoved, m.GetType().Name));
+        Assert.All(rest, m => Assert.True(m is ChunkLightChanged or EntitySpawned or EntitiesMoved or EntityRemoved, m.GetType().Name));
+        Assert.Contains(rest, m => m is ChunkLightChanged light && light.Position == _surface.Chunk);
     }
 
     // --- Клики по инвентарю ---

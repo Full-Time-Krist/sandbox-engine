@@ -55,6 +55,24 @@ public sealed class ChunkLight
         _uniform = packed;
     }
 
+    /// <summary>
+    /// Свет всех блоков из <paramref name="source"/> (длина — <see cref="ChunkMath.Volume"/>), например пришедший с сервера.
+    /// Одинаковый во всём чанке хранится одним значением, без массива.
+    /// </summary>
+    public void CopyFrom(ReadOnlySpan<byte> source)
+    {
+        if (source.Length != ChunkMath.Volume)
+            throw new ArgumentException($"Ожидалось {ChunkMath.Volume} значений, получено {source.Length}.", nameof(source));
+
+        if (source.IndexOfAnyExcept(source[0]) < 0)
+        {
+            Fill(source[0]);
+            return;
+        }
+        _values ??= new byte[ChunkMath.Volume];
+        source.CopyTo(_values);
+    }
+
     /// <summary>Копирует свет всех блоков в <paramref name="destination"/> (длина — <see cref="ChunkMath.Volume"/>).</summary>
     public void CopyTo(Span<byte> destination)
     {

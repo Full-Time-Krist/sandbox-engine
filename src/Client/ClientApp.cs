@@ -285,6 +285,10 @@ internal sealed class ClientApp(
                     _world.SetBlock(changed.Position, changed.Block);
                     break;
 
+                case ChunkLightChanged light:
+                    _world.SetLight(light.Position, light.Light.AsMemory());
+                    break;
+
                 case InventoryContents contents:
                     if (contents.Slots.Length != Inventory.SlotCount)
                         throw new InvalidDataException($"Инвентарь от сервера: {contents.Slots.Length} слотов вместо {Inventory.SlotCount}");

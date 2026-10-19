@@ -240,7 +240,7 @@ public class LightEngineTests
 
         // Чанк сверху ушёл — снова солнце по рельефу.
         chunks.Remove(above.Position);
-        engine.ChunkRemoved(above.Position);
+        engine.ChunkRemoved(above);
         Assert.Equal(15, engine.GetSky(new BlockPos(5, 0, 5)));
         AssertMatchesReference(chunks, OpenSky.Instance);
     }
@@ -342,10 +342,11 @@ public class LightEngineTests
             AssertMatchesReference(chunks, sky);
         }
 
-        foreach (var position in Region().OrderBy(_ => random.Next()).Take(4).ToList())
+        foreach (var position in Region().OrderBy(_ => random.Next()).Take(8).ToList())
         {
+            var removed = chunks.Get(position)!;
             chunks.Remove(position);
-            engine.ChunkRemoved(position);
+            engine.ChunkRemoved(removed);
             AssertMatchesReference(chunks, sky);
         }
     }
@@ -383,6 +384,62 @@ public class LightEngineTests
         Set(chunks, engine, new BlockPos(15, 15, 15), BlockId.Air);
         engine.TakeChanged(changed);
         Assert.Equal([new ChunkPos(0, 0, 0)], changed);
+    }
+
+    /// <summary>Уход пачкой, как при выгрузке на сервере: сначала из мира убираются все, потом движку сообщается о каждом.</summary>
+    [Theory]
+    [InlineData(11)]
+    [InlineData(12)]
+    [InlineData(13)]
+    [InlineData(14)]
+    [InlineData(15)]
+    [InlineData(16)]
+    public void BatchRemoval_MatchesFromScratch(int seed)
+    {
+        var random = new Random(seed);
+        var sky = new HeightSky((x, z) => x > 8 ? 50 : -100);
+        var source = new ChunkMap();
+        foreach (var position in Region())
+            source.Set(new Chunk(position));
+        BuildRandomWorld(source, random);
+        var chunks = new ChunkMap();
+        var engine = new LightEngine(_blocks, chunks, sky);
+        foreach (var chunk in source.All.OrderBy(_ => random.Next()).ToList())
+        {
+            chunks.Set(chunk);
+            engine.ChunkAdded(chunk);
+        }
+
+        var removed = Region().OrderBy(_ => random.Next()).Take(random.Next(2, 6)).Select(p => chunks.Get(p)!).ToList();
+        foreach (var chunk in removed)
+            chunks.Remove(chunk.Position);
+        foreach (var chunk in removed)
+            engine.ChunkRemoved(chunk);
+
+        AssertMatchesReference(chunks, sky);
+    }
+
+    [Fact]
+    public void ChunkRemoved_UnderOpenSky_TouchesNoNeighbor()
+    {
+        // Земля ниже y = −16, выше воздух под солнцем: свет соседей не зависит от ушедшего чанка — ни сбоку
+        // (у них свои столбы солнца), ни снизу (солнце над незагруженным то же). Их нельзя ни снимать, ни отмечать:
+        // в полёте так уходит сотня чанков в секунду.
+        var (chunks, engine) = Create(build: c => Fill(c, -32, -32, -32, 31, -17, 31, _stone));
+        var changed = new List<ChunkPos>();
+        engine.TakeChanged(changed);
+
+        foreach (var position in (ChunkPos[])[new(0, 0, 0), new(0, -1, 0)])
+        {
+            var removed = chunks.Get(position)!;
+            chunks.Remove(position);
+            engine.ChunkRemoved(removed);
+
+            changed.Clear();
+            engine.TakeChanged(changed);
+            Assert.Empty(changed);
+            AssertMatchesReference(chunks, OpenSky.Instance);
+        }
     }
 
     private static int Coordinate(Random random) => random.Next(2) == 0

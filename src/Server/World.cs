@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using Server.Storage;
 using Shared;
 using Shared.Blocks;
+using Shared.Lighting;
 using Shared.Voxels;
 
 namespace Server;
@@ -27,6 +29,7 @@ public sealed class World : IDisposable
     public const int MaxGenerating = 64;
 
     private readonly TerrainGenerator _terrain;
+    private readonly NaturalSky _sky;
     private readonly WorldSave? _save;
     private readonly ChunkGenerator _generator;
     private readonly HashSet<ChunkPos> _generating = [];
@@ -45,6 +48,12 @@ public sealed class World : IDisposable
 
     public ChunkMap Chunks { get; } = new();
 
+    /// <summary>
+    /// Свет загруженных чанков. Мир сам сообщает ему о каждом изменении (чанк пришёл, ушёл, блок сменился), поэтому
+    /// свет всегда соответствует блокам; чей свет изменился — <see cref="LightEngine.TakeChanged"/>.
+    /// </summary>
+    public LightEngine Light { get; }
+
     public int Seed { get; }
 
     /// <summary>Точка появления — ноги игрока на поверхности (по умолчанию над началом координат).</summary>
@@ -53,7 +62,14 @@ public sealed class World : IDisposable
     /// <summary>Режим нового игрока в этом мире.</summary>
     public GameMode DefaultMode { get; }
 
-    /// <summary>Сколько чанков сейчас генерируется.</summary>
+    /// <summary>
+    /// Сколько миллисекунд тика может уйти на приход чанков (<see cref="CollectGenerated"/>): свет считается здесь же,
+    /// около 0,5 мс на чанк у поверхности, а готовых за тик бывает до <see cref="MaxGenerating"/> — тик вырос бы до
+    /// 80 мс (замер шага 8.2). Что не уложилось, ждёт следующего тика; один чанк за тик приходит всегда.
+    /// </summary>
+    internal double CollectBudgetMs { get; init; } = 15;
+
+    /// <summary>Сколько чанков сейчас генерируется или ждёт прихода в мир (<see cref="CollectBudgetMs"/>).</summary>
     public int GeneratingCount => _generating.Count;
 
     /// <summary>Сколько изменённых чанков ждёт записи в сохранение.</summary>
@@ -69,7 +85,7 @@ public sealed class World : IDisposable
     /// <param name="spawnColumn">Столбец, над которым появляется игрок. Для проверок вдали от центра мира.</param>
     /// <param name="save">Сохранение; null — мир живёт только в памяти (тесты).</param>
     /// <param name="defaultMode">Режим нового игрока в новом мире; у мира из сохранения он свой.</param>
-    internal World(BaseBlocks blocks, int seed, int generatorThreads, (int X, int Z) spawnColumn = default, WorldSave? save = null,
+    internal World(BlockRegistry registry, BaseBlocks blocks, int seed, int generatorThreads, (int X, int Z) spawnColumn = default, WorldSave? save = null,
         GameMode defaultMode = GameMode.Survival)
     {
         _save = save;
@@ -92,6 +108,9 @@ public sealed class World : IDisposable
             save?.Initialize(new WorldInfo(Seed, SpawnPosition, DefaultMode));
         }
 
+        // Над незагруженными чанками солнце светит по естественному рельефу: построек там без чанка не видно.
+        _sky = new NaturalSky(_terrain);
+        Light = new LightEngine(registry, Chunks, _sky);
         _generator = new ChunkGenerator(Produce, generatorThreads);
     }
 
@@ -113,26 +132,31 @@ public sealed class World : IDisposable
         return true;
     }
 
-    /// <summary>Меняет блок и помечает чанк для сохранения. False — чанк не загружен.</summary>
+    /// <summary>Меняет блок, пересчитывает свет вокруг и помечает чанк для сохранения. False — чанк не загружен.</summary>
     internal bool TrySetBlock(BlockPos pos, BlockId block)
     {
         if (!Chunks.TrySetBlock(pos, block))
             return false;
 
+        Light.BlockChanged(pos);
         _dirty.Add(pos.Chunk);
         return true;
     }
 
-    /// <summary>Переносит готовые чанки в мир.</summary>
+    /// <summary>Переносит готовые чанки в мир и считает их свет (и что они меняют у соседей).</summary>
     internal void CollectGenerated()
     {
         // Запись идёт в своём потоке; если она сломалась, играть дальше значит терять изменения молча.
         _save?.ThrowIfFaulted();
 
+        var start = Stopwatch.GetTimestamp();
         while (_generator.TryTakeCompleted(out var chunk))
         {
             _generating.Remove(chunk.Position);
             Chunks.Set(chunk);
+            Light.ChunkAdded(chunk);
+            if (Stopwatch.GetElapsedTime(start).TotalMilliseconds >= CollectBudgetMs)
+                break;
         }
     }
 
@@ -168,6 +192,10 @@ public sealed class World : IDisposable
                 _save?.SaveChunk(chunk);
             Chunks.Remove(chunk.Position);
         }
+        // Свет, пришедший из чанков в соседей, уходит вместе с ними. Когда ушли уже все: стороны между уходящими
+        // пересчитывать незачем (в полёте чанки уходят полосой, и у каждого уходят 2–4 соседа).
+        foreach (var chunk in unneeded)
+            Light.ChunkRemoved(chunk);
         return [.. unneeded.Select(c => c.Position)];
     }
 
@@ -190,6 +218,9 @@ public sealed class World : IDisposable
     /// </summary>
     private Chunk Produce(ChunkPos position)
     {
+        // Естественная высота столбца для солнца над незагруженным — здесь, а не в тике сервера.
+        _sky.Prepare(position.X, position.Z);
+
         if (_save != null && _save.TryLoadEntities(position, out var entities))
             _loadedEntities.Enqueue((position, entities));
 
