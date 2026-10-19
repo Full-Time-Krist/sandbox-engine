@@ -25,7 +25,16 @@ public sealed class ExampleModTests : IDisposable
     {
         _server?.Dispose();
         foreach (var directory in _tempDirectories)
-            Directory.Delete(directory, recursive: true);
+        {
+            try
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Windows не даёт удалить загруженную сборку мода, а выгрузки модов нет: папка останется во временных.
+            }
+        }
     }
 
     /// <summary>Папка собранного мода: examples/ExampleMod/bin/&lt;конфигурация тестов&gt;/example_mod.</summary>
