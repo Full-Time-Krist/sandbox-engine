@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Numerics;
 using Api;
+using Server.Entities;
 using Server.Modding;
 using Server.Quests;
 using Server.Storage;
@@ -86,6 +87,8 @@ public sealed class GameServer : IDisposable
     /// в <see cref="Tick"/> по порядку, удалённые убираются в его конце.
     /// </summary>
     internal EntityWorld Entities { get; } = new();
+
+    private readonly EntitySync _entitySync = new();
 
     /// <summary>Сохранение мира или null, если мир только в памяти. Для тестов: дождаться записи на диск.</summary>
     internal WorldSave? Save => _save;
@@ -258,8 +261,9 @@ public sealed class GameServer : IDisposable
         }
         _events.Dispatch();
 
-        // Системы сущностей — здесь, после действий игроков и до рассылки чанков, в порядке вызова (с шага 7.2 —
-        // движение, потом подбор). Удалённые сущности убираются в конце тика (EntityWorld.FlushDestroyed).
+        // Системы сущностей — здесь, после действий игроков, по порядку: движение (с шага 7.3 — потом подбор).
+        // Рассылка сущностей — после рассылки чанков, удалённые убираются в конце тика (EntityWorld.FlushDestroyed).
+        MovementSystem.Run(Entities, World.Chunks, _registry);
 
         World.CollectGenerated();
         foreach (var session in _sessions)
@@ -267,6 +271,7 @@ public sealed class GameServer : IDisposable
             if (session.IsJoined)
                 StreamChunks(session);
         }
+        _entitySync.Run(Entities, _sessions);
 
         if (++_tick % UnloadIntervalTicks == 0)
             UnloadUnusedChunks();
@@ -446,11 +451,29 @@ public sealed class GameServer : IDisposable
                 session.Breaking = null;
                 break;
 
+            case DropItem drop when session.IsJoined:
+                HandleDrop(session, drop.WholeStack);
+                break;
+
             default:
                 // До JoinRequest принимается только он сам. Незнакомое сообщение — ошибка протокола, а не повод падать.
                 Console.WriteLine($"[Server] Сообщение {message.GetType().Name} отклонено (joined: {session.IsJoined})");
                 break;
         }
+    }
+
+    /// <summary>Q: одна штука из руки (или вся стопка) летит предметом вперёд по взгляду (<see cref="ItemEntities.Throw"/>). Пустая рука — ничего.</summary>
+    private void HandleDrop(ClientSession session, bool wholeStack)
+    {
+        var slot = session.Inventory.SelectedSlot;
+        var held = session.Inventory[slot];
+        if (held.IsEmpty)
+            return;
+
+        var count = wholeStack ? held.Count : 1;
+        session.Inventory.Remove(slot, count);
+        var (position, velocity) = ItemEntities.Throw(session.PlayerPosition, session.Look);
+        ItemEntities.Spawn(Entities, position, velocity, new ItemStack(held.Item, count));
     }
 
     /// <summary>

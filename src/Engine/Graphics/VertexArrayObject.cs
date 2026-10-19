@@ -41,6 +41,12 @@ public sealed unsafe class VertexArrayObject : IDisposable
         _gl.VertexArrayAttribBinding(Handle, location, binding);
     }
 
+    /// <summary>
+    /// Буфер точки привязки читается раз на <paramref name="divisor"/> экземпляров, а не на каждую вершину (instancing):
+    /// так один меш рисуется много раз за вызов, а данные каждой копии (положение, текстура) берутся из второго буфера.
+    /// </summary>
+    public void SetBindingDivisor(uint binding, uint divisor) => _gl.VertexArrayBindingDivisor(Handle, binding, divisor);
+
     public void SetIndexBuffer(GpuBuffer<uint> buffer)
     {
         _gl.VertexArrayElementBuffer(Handle, buffer.Handle);
@@ -70,6 +76,13 @@ public sealed unsafe class VertexArrayObject : IDisposable
     {
         _gl.BindVertexArray(Handle);
         _gl.DrawArrays(primitive, first, (uint)vertexCount);
+    }
+
+    /// <summary>Рисует <paramref name="instanceCount"/> копий вершин подряд одним вызовом (см. <see cref="SetBindingDivisor"/>).</summary>
+    public void DrawArraysInstanced(PrimitiveType primitive, int vertexCount, int instanceCount)
+    {
+        _gl.BindVertexArray(Handle);
+        _gl.DrawArraysInstanced(primitive, 0, (uint)vertexCount, (uint)instanceCount);
     }
 
     public void Dispose() => _gl.DeleteVertexArray(Handle);

@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Shared.Blocks;
+using Shared.Entities;
 using Shared.Items;
 using Shared.Voxels;
 
@@ -82,3 +83,26 @@ public sealed record QuestChanged(string Quest, int Progress, bool Completed) : 
 
 /// <summary>Набранное у задания: для <see cref="QuestBookContents"/>.</summary>
 public readonly record struct QuestCount(string Quest, int Count);
+
+/// <summary>Вид сущности: что клиент рисует. Пока только предметы на земле.</summary>
+public enum EntityKind : byte
+{
+    Item = 1,
+}
+
+/// <summary>
+/// Сущность появилась у клиента: её создали в отправленном ему чанке, или клиент получил чанк, где она уже была,
+/// или она пришла в такой чанк. Номер — тот же, что на сервере: по нему придут перемещения и удаление.
+/// </summary>
+/// <param name="Position">Точка тела: центр нижней грани короба.</param>
+/// <param name="Item">Стопка у предмета на земле (<see cref="EntityKind.Item"/>).</param>
+public sealed record EntitySpawned(EntityId Entity, EntityKind Kind, Vector3d Position, ItemStack Item) : ServerMessage;
+
+/// <summary>Сущности, сдвинувшиеся за тик, — одним сообщением в конце тика; неподвижные не шлются.</summary>
+public sealed record EntitiesMoved(ImmutableArray<EntityPosition> Entities) : ServerMessage;
+
+/// <summary>Новое положение сущности для <see cref="EntitiesMoved"/>.</summary>
+public readonly record struct EntityPosition(EntityId Entity, Vector3d Position);
+
+/// <summary>Сущность больше не видна клиенту: удалена на сервере или ушла (вместе с чанком) за пределы отправленного.</summary>
+public sealed record EntityRemoved(EntityId Entity) : ServerMessage;

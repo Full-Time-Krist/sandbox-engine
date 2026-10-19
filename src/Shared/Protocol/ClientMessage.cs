@@ -68,3 +68,6 @@ public sealed record UseItem(ItemAction Action, Vector3d EyePosition, Vector3 Lo
 /// с основным действием (предмет в руке на сервере решает, ломать ли).
 /// </summary>
 public sealed record StopBreaking : ClientMessage;
+
+/// <summary>Выбросить предмет из руки (Q — одну штуку, Ctrl+Q — всю стопку). Сервер создаёт предмет на земле перед игроком.</summary>
+public sealed record DropItem(bool WholeStack) : ClientMessage;

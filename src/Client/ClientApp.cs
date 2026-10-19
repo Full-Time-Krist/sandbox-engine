@@ -60,6 +60,11 @@ internal sealed class ClientApp(
     private ColorMesh _selectionBox = null!;
     private ShaderProgram _crackShader = null!;
     private CrackRenderer _cracks = null!;
+    private ShaderProgram _itemShader = null!;
+    private ItemEntityRenderer _itemRenderer = null!;
+
+    /// <summary>Сущности, которые показал сервер (предметы на земле).</summary>
+    private readonly ClientEntities _entities = new();
 
     /// <summary>
     /// Блок, который игрок ломает удержанием ЛКМ (в выживании): что, каким предметом и с какого момента. Время ломания
@@ -140,6 +145,9 @@ internal sealed class ClientApp(
         _crackShader = ShaderProgram.FromFiles(Gl, Path.Combine(shaders, "crack"));
         _crackShader.SetUniform("u_Textures", 0);
         _cracks = new CrackRenderer(Gl, _crackShader, crackLayer);
+        _itemShader = ShaderProgram.FromFiles(Gl, Path.Combine(shaders, "item"));
+        _itemShader.SetUniform("u_Textures", 0);
+        _itemRenderer = new ItemEntityRenderer(Gl, _itemShader, itemVisuals, _items);
         _hud = new Hud(Gl, Path.Combine(AppContext.BaseDirectory, "Assets", "Fonts", "ui.ttf"), Window.FramebufferSize,
             _blockTextures, itemVisuals, _items, names, content.Quests);
         _journal = new JournalScreen(Gl, Path.Combine(AppContext.BaseDirectory, "Assets", "Fonts", "ui.ttf"), Window.FramebufferSize,
@@ -197,6 +205,8 @@ internal sealed class ClientApp(
         if (integratedServer?.Fault is { } fault)
             throw new InvalidOperationException("Встроенный сервер упал", fault);
 
+        // Положения сущностей до сообщений этого тика становятся «прошлыми»: между ними и новыми идёт интерполяция.
+        _entities.BeginTick();
         ProcessServerMessages();
 
         _controller.Tick(Input, controlsEnabled: Input.IsCursorCaptured);
@@ -206,7 +216,7 @@ internal sealed class ClientApp(
         if (_tick % (GameTime.TicksPerSecond * 10) == 0)
         {
             // Память — чтобы при долгом полёте было видно, что она не растёт без предела.
-            Console.WriteLine($"[Client] Чанков {_world.Chunks.Count}, мешей {_chunkRenderer.MeshCount} (в очереди {_chunkRenderer.Pending}), " +
+            Console.WriteLine($"[Client] Чанков {_world.Chunks.Count}, мешей {_chunkRenderer.MeshCount} (в очереди {_chunkRenderer.Pending}), сущностей {_entities.Count}, " +
                               $"память {GC.GetTotalMemory(false) / 1024 / 1024} МБ, позиция {_controller.Position:F0}; {_meshStats}; " +
                               $"самый долгий кадр {_frameTimes.MaxMs:F1} мс, кадров дольше 20 мс: {_frameTimes.Slow}");
             _meshStats = default;
@@ -301,7 +311,8 @@ internal sealed class ClientApp(
                     break;
 
                 default:
-                    Console.WriteLine($"[Client] Неизвестное сообщение {message.GetType().Name}");
+                    if (!_entities.Apply(message))
+                        Console.WriteLine($"[Client] Неизвестное сообщение {message.GetType().Name}");
                     break;
             }
         }
@@ -357,6 +368,7 @@ internal sealed class ClientApp(
         _chunkShader.SetUniform("u_ViewProjection", viewProjection);
         _blockTextures.Bind(0);
         _drawnChunks = _chunkRenderer.Draw(_chunkShader, eye, Frustum.FromMatrix(viewProjection));
+        _itemRenderer.Draw(viewProjection, eye, _entities, alpha, _clock.Elapsed.TotalSeconds);
 
         DrawSelection(eye);
         DrawCracks(eye, viewProjection);
@@ -492,7 +504,12 @@ internal sealed class ClientApp(
             connection.Send(new SetGameMode(_mode == GameMode.Creative ? GameMode.Survival : GameMode.Creative));
 
         if (_inventoryReceived)
+        {
             HandleSlotSelection();
+            // Q — выбросить штуку из руки, Ctrl+Q — всю стопку. Что выбросить, решает сервер по своему инвентарю.
+            if (Input.WasKeyPressed(Key.Q) && !_inventory.Selected.IsEmpty)
+                connection.Send(new DropItem(WholeStack: Input.IsKeyDown(Key.ControlLeft) || Input.IsKeyDown(Key.ControlRight)));
+        }
 
         return true;
     }
@@ -615,6 +632,8 @@ internal sealed class ClientApp(
         _inventoryScreen.Dispose();
         _cracks.Dispose();
         _crackShader.Dispose();
+        _itemRenderer.Dispose();
+        _itemShader.Dispose();
         _hud.Dispose();
         _journal.Dispose();
         _selectionBox.Dispose();
