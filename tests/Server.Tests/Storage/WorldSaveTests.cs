@@ -169,6 +169,7 @@ public sealed class WorldSaveTests : IDisposable
         Assert.Equal(expected.Mode, actual.Mode);
         Assert.Equal(expected.SelectedSlot, actual.SelectedSlot);
         Assert.Equal(expected.Slots.ToArray(), actual.Slots.ToArray());
+        Assert.Equal(expected.Health, actual.Health);
     }
 
     private ItemStack Stack(string name, int count, ItemRegistry? items = null) =>
@@ -307,7 +308,7 @@ public sealed class WorldSaveTests : IDisposable
             save.SavePlayer("Player", new SavedPlayer(position, new LookAngles(1, 0.5f), GameMode.Creative, 2,
                 Slots((4, Stack("base:sand", 9))), Quests()));
         }
-        Assert.Equal(4L, Execute("SELECT value FROM meta WHERE key = 'format_version'"));
+        Assert.Equal(5L, Execute("SELECT value FROM meta WHERE key = 'format_version'"));
 
         using var reopened = Open();
         Assert.Null(reopened.UpgradedFrom);
@@ -345,7 +346,7 @@ public sealed class WorldSaveTests : IDisposable
             AssertPlayer(expected, save.LoadPlayer("Player"));
             save.SavePlayer("Player", expected with { Quests = Quests(["base:get_wood"]) });
         }
-        Assert.Equal(4L, Execute("SELECT value FROM meta WHERE key = 'format_version'"));
+        Assert.Equal(5L, Execute("SELECT value FROM meta WHERE key = 'format_version'"));
 
         using var reopened = Open();
         Assert.Null(reopened.UpgradedFrom);
@@ -418,11 +419,52 @@ public sealed class WorldSaveTests : IDisposable
             Assert.False(save.TryLoadEntities(position, out _));
             save.SaveEntities(position, [1, 0]);
         }
-        Assert.Equal(4L, Execute("SELECT value FROM meta WHERE key = 'format_version'"));
+        Assert.Equal(5L, Execute("SELECT value FROM meta WHERE key = 'format_version'"));
 
         using var reopened = Open();
         Assert.Null(reopened.UpgradedFrom);
         Assert.True(reopened.TryLoadEntities(position, out _));
+    }
+
+    [Fact]
+    public void Version4Save_IsUpgraded_PlayerHealthFull_ThenSaved()
+    {
+        // Схема версии 4 (шаг 7.4): у игрока нет столбца здоровья.
+        Execute("""
+            PRAGMA journal_mode = WAL;
+            CREATE TABLE meta (key TEXT PRIMARY KEY, value);
+            CREATE TABLE block_names (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE);
+            CREATE TABLE item_names (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE);
+            CREATE TABLE chunks (
+                x INTEGER NOT NULL, y INTEGER NOT NULL, z INTEGER NOT NULL, data BLOB NOT NULL,
+                PRIMARY KEY (x, y, z)) WITHOUT ROWID;
+            CREATE TABLE entities (
+                x INTEGER NOT NULL, y INTEGER NOT NULL, z INTEGER NOT NULL, data BLOB NOT NULL,
+                PRIMARY KEY (x, y, z)) WITHOUT ROWID;
+            CREATE TABLE players (name TEXT PRIMARY KEY, x REAL NOT NULL, y REAL NOT NULL, z REAL NOT NULL,
+                yaw REAL NOT NULL DEFAULT 0, pitch REAL NOT NULL DEFAULT 0, mode TEXT, selected_slot INTEGER NOT NULL DEFAULT 0,
+                inventory BLOB, quests TEXT);
+            INSERT INTO meta VALUES ('format_version', 4), ('seed', 42), ('spawn_x', 0.5), ('spawn_y', 80.0), ('spawn_z', -3.5);
+            INSERT INTO block_names VALUES (0, 'base:air'), (1, 'base:stone');
+            INSERT INTO item_names VALUES (0, 'base:air'), (1, 'base:stone');
+            INSERT INTO players VALUES ('Player', 1.5, 64.0, 2.5, 0.5, 0.25, 'survival', 4, x'0101040107', NULL);
+            """);
+
+        var expected = new SavedPlayer(new Vector3d(1.5, 64, 2.5), new LookAngles(0.5f, 0.25f), GameMode.Survival, 4,
+            Slots((4, Stack("base:stone", 7))), Quests());
+        using (var save = Open())
+        {
+            Assert.Equal(4, save.UpgradedFrom);
+            var loaded = save.LoadPlayer("Player")!;
+            Assert.Null(loaded.Health); // не записано — значит полное
+            AssertPlayer(expected, loaded);
+            save.SavePlayer("Player", expected with { Health = 7 });
+        }
+        Assert.Equal(5L, Execute("SELECT value FROM meta WHERE key = 'format_version'"));
+
+        using var reopened = Open();
+        Assert.Null(reopened.UpgradedFrom);
+        Assert.Equal(7, reopened.LoadPlayer("Player")!.Health);
     }
 
     [Theory]

@@ -271,6 +271,13 @@ public sealed class GameServer : IDisposable
         // Системы сущностей — здесь, после действий игроков, по порядку. Притяжение задаёт скорость до движения,
         // подбор и слияние смотрят на положения после него. Рассылка сущностей — после рассылки чанков,
         // удалённые убираются в конце тика (EntityWorld.FlushDestroyed).
+        // Сущность игрока стоит там же, где его принятая позиция; здоровье восстанавливается.
+        foreach (var session in _sessions)
+        {
+            if (session.IsJoined)
+                Entities.Get<Position>(session.Entity).Value = session.PlayerPosition;
+        }
+        Regenerate();
         _itemSystem.Age(Entities);
         _itemSystem.Attract(Entities, _sessions);
         MovementSystem.Run(Entities, World.Chunks, _registry);
@@ -323,7 +330,7 @@ public sealed class GameServer : IDisposable
             if (session.IsJoined)
             {
                 _save.SavePlayer(session.PlayerName, new SavedPlayer(session.PlayerPosition, session.Look, session.Mode,
-                    session.Inventory.SelectedSlot, session.Inventory.CopySlots(), session.Quests));
+                    session.Inventory.SelectedSlot, session.Inventory.CopySlots(), session.Quests, HealthOf(session).Current));
             }
         }
         _entityPersistence.SaveAll();
@@ -413,6 +420,10 @@ public sealed class GameServer : IDisposable
 
     private void Handle(ClientSession session, ClientMessage message)
     {
+        // Погибший до возрождения ничего не делает: сообщения, отправленные до смерти или с экрана смерти, молча пропускаются.
+        if (session.IsDead && message is not Respawn)
+            return;
+
         switch (message)
         {
             case JoinRequest join when !session.IsJoined:
@@ -474,6 +485,10 @@ public sealed class GameServer : IDisposable
                 HandleDrop(session, drop.WholeStack);
                 break;
 
+            case Respawn when session.IsJoined:
+                HandleRespawn(session);
+                break;
+
             default:
                 // До JoinRequest принимается только он сам. Незнакомое сообщение — ошибка протокола, а не повод падать.
                 Console.WriteLine($"[Server] Сообщение {message.GetType().Name} отклонено (joined: {session.IsJoined})");
@@ -522,6 +537,10 @@ public sealed class GameServer : IDisposable
     {
         var saved = _save?.LoadPlayer(join.PlayerName);
         var start = saved != null && IsValidPosition(saved.Position) ? saved.Position : World.SpawnPosition;
+        // Погиб и вышел, не возродившись: вещи уже выпали, при входе — возрождение в точке появления.
+        var health = saved?.Health is { } savedHealth ? Math.Min(savedHealth, PlayerHealth.Max) : PlayerHealth.Max;
+        if (health <= 0)
+            (start, health) = (World.SpawnPosition, PlayerHealth.Max);
         var mode = saved?.Mode ?? World.DefaultMode;
         var inventory = new Inventory(_items);
         if (saved != null)
@@ -531,6 +550,10 @@ public sealed class GameServer : IDisposable
             new PlayerChunkView(_viewDistance, _verticalDistance, BlockPos.Containing(start).Chunk));
         // До первого PlayerMove игрок стоит в начальной точке, иначе его действия сочлись бы «издалека».
         session.PlayerPosition = start;
+        session.Entity = Entities.Create();
+        Entities.Set(session.Entity, new Position { Value = start });
+        Entities.Set(session.Entity, new Health { Current = health, Max = PlayerHealth.Max });
+        Entities.Set(session.Entity, new Fall { HighestY = start.Y });
         session.Look = saved?.Look ?? default;
         // Чанки придут в следующих тиках (StreamChunks), начиная с ближайших.
         session.Connection.Send(new JoinAccepted(session.PlayerId, start, session.Look, mode, _blockNames, _itemNames));
@@ -539,6 +562,7 @@ public sealed class GameServer : IDisposable
         inventory.TakeChanges();
         session.Connection.Send(new QuestBookContents([.. session.Quests.Completed],
             [.. session.Quests.Progress.Select(entry => new QuestCount(entry.Key, entry.Value))]));
+        SendHealth(session);
         Console.WriteLine($"[Server] {session.PlayerName} подключился (id {session.PlayerId}, режим {mode.ToName()})");
         _events.Raise(new PlayerJoined(_editor, session));
     }
@@ -560,7 +584,7 @@ public sealed class GameServer : IDisposable
     /// а клиент ещё тик-другой летит по-творчески: его уже отправленные перемещения сервер отклонил бы.
     /// Телепорт на месте делает их устаревшими (старый номер) и гасит скорость у клиента.
     /// </summary>
-    private static void ChangeMode(ClientSession session, GameMode mode)
+    private void ChangeMode(ClientSession session, GameMode mode)
     {
         if (session.Mode == mode)
             return;
@@ -592,6 +616,7 @@ public sealed class GameServer : IDisposable
         if (problem == null)
         {
             session.PlayerPosition = move.Position;
+            TrackFall(session);
             return;
         }
 
@@ -622,8 +647,120 @@ public sealed class GameServer : IDisposable
     /// <summary>Задания игрока на сервере. Для тестов: менять можно только между тиками, из потока теста.</summary>
     internal QuestBook PlayerQuests(int playerId) => _sessions.Single(s => s.IsJoined && s.PlayerId == playerId).Quests;
 
-    private static void SendTeleport(ClientSession session) =>
+    /// <summary>Переносит клиента в <see cref="ClientSession.PlayerPosition"/>; перенос — не падение, высота считается заново.</summary>
+    private void SendTeleport(ClientSession session)
+    {
+        Entities.Get<Fall>(session.Entity).HighestY = session.PlayerPosition.Y;
         session.Connection.Send(new PlayerTeleport(session.PlayerPosition, session.Movement.NextTeleport()));
+    }
+
+    private ref Health HealthOf(ClientSession session) => ref Entities.Get<Health>(session.Entity);
+
+    private void SendHealth(ClientSession session)
+    {
+        var health = HealthOf(session);
+        session.Connection.Send(new HealthChanged(health.Current, health.Max));
+    }
+
+    /// <summary>
+    /// Падение по принятым позициям: запоминается самая высокая точка ног, а при касании земли урон — по высоте падения
+    /// (<see cref="PlayerHealth.FallDamage"/>). В творческом урона нет — это решает <see cref="Damage(ClientSession, int, string)"/>.
+    /// </summary>
+    private void TrackFall(ClientSession session)
+    {
+        ref var fall = ref Entities.Get<Fall>(session.Entity);
+        var y = session.PlayerPosition.Y;
+        fall.HighestY = Math.Max(fall.HighestY, y);
+        // На земле — если чуть ниже ног твёрдый блок.
+        if (!PlayerPhysics.Collides(session.PlayerPosition - new Vector3d(0, 0.01, 0), World.Chunks, _registry))
+            return;
+
+        var damage = PlayerHealth.FallDamage(fall.HighestY - y);
+        fall.HighestY = y;
+        if (damage > 0)
+            Damage(session, damage, PlayerHealth.FallCause);
+    }
+
+    /// <summary>Урон игроку в выживании: здоровье, сообщение клиенту, событие модов; до нуля — смерть.</summary>
+    internal void Damage(ClientSession session, int amount, string cause)
+    {
+        if (amount <= 0 || session.IsDead || session.Mode != GameMode.Survival)
+            return;
+
+        ref var health = ref HealthOf(session);
+        health.Current = Math.Max(0, health.Current - amount);
+        health.RegenTicks = 0;
+        SendHealth(session);
+        _events.Raise(new PlayerDamaged(_editor, session, amount, cause));
+        if (health.Current == 0)
+            Die(session, cause);
+    }
+
+    /// <summary>
+    /// Смерть: весь инвентарь и курсор выпадают предметами на месте (их можно подобрать, вернувшись), клиент получает
+    /// экран смерти, действия игрока до возрождения не принимаются.
+    /// </summary>
+    private void Die(ClientSession session, string cause)
+    {
+        session.IsDead = true;
+        session.Breaking = null;
+        var center = session.PlayerPosition + new Vector3d(0, 1, 0);
+        for (var slot = 0; slot < Inventory.SlotCount; slot++)
+        {
+            var stack = session.Inventory[slot];
+            if (stack.IsEmpty)
+                continue;
+            session.Inventory.Set(slot, ItemStack.Empty);
+            var velocity = new Vector3((_random.NextSingle() * 2 - 1) * 2, 3, (_random.NextSingle() * 2 - 1) * 2);
+            ItemEntities.Spawn(Entities, center, velocity, stack, ItemEntities.ThrowPickupDelay);
+        }
+
+        session.Connection.Send(new DeathNotice(cause));
+        Console.WriteLine($"[Server] {session.PlayerName} погиб ({cause})");
+        _events.Raise(new PlayerDied(_editor, session, cause));
+    }
+
+    /// <summary>«Возродиться»: в точку появления мира с полным здоровьем.</summary>
+    private void HandleRespawn(ClientSession session)
+    {
+        if (!session.IsDead)
+            return;
+
+        session.IsDead = false;
+        ref var health = ref HealthOf(session);
+        (health.Current, health.RegenTicks) = (health.Max, 0);
+        session.PlayerPosition = World.SpawnPosition;
+        SendTeleport(session);
+        SendHealth(session);
+    }
+
+    /// <summary>Восстановление здоровья: единица за <see cref="PlayerHealth.RegenIntervalTicks"/> у живых игроков.</summary>
+    private void Regenerate()
+    {
+        foreach (var session in _sessions)
+        {
+            if (!session.IsJoined || session.IsDead)
+                continue;
+            ref var health = ref HealthOf(session);
+            if (health.Current >= health.Max)
+            {
+                health.RegenTicks = 0;
+                continue;
+            }
+            if (++health.RegenTicks < PlayerHealth.RegenIntervalTicks)
+                continue;
+            health.RegenTicks = 0;
+            health.Current++;
+            SendHealth(session);
+        }
+    }
+
+    /// <summary>Здоровье игрока. Для тестов.</summary>
+    internal int PlayerHealthOf(int playerId) => HealthOf(_sessions.Single(s => s.IsJoined && s.PlayerId == playerId)).Current;
+
+    /// <summary>Урон игроку по номеру. Для тестов (позже — для API модов).</summary>
+    internal void Damage(int playerId, int amount, string cause) =>
+        Damage(_sessions.Single(s => s.IsJoined && s.PlayerId == playerId), amount, cause);
 
     private void HandleUseItem(ClientSession session, UseItem use)
     {

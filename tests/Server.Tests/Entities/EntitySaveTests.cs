@@ -86,7 +86,7 @@ public sealed class EntitySaveTests : IDisposable
 
         Teleport(server, client, Far + new Vector3d(0, 100, 0));
         TickUntil(server, () => !server.Entities.IsAlive(item), "предмет уйдёт вместе с чанком");
-        Assert.Equal(0, server.Entities.Count);
+        Assert.Empty(Items(server)); // в памяти — только сущность самого игрока
         Assert.True(server.Save!.TryLoadEntities(chunk, out _));
 
         Teleport(server, client, home);

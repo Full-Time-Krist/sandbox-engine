@@ -71,3 +71,6 @@ public sealed record StopBreaking : ClientMessage;
 
 /// <summary>Выбросить предмет из руки (Q — одну штуку, Ctrl+Q — всю стопку). Сервер создаёт предмет на земле перед игроком.</summary>
 public sealed record DropItem(bool WholeStack) : ClientMessage;
+
+/// <summary>Погибший игрок нажал «Возродиться»: сервер переносит его в точку появления с полным здоровьем.</summary>
+public sealed record Respawn : ClientMessage;

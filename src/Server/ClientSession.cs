@@ -60,6 +60,15 @@ internal sealed class ClientSession(IConnection<ServerMessage, ClientMessage> co
     /// <summary>Блок, который игрок сейчас ломает удержанием ЛКМ, или null (<see cref="GameServer"/> ведёт и завершает).</summary>
     public BlockBreaking? Breaking { get; set; }
 
+    /// <summary>
+    /// Сущность игрока в мире сущностей (позиция, здоровье, падение — <see cref="Entities.PlayerHealth"/>). Появляется при
+    /// подключении. Позиция сущности повторяет <see cref="PlayerPosition"/> каждый тик.
+    /// </summary>
+    public EntityId Entity { get; set; }
+
+    /// <summary>Игрок погиб и ещё не возродился: его действия не принимаются, пока клиент не пришлёт <see cref="Respawn"/>.</summary>
+    public bool IsDead { get; set; }
+
     public void SetMode(GameMode mode)
     {
         Mode = mode;

@@ -84,6 +84,13 @@ public sealed record QuestChanged(string Quest, int Progress, bool Completed) : 
 /// <summary>Набранное у задания: для <see cref="QuestBookContents"/>.</summary>
 public readonly record struct QuestCount(string Quest, int Count);
 
+/// <summary>Здоровье игрока: приходит при входе и при каждом изменении (урон, восстановление, возрождение).</summary>
+public sealed record HealthChanged(int Health, int MaxHealth) : ServerMessage;
+
+/// <summary>Игрок погиб: клиент показывает экран смерти, пока игрок не нажмёт «Возродиться» (<see cref="Respawn"/>).</summary>
+/// <param name="Cause">Причина — имя вида <c>base:fall</c>; текст для игрока подбирает клиент.</param>
+public sealed record DeathNotice(string Cause) : ServerMessage;
+
 /// <summary>Вид сущности: что клиент рисует. Пока только предметы на земле.</summary>
 public enum EntityKind : byte
 {

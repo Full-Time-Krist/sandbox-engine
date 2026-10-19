@@ -63,6 +63,12 @@ internal sealed class ClientApp(
     private ShaderProgram _itemShader = null!;
     private ItemEntityRenderer _itemRenderer = null!;
 
+    /// <summary>Здоровье от сервера (<see cref="HealthChanged"/>); null — ещё не пришло.</summary>
+    private (int Current, int Max)? _health;
+
+    /// <summary>Причина смерти, пока открыт экран смерти; null — игрок жив.</summary>
+    private string? _deathCause;
+
     /// <summary>Сущности, которые показал сервер (предметы на земле).</summary>
     private readonly ClientEntities _entities = new();
 
@@ -295,6 +301,21 @@ internal sealed class ClientApp(
                     UpdateStatusText();
                     break;
 
+                case HealthChanged health:
+                    _health = (health.Health, health.MaxHealth);
+                    UpdateStatusText();
+                    break;
+
+                case DeathNotice death:
+                    // Вещи уже выпали на сервере (и с курсора тоже): экраны закрываются без возврата курсора.
+                    _deathCause = death.Cause;
+                    _inventoryOpen = false;
+                    _inventoryScreen.Close();
+                    _journalOpen = false;
+                    Input.ReleaseCursor();
+                    Console.WriteLine($"[Client] Игрок погиб: {death.Cause}");
+                    break;
+
                 case QuestBookContents book:
                     _quests = new QuestBook();
                     foreach (var name in book.Completed)
@@ -373,13 +394,17 @@ internal sealed class ClientApp(
         DrawSelection(eye);
         DrawCracks(eye, viewProjection);
         // Задания идут только в выживании: в творческом подсказывать их незачем.
-        _hud.Draw(_framebufferSize, _inventory, deltaTime, _inventoryOpen || _journalOpen, _mode == GameMode.Survival ? _quests : null);
+        // На экране смерти обычный интерфейс (перекрестие, хотбар, задания) не нужен.
+        _hud.Draw(_framebufferSize, _inventory, deltaTime, _inventoryOpen || _journalOpen || _deathCause != null, _mode == GameMode.Survival ? _quests : null,
+            _mode == GameMode.Survival ? _health : null);
         if (_inventoryOpen)
             _inventoryScreen.Draw(_framebufferSize, _inventory, _mode == GameMode.Creative, MouseFramebufferPosition,
                 station => Crafting.IsStationNear(_world.Chunks, eye, station));
         if (_journalOpen)
             _journal.Draw(_framebufferSize, _quests, _inventory, _mode == GameMode.Survival);
         _hud.DrawToasts(_framebufferSize, deltaTime);
+        if (_deathCause != null)
+            _hud.DrawDeath(_framebufferSize, DeathCauses.Text(_deathCause), MouseFramebufferPosition);
     }
 
     private void DrawSelection(Vector3d eye)
@@ -427,6 +452,19 @@ internal sealed class ClientApp(
     /// <summary>Захват курсора, взгляд мышью и выбор слота. Возвращает, можно ли в этом кадре применять предмет.</summary>
     private bool HandleFrameInput()
     {
+        if (_deathCause != null)
+        {
+            // Экран смерти: кнопка «Возродиться» (или Enter). Возродит сервер — он пришлёт телепорт и здоровье.
+            var button = HudLayout.RespawnButton(_framebufferSize.X, _framebufferSize.Y, Engine.Ui.UiScale.For(_framebufferSize.X, _framebufferSize.Y));
+            if ((Input.WasMousePressed(MouseButton.Left) && button.Contains(MouseFramebufferPosition)) || Input.WasKeyPressed(Key.Enter))
+            {
+                _deathCause = null;
+                connection.Send(new Respawn());
+                Input.CaptureCursor();
+            }
+            return false;
+        }
+
         if (_inventoryOpen)
         {
             if (Input.WasKeyPressed(Key.Escape) || Input.WasKeyPressed(Key.E))
@@ -621,7 +659,8 @@ internal sealed class ClientApp(
         // Позиция ног, полёт и режим — для проверок скриптом: по заголовку видно, стоит игрок, падает или упёрся.
         var player = _controller is null ? "" : $"{_controller.Position}{(_controller.IsFlying ? " полёт" : "")} | ";
         var mode = _mode == GameMode.Creative ? "творческий" : "выживание";
-        StatusText = $"{player}{mode} | слот {_inventory.SelectedSlot + 1}: {item} | " +
+        var health = _health is { } h ? $" | здоровье {h.Current}/{h.Max}" : "";
+        StatusText = $"{player}{mode}{health} | слот {_inventory.SelectedSlot + 1}: {item} | " +
                      $"чанков {_world.Chunks.Count}, мешей {_chunkRenderer?.MeshCount ?? 0}, нарисовано {_drawnChunks}";
     }
 

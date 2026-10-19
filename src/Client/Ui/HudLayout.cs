@@ -47,6 +47,32 @@ internal static class HudLayout
         return new PixelRect(screenWidth - width - margin, margin, width, ToastHeight * scale);
     }
 
+    /// <summary>Полоса здоровья: по 4 пикселя на единицу (20 единиц — 80), рамка в пиксель, высота 7.</summary>
+    public const int HealthUnit = 4;
+    public const int HealthBarHeight = 7;
+
+    /// <summary>Зазор между полосой здоровья и хотбаром.</summary>
+    public const int HealthBarGap = 2;
+
+    /// <summary>Над хотбаром, от его левого края (как сердца в Minecraft): справа остаётся место под будущие полосы.</summary>
+    public static PixelRect HealthBar(PixelRect hotbar, int maxHealth, int scale) =>
+        new(hotbar.X, hotbar.Y - (HealthBarHeight + HealthBarGap) * scale, (maxHealth * HealthUnit + 2) * scale, HealthBarHeight * scale);
+
+    /// <summary>Заполненная часть полосы: целое число пикселей интерфейса на единицу — край заливки всегда чёткий.</summary>
+    public static PixelRect HealthFill(PixelRect bar, int health, int scale) =>
+        new(bar.X + scale, bar.Y + scale, Math.Max(0, health) * HealthUnit * scale, bar.Height - 2 * scale);
+
+    /// <summary>Над чем стоит название предмета в руке: над полосой здоровья (она может быть, а может и не быть).</summary>
+    public static int HeldNameBottom(PixelRect hotbar, int scale) => hotbar.Y - (HealthBarHeight + HealthBarGap + 3) * scale;
+
+    /// <summary>Кнопка «Возродиться» на экране смерти: по центру, чуть ниже середины, 120 × 20.</summary>
+    public static PixelRect RespawnButton(int screenWidth, int screenHeight, int scale)
+    {
+        var width = 120 * scale;
+        var height = 20 * scale;
+        return new PixelRect((screenWidth - width) / 2, screenHeight / 2 + 10 * scale, width, height);
+    }
+
     /// <summary>Хотбар по центру внизу экрана.</summary>
     public static PixelRect Hotbar(int screenWidth, int screenHeight, int scale)
     {

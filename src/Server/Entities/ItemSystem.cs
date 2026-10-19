@@ -160,7 +160,7 @@ internal sealed class ItemSystem(ItemRegistry items)
     }
 
     private static bool CanPickUp(ClientSession session, ItemStack stack) =>
-        session.IsJoined && session.Mode == GameMode.Survival && session.Inventory.CanAdd(new ItemStack(stack.Item, 1));
+        session.IsJoined && !session.IsDead && session.Mode == GameMode.Survival && session.Inventory.CanAdd(new ItemStack(stack.Item, 1));
 
     private static Aabb Reach(ClientSession session)
     {

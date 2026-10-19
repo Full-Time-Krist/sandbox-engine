@@ -261,6 +261,8 @@ context.Events.OnPlayerJoined(e => …);  // e.World, e.Player
 context.Events.OnItemCrafted(e => …);   // e.World, e.Player, e.Recipe, e.Times (Shift+клик — несколько раз за действие)
 context.Events.OnQuestCompleted(e => …); // e.World, e.Player, e.Quest — например, выдать награду в e.Player.Inventory
 context.Events.OnItemPickedUp(e => …);   // e.World, e.Player, e.Stack — сколько подобрано с земли этим касанием
+context.Events.OnPlayerDamaged(e => …);  // e.World, e.Player, e.Amount, e.Cause ("base:fall" — падение)
+context.Events.OnPlayerDied(e => …);     // e.World, e.Player, e.Cause — вещи погибшего уже выпали на месте
 ```
 
 - События сообщают об уже случившемся; отменить их нельзя.

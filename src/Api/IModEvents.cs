@@ -32,6 +32,12 @@ public interface IModEvents
 
     /// <summary>Игрок подобрал предмет с земли: подобранное уже в инвентаре (остаток, если не влез, лежит дальше).</summary>
     void OnItemPickedUp(Action<ItemPickedUp> handler);
+
+    /// <summary>Игрок получил урон (только в выживании): здоровье уже уменьшено, клиенту ушло новое.</summary>
+    void OnPlayerDamaged(Action<PlayerDamaged> handler);
+
+    /// <summary>Игрок погиб: его вещи уже выпали на месте смерти, клиенту ушёл экран смерти.</summary>
+    void OnPlayerDied(Action<PlayerDied> handler);
 }
 
 /// <param name="Block">Блок, который был на месте до ломания.</param>
@@ -52,3 +58,10 @@ public readonly record struct QuestCompleted(IWorld World, IPlayer Player, Quest
 
 /// <param name="Stack">Сколько подобрано этим касанием.</param>
 public readonly record struct ItemPickedUp(IWorld World, IPlayer Player, ItemStack Stack);
+
+/// <param name="Amount">Сколько единиц здоровья отнято.</param>
+/// <param name="Cause">Причина — имя вида <c>base:fall</c>.</param>
+public readonly record struct PlayerDamaged(IWorld World, IPlayer Player, int Amount, string Cause);
+
+/// <param name="Cause">Причина последнего урона — имя вида <c>base:fall</c>.</param>
+public readonly record struct PlayerDied(IWorld World, IPlayer Player, string Cause);

@@ -23,6 +23,11 @@ public sealed class ModEventsTests : IDisposable
     private readonly List<PlayerJoined> _joined = [];
 
     private readonly List<ItemPickedUp> _pickedUp = [];
+    private readonly List<PlayerDamaged> _damaged = [];
+    private readonly List<PlayerDied> _died = [];
+
+    /// <summary>Сколько предметов было в инвентаре погибшего, когда пришло событие смерти: вещи должны уже выпасть.</summary>
+    private readonly List<int> _itemsSeenOnDeath = [];
 
     /// <summary>Пусто ли на месте блока, когда пришло событие ломания: обработчик должен видеть действие законченным.</summary>
     private readonly List<bool> _airSeenByHandler = [];
@@ -52,6 +57,12 @@ public sealed class ModEventsTests : IDisposable
         });
         context.Events.OnBlockPlaced(_placed.Add);
         context.Events.OnPlayerJoined(_joined.Add);
+        context.Events.OnPlayerDamaged(_damaged.Add);
+        context.Events.OnPlayerDied(e =>
+        {
+            _died.Add(e);
+            _itemsSeenOnDeath.Add(Enumerable.Range(0, Inventory.SlotCount).Count(slot => !e.Player.Inventory[slot].IsEmpty));
+        });
         context.Events.OnItemPickedUp(e =>
         {
             _pickedUp.Add(e);
@@ -112,6 +123,24 @@ public sealed class ModEventsTests : IDisposable
         Assert.Equal(new ItemStack(drop, 1), e.Stack);
         Assert.Equal("Tester", e.Player.Name);
         Assert.Equal([1], _countSeenOnPickup);
+    }
+
+    /// <summary>Урон — событие с размером и причиной; смертельный — ещё и смерть, когда вещи уже выпали.</summary>
+    [Fact]
+    public void Damage_AndDeath_RaiseEvents()
+    {
+        Start(("test_mod", Recorder()));
+        _inventory.Set(3, new ItemStack(_content.Items.Get("base:dirt").Id, 5));
+
+        _server.Damage(_client.PlayerId, 4, "test:hit");
+        _server.Damage(_client.PlayerId, 30, "test:lava");
+        _server.Tick();
+
+        Assert.Equal([(4, "test:hit"), (30, "test:lava")], _damaged.Select(e => (e.Amount, e.Cause)));
+        var died = Assert.Single(_died);
+        Assert.Equal("test:lava", died.Cause);
+        Assert.Equal("Tester", died.Player.Name);
+        Assert.Equal([0], _itemsSeenOnDeath);
     }
 
     [Fact]
