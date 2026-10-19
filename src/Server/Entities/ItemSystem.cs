@@ -26,6 +26,14 @@ internal sealed class ItemSystem(ItemRegistry items)
     /// <summary>Одинаковые предметы ближе этого сливаются в одну стопку (до предела стопки).</summary>
     public const double MergeRadius = 0.5;
 
+    /// <summary>
+    /// Слияние — раз в 10 тиков (0,5 с): на глаз так же быстро, а сортировка тысячи предметов каждый тик стоила
+    /// четверть миллисекунды (замер шага 7.6).
+    /// </summary>
+    public const int MergeIntervalTicks = 10;
+
+    private int _mergeCountdown;
+
     private static readonly Vector3d BodyCenter = new(0, PlayerPhysics.Height / 2, 0);
     private static readonly Vector3d ItemCenter = new(0, ItemEntities.Shape.Height / 2, 0);
 
@@ -114,6 +122,10 @@ internal sealed class ItemSystem(ItemRegistry items)
     /// </summary>
     public void Merge(EntityWorld entities)
     {
+        if (++_mergeCountdown < MergeIntervalTicks)
+            return;
+        _mergeCountdown = 0;
+
         _byX.Clear();
         foreach (var entity in entities.Query<DroppedItem, Position>())
         {

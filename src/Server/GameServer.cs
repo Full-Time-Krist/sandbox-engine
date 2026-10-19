@@ -550,6 +550,7 @@ public sealed class GameServer : IDisposable
             new PlayerChunkView(_viewDistance, _verticalDistance, BlockPos.Containing(start).Chunk));
         // До первого PlayerMove игрок стоит в начальной точке, иначе его действия сочлись бы «издалека».
         session.PlayerPosition = start;
+        session.Server = this;
         session.Entity = Entities.Create();
         Entities.Set(session.Entity, new Position { Value = start });
         Entities.Set(session.Entity, new Health { Current = health, Max = PlayerHealth.Max });
@@ -654,7 +655,7 @@ public sealed class GameServer : IDisposable
         session.Connection.Send(new PlayerTeleport(session.PlayerPosition, session.Movement.NextTeleport()));
     }
 
-    private ref Health HealthOf(ClientSession session) => ref Entities.Get<Health>(session.Entity);
+    internal ref Health HealthOf(ClientSession session) => ref Entities.Get<Health>(session.Entity);
 
     private void SendHealth(ClientSession session)
     {
@@ -930,6 +931,17 @@ public sealed class GameServer : IDisposable
             if (player is ClientSession session)
                 server._quests.Count(session, QuestGoalKind.Break, goal => goal.Block == old, 1, this);
             return true;
+        }
+
+        public void SpawnItem(Vector3d position, ItemStack stack)
+        {
+            if (!position.IsFinite || !server._items.Contains(stack.Item))
+                return;
+            var max = server._items.Get(stack.Item).MaxStackSize;
+            // Больше предела — несколькими предметами: на земле, как в инвентаре, стопка не больше своего предела.
+            // Пустая стопка (0 штук) не даёт ни одного.
+            for (var left = stack.Count; left > 0; left -= max)
+                ItemEntities.Spawn(server.Entities, position, Vector3.Zero, new ItemStack(stack.Item, Math.Min(left, max)), ItemEntities.DropPickupDelay);
         }
 
         public bool TryPlaceBlock(BlockPos pos, BlockId block, IPlayer player)

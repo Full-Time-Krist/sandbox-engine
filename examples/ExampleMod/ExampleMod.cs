@@ -6,7 +6,7 @@ namespace ExampleMod;
 
 /// <summary>
 /// Пример мода: аметистовая руда (блок и предмет — в <c>content/</c>, текстура — в <c>textures/</c>), волшебная палочка
-/// с поведением на C#, рецепт и задание (в <c>content/</c>) и три обработчика событий. Кроме того, <c>content/overrides/sand.json</c> заменяет ванильный
+/// с поведением на C#, рецепт и задание (в <c>content/</c>) и четыре обработчика событий. Кроме того, <c>content/overrides/sand.json</c> заменяет ванильный
 /// песок (<c>"override": true</c>) — новая текстура; для этого мод зависит от <c>base</c> в <c>mod.json</c>.
 /// Игра находит этот класс сама: он единственный реализует <see cref="IMod"/>.
 /// </summary>
@@ -24,24 +24,29 @@ public sealed class ExampleMod : IMod
         // Предмет example_mod:wand ссылается на это поведение полем "behavior" в своём JSON.
         context.RegisterItemBehavior("example_mod:wand", new WandBehavior(stone, amethystOre));
 
-        // Аметистовая руда в выживании даёт вдвое больше: одну штуку кладёт игра, вторую — мод.
+        // Аметистовая руда в выживании даёт вдвое больше: одну штуку роняет игра, вторая выпадает рядом от мода.
         context.Events.OnBlockBroken(e =>
         {
             if (e.Block != amethystOre || e.Player.Mode != GameMode.Survival)
                 return;
-            e.Player.Inventory.Add(new ItemStack(amethystOreItem, 1));
+            e.World.SpawnItem(new Vector3d(e.Position.X + 0.5, e.Position.Y, e.Position.Z + 0.5), new ItemStack(amethystOreItem, 1));
             context.Log($"{e.Player.Name} добыл аметистовую руду: +1 в награду");
         });
 
-        // Награда за своё задание (content/quests/amethyst.json): три медных слитка. Что не влезло — пропадает, как добыча
-        // без места; для примера этого достаточно.
+        // Награда за своё задание (content/quests/amethyst.json): три медных слитка. Что не влезло в инвентарь — падает
+        // к ногам игрока, а не пропадает.
         context.Events.OnQuestCompleted(e =>
         {
             if (e.Quest.Name != "example_mod:amethyst")
                 return;
-            e.Player.Inventory.Add(new ItemStack(copperIngot, 3));
+            var left = e.Player.Inventory.Add(new ItemStack(copperIngot, 3));
+            if (left > 0)
+                e.World.SpawnItem(e.Player.Position, new ItemStack(copperIngot, left));
             context.Log($"{e.Player.Name} выполнил «{e.Quest.Title}»: награда — 3 медных слитка");
         });
+
+        // Погибшему — строка в лог: причина приходит в событии.
+        context.Events.OnPlayerDied(e => context.Log($"{e.Player.Name} погиб ({e.Cause}), вещи лежат на месте"));
 
         // Палочка — каждому вошедшему, у кого её ещё нет.
         context.Events.OnPlayerJoined(e =>

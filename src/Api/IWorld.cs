@@ -1,4 +1,6 @@
+using Shared;
 using Shared.Blocks;
+using Shared.Items;
 using Shared.Voxels;
 
 namespace Api;
@@ -26,4 +28,10 @@ public interface IWorld
 
     /// <summary>Игрок ставит блок: моды получают <see cref="BlockPlaced"/>. False, если чанк не загружен.</summary>
     bool TryPlaceBlock(BlockPos pos, BlockId block, IPlayer player);
+
+    /// <summary>
+    /// Кладёт стопку предметом на землю: точка — низ предмета, он падает и ложится, как добыча; подобрать его можно через
+    /// 0,5 с. Пустая стопка — ничего. В незагруженном месте предмет стоит, пока туда не придёт игрок.
+    /// </summary>
+    void SpawnItem(Vector3d position, ItemStack stack);
 }

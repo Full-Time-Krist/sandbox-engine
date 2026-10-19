@@ -55,6 +55,11 @@ public static class BoxPhysics
     /// </summary>
     public static BodyState Fall(BodyState state, in BodyShape shape, ChunkMap chunks, BlockRegistry blocks)
     {
+        // Лежит и опора на месте: шаг ничего бы не изменил (гравитацию гасит та же опора), а стоит он десятков чтений
+        // блоков. Тысяча лежащих предметов — основная работа системы движения (замер шага 7.6).
+        if (state.OnGround && state.Velocity == Vector3.Zero && HasSupport(state.Position, shape, chunks, blocks))
+            return state;
+
         var velocity = state.Velocity;
         velocity.Y = MathF.Max(velocity.Y - shape.Gravity * (float)Dt, -shape.TerminalVelocity);
 
@@ -79,6 +84,33 @@ public static class BoxPhysics
     }
 
     private static float Settle(float speed) => MathF.Abs(speed) < RestSpeed ? 0 : speed;
+
+    /// <summary>
+    /// Стоит ли тело на твёрдом блоке: низ короба ровно на верхней грани хотя бы одного блока под ним (короб может
+    /// стоять сразу на нескольких). Незагруженный мир опорой не считается — тогда решает полный шаг.
+    /// </summary>
+    private static bool HasSupport(Vector3d feet, in BodyShape shape, ChunkMap chunks, BlockRegistry blocks)
+    {
+        var top = Math.Round(feet.Y);
+        if (Math.Abs(feet.Y - top) > Aabb.Epsilon)
+            return false;
+
+        var box = BodyAt(feet, shape.Width, shape.Height);
+        var y = (int)top - 1;
+        // Касание гранью соседнего столбца — не опора: края сужаются на допуск, как в Aabb.
+        var minX = (int)Math.Floor(box.Min.X + Aabb.Epsilon);
+        var maxX = (int)Math.Floor(box.Max.X - Aabb.Epsilon);
+        var minZ = (int)Math.Floor(box.Min.Z + Aabb.Epsilon);
+        var maxZ = (int)Math.Floor(box.Max.Z - Aabb.Epsilon);
+        for (var x = minX; x <= maxX; x++)
+        for (var z = minZ; z <= maxZ; z++)
+        {
+            var pos = new BlockPos(x, y, z);
+            if (chunks.Contains(pos.Chunk) && blocks.IsSolid(chunks.GetBlock(pos)))
+                return true;
+        }
+        return false;
+    }
 
     /// <summary>
     /// Сдвигает короб на <paramref name="delta"/>, обрезая движение о твёрдые блоки: сначала по Y, затем X и Z.

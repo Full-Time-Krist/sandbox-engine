@@ -74,6 +74,41 @@ public class BoxPhysicsTests
         Assert.True(later.OnGround);
     }
 
+    /// <summary>
+    /// Лежащий предмет не пересчитывается, пока опора на месте; убрали блок из-под него — снова падает. Стоит на двух
+    /// столбцах — держится, пока цел хотя бы один.
+    /// </summary>
+    [Fact]
+    public void Resting_FallsAgain_WhenSupportRemoved()
+    {
+        Fill(10, 0, 10, 11, 0, 10); // два блока: верх на высоте 1
+        var straddling = Run(new BodyState(new Vector3d(11, 3, 10.5)), 60); // на стыке двух блоков
+        Assert.Equal(1, straddling.Position.Y, Tolerance);
+        Assert.True(straddling.OnGround);
+
+        Assert.True(_chunks.TrySetBlock(new BlockPos(10, 0, 10), BlockId.Air));
+        var halfSupported = Run(straddling, 20);
+        Assert.Equal(straddling.Position, halfSupported.Position);
+
+        Assert.True(_chunks.TrySetBlock(new BlockPos(11, 0, 10), BlockId.Air));
+        var fallen = Run(halfSupported, 60);
+        Assert.Equal(0, fallen.Position.Y, Tolerance);
+        Assert.True(fallen.OnGround);
+    }
+
+    /// <summary>Касание гранью соседнего блока сбоку — не опора: предмет вплотную к стене всё равно падает.</summary>
+    [Fact]
+    public void TouchingWallSideways_IsNotSupport()
+    {
+        Fill(20, 0, 20, 20, 5, 20); // столб, его грань x = 20
+        // Правый край короба ровно на грани столба: под ногами — столбец 19, он пуст.
+        var start = new BodyState(new Vector3d(20 - Item.Width / 2, 3, 20.5), OnGround: true);
+
+        var after = Run(start, 60);
+
+        Assert.Equal(0, after.Position.Y, Tolerance);
+    }
+
     /// <summary>На любой скорости тело не проходит сквозь тонкую стену: путь за тик проверяется целиком.</summary>
     [Fact]
     public void FastBody_DoesNotPassThroughWall()

@@ -161,6 +161,27 @@ public sealed class ExampleModTests : IDisposable
         Assert.Contains("[Mod example_mod] Tester выполнил «Аметисты»: награда — 3 медных слитка", _log);
     }
 
+    /// <summary>Награда мода, не влезшая в инвентарь, не пропадает: мод роняет её к ногам игрока (<c>IWorld.SpawnItem</c>).</summary>
+    [Fact]
+    public void ModQuestReward_InventoryFull_FallsAtPlayersFeet()
+    {
+        var (client, inventory) = StartWithExampleMod();
+        var content = GameContent.Load([ExampleMod()]);
+        var planks = content.Items.Get("base:planks");
+        var ore = new ItemStack(content.Items.Get("example_mod:amethyst_ore").Id, 4);
+        for (var slot = 0; slot < Inventory.Size; slot++)
+            inventory.Set(slot, new ItemStack(planks.Id, planks.MaxStackSize));
+        inventory.Set(5, ore);
+        var quests = _server!.PlayerQuests(client.PlayerId);
+        foreach (var name in new[] { "base:get_wood", "base:planks", "base:crafting_table", "base:wooden_pickaxe" })
+            quests.Complete(name);
+        // Инвентарь полон: выпавшую награду игрок не подберёт, она останется лежать.
+        _server.Tick();
+
+        Assert.True(quests.IsCompleted("example_mod:amethyst"));
+        Assert.Equal(3, TestServers.OnGround(_server, content.Items.Get("base:copper_ingot").Id));
+    }
+
     [Fact]
     public void DataOnlyMod_HasNoCode_ItsContentLoads()
     {

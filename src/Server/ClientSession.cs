@@ -16,6 +16,12 @@ internal sealed class ClientSession(IConnection<ServerMessage, ClientMessage> co
 {
     string IPlayer.Name => PlayerName;
     Vector3d IPlayer.Position => PlayerPosition;
+    int IPlayer.Health => Server.HealthOf(this).Current;
+    int IPlayer.MaxHealth => Server.HealthOf(this).Max;
+    void IPlayer.Damage(int amount, string cause) => Server.Damage(this, amount, cause);
+
+    /// <summary>Сервер игрока: через него моды узнают здоровье и наносят урон (<see cref="IPlayer"/>). Появляется при подключении.</summary>
+    public GameServer Server { get; set; } = null!;
 
     public IConnection<ServerMessage, ClientMessage> Connection { get; } = connection;
 

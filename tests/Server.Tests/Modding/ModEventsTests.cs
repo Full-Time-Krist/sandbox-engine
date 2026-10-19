@@ -143,6 +143,55 @@ public sealed class ModEventsTests : IDisposable
         Assert.Equal([0], _itemsSeenOnDeath);
     }
 
+    /// <summary>
+    /// <c>IWorld.SpawnItem</c>: предмет на земле с задержкой подбора добычи; стопка больше предела — несколькими
+    /// предметами; пустая — ничего.
+    /// </summary>
+    [Fact]
+    public void ModSpawnItem_LiesOnGround_SplitByStackLimit()
+    {
+        var pickaxe = _content.Items.Get("base:wooden_pickaxe").Id;
+        var dirt = _content.Items.Get("base:dirt").Id;
+        Start(("test_mod", new TestMod(context => context.Events.OnPlayerJoined(e =>
+        {
+            var spot = e.Player.Position + new Vector3d(4, 2, 0);
+            e.World.SpawnItem(spot, new ItemStack(pickaxe, 3));
+            e.World.SpawnItem(spot, new ItemStack(dirt, 10));
+            e.World.SpawnItem(spot, ItemStack.Empty);
+        }))));
+
+        var stacks = TestServers.ItemsOnGround(_server);
+        Assert.Equal(4, stacks.Count);
+        Assert.Equal(3, stacks.Count(s => s == new ItemStack(pickaxe, 1)));
+        Assert.Contains(new ItemStack(dirt, 10), stacks);
+    }
+
+    /// <summary>Здоровье и урон игрока для модов: урон — то же, что у игры (событие, творческий не ранится).</summary>
+    [Fact]
+    public void ModDamage_ChangesHealth_RaisesEvent_IgnoredInCreative()
+    {
+        var seen = new List<(int Before, int After, int Max)>();
+        Start(("test_mod", new TestMod(context =>
+        {
+            context.Events.OnPlayerDamaged(_damaged.Add);
+            context.Events.OnPlayerJoined(e =>
+            {
+                var before = e.Player.Health;
+                e.Player.Damage(5, "test_mod:spikes");
+                seen.Add((before, e.Player.Health, e.Player.MaxHealth));
+            });
+        })));
+
+        Assert.Equal([(20, 15, 20)], seen);
+        var damaged = Assert.Single(_damaged);
+        Assert.Equal((5, "test_mod:spikes"), (damaged.Amount, damaged.Cause));
+        Assert.Equal(15, _server.PlayerHealthOf(_client.PlayerId));
+
+        _server.SetGameMode(_client.PlayerId, GameMode.Creative);
+        ((IPlayer)damaged.Player).Damage(50, "test_mod:spikes");
+        Assert.Equal(15, _server.PlayerHealthOf(_client.PlayerId));
+    }
+
     [Fact]
     public void Break_InventoryFull_StillBreaks_WithEvent()
     {

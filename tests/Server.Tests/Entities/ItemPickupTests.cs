@@ -175,7 +175,7 @@ public sealed class ItemPickupTests : IDisposable
         // Тот же X, но в 3 блоках по Z: пары ищутся по полосе X, расстояние должно проверяться целиком.
         ItemEntities.Spawn(_server.Entities, spot + new Vector3d(0.1, 0, 3), Vector3.Zero, new ItemStack(Dirt, 2));
 
-        Tick(_server, 10);
+        Tick(_server, ItemSystem.MergeIntervalTicks);
 
         var stacks = ItemsOnGround(_server);
         Assert.Equal(5, stacks.Count);
@@ -195,7 +195,7 @@ public sealed class ItemPickupTests : IDisposable
         for (var i = 0; i < 10; i++)
             ItemEntities.Spawn(_server.Entities, spot + new Vector3d(i * 0.04, 0, 0), Vector3.Zero, new ItemStack(Dirt, 3));
 
-        Tick(_server, 5);
+        Tick(_server, ItemSystem.MergeIntervalTicks);
 
         Assert.Equal([new ItemStack(Dirt, 30)], ItemsOnGround(_server));
     }

@@ -15,4 +15,15 @@ public interface IPlayer
 
     /// <summary>Авторитетный инвентарь: изменения уходят клиенту в конце тика.</summary>
     Inventory Inventory { get; }
+
+    /// <summary>Здоровье (0 — погиб и ещё не возродился).</summary>
+    int Health { get; }
+
+    int MaxHealth { get; }
+
+    /// <summary>
+    /// Ранит игрока на <paramref name="amount"/> единиц с причиной <paramref name="cause"/> (имя вида <c>my_mod:spikes</c>):
+    /// событие <see cref="PlayerDamaged"/>, до нуля — смерть. В творческом и у погибшего ничего не делает.
+    /// </summary>
+    void Damage(int amount, string cause);
 }
