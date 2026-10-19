@@ -70,7 +70,7 @@ public sealed class WorldTests : IDisposable
 
         var removed = _world.Unload(p => p.X < 3);
 
-        Assert.Equal(3, removed);
+        Assert.Equal([3, 4, 5], removed.Select(p => p.X).Order());
         Assert.Equal(3, _world.Chunks.Count);
         Assert.All(_world.Chunks.All, c => Assert.True(c.Position.X < 3));
     }

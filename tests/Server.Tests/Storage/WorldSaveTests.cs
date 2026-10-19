@@ -307,7 +307,7 @@ public sealed class WorldSaveTests : IDisposable
             save.SavePlayer("Player", new SavedPlayer(position, new LookAngles(1, 0.5f), GameMode.Creative, 2,
                 Slots((4, Stack("base:sand", 9))), Quests()));
         }
-        Assert.Equal(3L, Execute("SELECT value FROM meta WHERE key = 'format_version'"));
+        Assert.Equal(4L, Execute("SELECT value FROM meta WHERE key = 'format_version'"));
 
         using var reopened = Open();
         Assert.Null(reopened.UpgradedFrom);
@@ -345,11 +345,84 @@ public sealed class WorldSaveTests : IDisposable
             AssertPlayer(expected, save.LoadPlayer("Player"));
             save.SavePlayer("Player", expected with { Quests = Quests(["base:get_wood"]) });
         }
-        Assert.Equal(3L, Execute("SELECT value FROM meta WHERE key = 'format_version'"));
+        Assert.Equal(4L, Execute("SELECT value FROM meta WHERE key = 'format_version'"));
 
         using var reopened = Open();
         Assert.Null(reopened.UpgradedFrom);
         AssertPlayer(expected with { Quests = Quests(["base:get_wood"]) }, reopened.LoadPlayer("Player"));
+    }
+
+    /// <summary>
+    /// Сущности чанка: до записи читаются из очереди, после — с диска; пустые (null) стирают строку, и стёртое не
+    /// возвращается ни из очереди, ни с диска.
+    /// </summary>
+    [Fact]
+    public void Entities_SavedLoadedAndDeleted_ThroughQueueAndDisk()
+    {
+        var position = new ChunkPos(-3, 1, 7);
+        var data = new byte[] { 1, 0 };
+        using (var save = Open(startWriter: false))
+        {
+            Assert.False(save.TryLoadEntities(position, out _));
+            save.SaveEntities(position, data);
+            // Поток записи не запущен: данные — только в очереди.
+            Assert.True(save.TryLoadEntities(position, out var pending));
+            Assert.Equal(data, pending);
+            save.StartWriter();
+            save.Flush();
+        }
+
+        using (var reopened = Open())
+        {
+            Assert.True(reopened.TryLoadEntities(position, out var stored));
+            Assert.Equal(data, stored);
+            Assert.False(reopened.TryLoadEntities(position with { X = -2 }, out _));
+
+            reopened.SaveEntities(position, null);
+            Assert.False(reopened.TryLoadEntities(position, out _));
+        }
+
+        Assert.Equal(0L, Execute("SELECT COUNT(*) FROM entities"));
+        using var third = Open();
+        Assert.False(third.TryLoadEntities(position, out _));
+    }
+
+    [Fact]
+    public void Version3Save_IsUpgraded_EntitiesTableAppears_PlayerKept()
+    {
+        // Схема версии 3 (шаги 6.5–7.3): без таблицы сущностей.
+        Execute("""
+            PRAGMA journal_mode = WAL;
+            CREATE TABLE meta (key TEXT PRIMARY KEY, value);
+            CREATE TABLE block_names (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE);
+            CREATE TABLE item_names (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE);
+            CREATE TABLE chunks (
+                x INTEGER NOT NULL, y INTEGER NOT NULL, z INTEGER NOT NULL, data BLOB NOT NULL,
+                PRIMARY KEY (x, y, z)) WITHOUT ROWID;
+            CREATE TABLE players (name TEXT PRIMARY KEY, x REAL NOT NULL, y REAL NOT NULL, z REAL NOT NULL,
+                yaw REAL NOT NULL DEFAULT 0, pitch REAL NOT NULL DEFAULT 0, mode TEXT, selected_slot INTEGER NOT NULL DEFAULT 0,
+                inventory BLOB, quests TEXT);
+            INSERT INTO meta VALUES ('format_version', 3), ('seed', 42), ('spawn_x', 0.5), ('spawn_y', 80.0), ('spawn_z', -3.5);
+            INSERT INTO block_names VALUES (0, 'base:air'), (1, 'base:stone');
+            INSERT INTO item_names VALUES (0, 'base:air'), (1, 'base:stone');
+            INSERT INTO players VALUES ('Player', 1.5, 64.0, 2.5, 0.5, 0.25, 'creative', 4, x'0101040107', NULL);
+            """);
+
+        var expected = new SavedPlayer(new Vector3d(1.5, 64, 2.5), new LookAngles(0.5f, 0.25f), GameMode.Creative, 4,
+            Slots((4, Stack("base:stone", 7))), Quests());
+        var position = new ChunkPos(0, 2, 0);
+        using (var save = Open())
+        {
+            Assert.Equal(3, save.UpgradedFrom);
+            AssertPlayer(expected, save.LoadPlayer("Player"));
+            Assert.False(save.TryLoadEntities(position, out _));
+            save.SaveEntities(position, [1, 0]);
+        }
+        Assert.Equal(4L, Execute("SELECT value FROM meta WHERE key = 'format_version'"));
+
+        using var reopened = Open();
+        Assert.Null(reopened.UpgradedFrom);
+        Assert.True(reopened.TryLoadEntities(position, out _));
     }
 
     [Theory]

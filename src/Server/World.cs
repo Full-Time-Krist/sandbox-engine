@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Server.Storage;
 using Shared;
 using Shared.Blocks;
@@ -32,6 +33,12 @@ public sealed class World : IDisposable
 
     /// <summary>Чанки, изменённые после последней записи в сохранение.</summary>
     private readonly HashSet<ChunkPos> _dirty = [];
+
+    /// <summary>
+    /// Сущности чанков, прочитанные из сохранения вместе с чанком в фоновом потоке (<see cref="EntityCodec"/>).
+    /// Попадают сюда раньше самого чанка, а забирает их сервер, когда чанк уже в мире (<see cref="TryTakeLoadedEntities"/>).
+    /// </summary>
+    private readonly ConcurrentQueue<(ChunkPos Position, byte[] Data)> _loadedEntities = new();
 
     private int _loadedCount;
     private int _generatedCount;
@@ -130,10 +137,29 @@ public sealed class World : IDisposable
     }
 
     /// <summary>
-    /// Удаляет чанки, для которых <paramref name="isNeeded"/> вернул false, изменённые перед этим сохраняет.
-    /// Возвращает число удалённых.
+    /// Сущности чанка, который только что попал в мир (<see cref="CollectGenerated"/>), из сохранения.
+    /// Вызывать после <see cref="CollectGenerated"/>: сущности чанка, ещё не попавшего в мир, тоже лежат здесь.
     /// </summary>
-    internal int Unload(Func<ChunkPos, bool> isNeeded)
+    internal bool TryTakeLoadedEntities(out ChunkPos position, out byte[] data)
+    {
+        while (_loadedEntities.TryPeek(out var next))
+        {
+            // Чанк ещё в генераторе (сущности прочитаны раньше него) — подождёт следующего тика.
+            if (!Chunks.Contains(next.Position))
+                break;
+            _loadedEntities.TryDequeue(out _);
+            (position, data) = next;
+            return true;
+        }
+        (position, data) = (default, []);
+        return false;
+    }
+
+    /// <summary>
+    /// Удаляет чанки, для которых <paramref name="isNeeded"/> вернул false, изменённые перед этим сохраняет.
+    /// Возвращает позиции удалённых: их сущности сервер сохраняет и убирает сам.
+    /// </summary>
+    internal List<ChunkPos> Unload(Func<ChunkPos, bool> isNeeded)
     {
         var unneeded = Chunks.All.Where(c => !isNeeded(c.Position)).ToList();
         foreach (var chunk in unneeded)
@@ -142,7 +168,7 @@ public sealed class World : IDisposable
                 _save?.SaveChunk(chunk);
             Chunks.Remove(chunk.Position);
         }
-        return unneeded.Count;
+        return [.. unneeded.Select(c => c.Position)];
     }
 
     /// <summary>Ставит в очередь записи все изменённые чанки. Возвращает их число.</summary>
@@ -158,9 +184,15 @@ public sealed class World : IDisposable
         return count;
     }
 
-    /// <summary>Готовит чанк в фоновом потоке: из сохранения, а если там его нет — генерирует и сразу сохраняет.</summary>
+    /// <summary>
+    /// Готовит чанк в фоновом потоке: из сохранения, а если там его нет — генерирует и сразу сохраняет. Сущности чанка
+    /// читаются здесь же, чтобы сервер не ждал диск в своём тике.
+    /// </summary>
     private Chunk Produce(ChunkPos position)
     {
+        if (_save != null && _save.TryLoadEntities(position, out var entities))
+            _loadedEntities.Enqueue((position, entities));
+
         if (_save != null && _save.TryLoadChunk(position, out var saved))
         {
             Interlocked.Increment(ref _loadedCount);

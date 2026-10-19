@@ -90,6 +90,7 @@ public sealed class GameServer : IDisposable
 
     private readonly EntitySync _entitySync = new();
     private readonly ItemSystem _itemSystem;
+    private readonly EntityPersistence _entityPersistence;
 
     /// <summary>Разлёт добычи. Без сида: на исход игры он не влияет, тесты проверяют не точку, а что предмет есть.</summary>
     private readonly Random _random = new();
@@ -160,6 +161,7 @@ public sealed class GameServer : IDisposable
         }
 
         _editor = new WorldEditor(this);
+        _entityPersistence = new EntityPersistence(Entities, _save, _items);
     }
 
     /// <summary>
@@ -277,6 +279,8 @@ public sealed class GameServer : IDisposable
         _events.Dispatch();
 
         World.CollectGenerated();
+        while (World.TryTakeLoadedEntities(out var loadedChunk, out var entityData))
+            _entityPersistence.Restore(loadedChunk, entityData);
         foreach (var session in _sessions)
         {
             if (session.IsJoined)
@@ -322,6 +326,7 @@ public sealed class GameServer : IDisposable
                     session.Inventory.SelectedSlot, session.Inventory.CopySlots(), session.Quests));
             }
         }
+        _entityPersistence.SaveAll();
         return World.SaveDirty();
     }
 
@@ -367,7 +372,10 @@ public sealed class GameServer : IDisposable
     /// <summary>Выгружает из памяти сервера чанки, которые не нужны ни одному игроку.</summary>
     private void UnloadUnusedChunks()
     {
-        _unloadedSinceLog += World.Unload(position => _sessions.Any(s => s.IsJoined && s.View.Keeps(position)));
+        var unloaded = World.Unload(position => _sessions.Any(s => s.IsJoined && s.View.Keeps(position)));
+        // Сущности уходят вместе со своими чанками: записываются и убираются из памяти.
+        _entityPersistence.Save(unloaded, remove: true);
+        _unloadedSinceLog += unloaded.Count;
 
         // Сводка раз в 10 секунд, а не каждую выгрузку: в полёте выгрузка идёт каждую секунду.
         if (_tick % (UnloadIntervalTicks * 10) == 0 && _unloadedSinceLog > 0)

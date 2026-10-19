@@ -25,7 +25,8 @@ internal sealed record SavedPlayer(Vector3d Position, LookAngles Look, GameMode?
 /// <summary>
 /// Сохранение мира: один файл SQLite. Таблицы <c>meta</c> (версия формата, сид, точка появления, режим по умолчанию),
 /// <c>block_names</c> и <c>item_names</c> (номер блока или предмета в сохранении → имя, см. <see cref="NameIdMap"/>),
-/// <c>chunks</c> (позиция → сжатые блоки в формате <see cref="ChunkCodec"/>) и <c>players</c> (имя → позиция,
+/// <c>chunks</c> (позиция → сжатые блоки в формате <see cref="ChunkCodec"/>), <c>entities</c> (позиция чанка → его
+/// сущности в формате <see cref="EntityCodec"/>; чанка без сущностей в ней нет) и <c>players</c> (имя → позиция,
 /// взгляд, режим, выбранный слот, инвентарь в формате <see cref="InventoryCodec"/>, задания в формате <see cref="QuestCodec"/>).
 /// </summary>
 /// <remarks>
@@ -51,8 +52,9 @@ internal sealed class WorldSave : IDisposable
     /// Версия схемы базы. Формат блоков чанка и инвентаря версионируется отдельно, первым байтом данных.
     /// Версия 2 (этап 3): таблица <c>item_names</c>, у игрока взгляд, режим, выбранный слот и инвентарь.
     /// Версия 3 (шаг 6.5): у игрока задания.
+    /// Версия 4 (шаг 7.4): таблица <c>entities</c> — предметы на земле.
     /// </summary>
-    public const int FormatVersion = 3;
+    public const int FormatVersion = 4;
 
     /// <summary>
     /// Столбцы игрока, появившиеся в версии 2. Новая база создаётся сразу с ними, у базы версии 1 их добавляет
@@ -79,6 +81,9 @@ internal sealed class WorldSave : IDisposable
     private readonly BlockingCollection<WriteItem> _queue = new(new ConcurrentQueue<WriteItem>());
     private readonly ConcurrentDictionary<ChunkPos, byte[]> _pendingChunks = new();
     private readonly ConcurrentDictionary<string, PlayerWrite> _pendingPlayers = new(StringComparer.Ordinal);
+
+    /// <summary>Сущности чанков в очереди записи; пустой массив — строка будет удалена (сущностей не осталось).</summary>
+    private readonly ConcurrentDictionary<ChunkPos, byte[]> _pendingEntities = new();
     private readonly ItemRegistry _items;
     private Thread? _writer;
     private volatile Exception? _fault;
@@ -119,6 +124,9 @@ internal sealed class WorldSave : IDisposable
                 CREATE TABLE IF NOT EXISTS chunks (
                     x INTEGER NOT NULL, y INTEGER NOT NULL, z INTEGER NOT NULL, data BLOB NOT NULL,
                     PRIMARY KEY (x, y, z)) WITHOUT ROWID;
+                CREATE TABLE IF NOT EXISTS entities (
+                    x INTEGER NOT NULL, y INTEGER NOT NULL, z INTEGER NOT NULL, data BLOB NOT NULL,
+                    PRIMARY KEY (x, y, z)) WITHOUT ROWID;
                 CREATE TABLE IF NOT EXISTS players (name TEXT PRIMARY KEY, x REAL NOT NULL, y REAL NOT NULL, z REAL NOT NULL,
                     {string.Join(", ", PlayerColumnsAddedIn2)}, {PlayerColumnAddedIn3});
                 """);
@@ -127,11 +135,13 @@ internal sealed class WorldSave : IDisposable
             var version = ReadMeta(_writeConnection, "format_version") is { } stored ? Convert.ToInt64(stored) : (long?)null;
             if (version > FormatVersion)
                 throw new InvalidDataException($"Мир сохранён более новой версией игры (формат {version}, поддерживается до {FormatVersion}).");
-            if (version is 1 or 2)
+            if (version is >= 1 and < FormatVersion)
             {
                 if (version == 1)
                     UpgradeFrom1();
-                UpgradeFrom2();
+                if (version <= 2)
+                    UpgradeFrom2();
+                UpgradeFrom3();
                 UpgradedFrom = (int)version;
             }
             if (version != null)
@@ -262,6 +272,36 @@ internal sealed class WorldSave : IDisposable
     }
 
     /// <summary>
+    /// Ставит в очередь записи сущности чанка (<see cref="EntityCodec"/>); null — сущностей в чанке не осталось,
+    /// его строка удаляется.
+    /// </summary>
+    public void SaveEntities(ChunkPos position, byte[]? data)
+    {
+        ThrowIfFaulted();
+        data ??= [];
+        _pendingEntities[position] = data;
+        _queue.Add(new EntitiesWrite(position, data));
+    }
+
+    /// <summary>
+    /// Сущности чанка из сохранения (сначала из очереди записи, потом с диска) в формате <see cref="EntityCodec"/>.
+    /// false — у чанка их нет. Можно из любого потока: читается вместе с чанком в фоновом потоке.
+    /// </summary>
+    public bool TryLoadEntities(ChunkPos position, out byte[] data)
+    {
+        if (_pendingEntities.TryGetValue(position, out data!))
+            return data.Length > 0;
+
+        using var command = _readConnections.Value!.CreateCommand();
+        command.CommandText = "SELECT data FROM entities WHERE x = $x AND y = $y AND z = $z";
+        command.Parameters.AddWithValue("$x", position.X);
+        command.Parameters.AddWithValue("$y", position.Y);
+        command.Parameters.AddWithValue("$z", position.Z);
+        data = command.ExecuteScalar() as byte[] ?? [];
+        return data.Length > 0;
+    }
+
+    /// <summary>
     /// Ставит игрока в очередь записи. Инвентарь кодируется сразу, в вызывающем потоке: потом он изменится.
     /// Предмет на курсоре записывается как есть; при загрузке его возвращает в инвентарь сервер.
     /// </summary>
@@ -384,6 +424,19 @@ internal sealed class WorldSave : IDisposable
             var cz = writeChunk.Parameters.Add("$z", SqliteType.Integer);
             var cdata = writeChunk.Parameters.Add("$data", SqliteType.Blob);
 
+            using var writeEntities = _writeConnection.CreateCommand();
+            writeEntities.CommandText = "INSERT OR REPLACE INTO entities (x, y, z, data) VALUES ($x, $y, $z, $data)";
+            var ex = writeEntities.Parameters.Add("$x", SqliteType.Integer);
+            var ey = writeEntities.Parameters.Add("$y", SqliteType.Integer);
+            var ez = writeEntities.Parameters.Add("$z", SqliteType.Integer);
+            var edata = writeEntities.Parameters.Add("$data", SqliteType.Blob);
+
+            using var deleteEntities = _writeConnection.CreateCommand();
+            deleteEntities.CommandText = "DELETE FROM entities WHERE x = $x AND y = $y AND z = $z";
+            var dx = deleteEntities.Parameters.Add("$x", SqliteType.Integer);
+            var dy = deleteEntities.Parameters.Add("$y", SqliteType.Integer);
+            var dz = deleteEntities.Parameters.Add("$z", SqliteType.Integer);
+
             using var writePlayer = _writeConnection.CreateCommand();
             writePlayer.CommandText = """
                 INSERT OR REPLACE INTO players (name, x, y, z, yaw, pitch, mode, selected_slot, inventory, quests)
@@ -411,6 +464,8 @@ internal sealed class WorldSave : IDisposable
                 using (var transaction = _writeConnection.BeginTransaction())
                 {
                     writeChunk.Transaction = transaction;
+                    writeEntities.Transaction = transaction;
+                    deleteEntities.Transaction = transaction;
                     writePlayer.Transaction = transaction;
                     foreach (var item in batch)
                     {
@@ -419,6 +474,14 @@ internal sealed class WorldSave : IDisposable
                             case ChunkWrite chunk:
                                 (cx.Value, cy.Value, cz.Value, cdata.Value) = (chunk.Position.X, chunk.Position.Y, chunk.Position.Z, chunk.Data);
                                 writeChunk.ExecuteNonQuery();
+                                break;
+                            case EntitiesWrite { Data.Length: 0 } empty:
+                                (dx.Value, dy.Value, dz.Value) = (empty.Position.X, empty.Position.Y, empty.Position.Z);
+                                deleteEntities.ExecuteNonQuery();
+                                break;
+                            case EntitiesWrite entities:
+                                (ex.Value, ey.Value, ez.Value, edata.Value) = (entities.Position.X, entities.Position.Y, entities.Position.Z, entities.Data);
+                                writeEntities.ExecuteNonQuery();
                                 break;
                             case PlayerWrite player:
                                 (pname.Value, px.Value, py.Value, pz.Value) = (player.Name, player.Position.X, player.Position.Y, player.Position.Z);
@@ -442,6 +505,9 @@ internal sealed class WorldSave : IDisposable
                     {
                         case ChunkWrite chunk:
                             _pendingChunks.TryRemove(new KeyValuePair<ChunkPos, byte[]>(chunk.Position, chunk.Data));
+                            break;
+                        case EntitiesWrite entities:
+                            _pendingEntities.TryRemove(new KeyValuePair<ChunkPos, byte[]>(entities.Position, entities.Data));
                             break;
                         case PlayerWrite player:
                             _pendingPlayers.TryRemove(new KeyValuePair<string, PlayerWrite>(player.Name, player));
@@ -561,6 +627,9 @@ internal sealed class WorldSave : IDisposable
         transaction.Commit();
     }
 
+    /// <summary>Обновляет схему версии 3 до 4: таблицу <c>entities</c> уже создал конструктор, остаётся записать версию.</summary>
+    private void UpgradeFrom3() => Execute(_writeConnection, "UPDATE meta SET value = 4 WHERE key = 'format_version';");
+
     /// <param name="table">Таблица имён: <c>block_names</c> или <c>item_names</c>.</param>
     private List<string> ReadNames(string table)
     {
@@ -597,6 +666,9 @@ internal sealed class WorldSave : IDisposable
 
     private abstract record WriteItem;
     private sealed record ChunkWrite(ChunkPos Position, byte[] Data) : WriteItem;
+
+    /// <param name="Data">Сущности чанка (<see cref="EntityCodec"/>); пустой массив — удалить строку.</param>
+    private sealed record EntitiesWrite(ChunkPos Position, byte[] Data) : WriteItem;
 
     /// <param name="Mode">null — не записан (игрок из версии 1).</param>
     /// <param name="Inventory">Инвентарь в формате <see cref="InventoryCodec"/>; null — не записан (игрок из версии 1).</param>

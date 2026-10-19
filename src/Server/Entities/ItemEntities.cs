@@ -1,4 +1,5 @@
 using System.Numerics;
+using Server.Storage;
 using Shared;
 using Shared.Entities;
 using Shared.Items;
@@ -44,6 +45,15 @@ internal static class ItemEntities
         entities.Set(entity, new Body { Velocity = velocity, Shape = Shape });
         entities.Set(entity, new DroppedItem { Stack = stack, PickupDelay = pickupDelay });
         entities.Set(entity, new Synced { SentPosition = position });
+        return entity;
+    }
+
+    /// <summary>Предмет из сохранения: та же стопка, скорость, задержка и возраст, что при записи.</summary>
+    public static EntityId Restore(EntityWorld entities, SavedItem saved)
+    {
+        var entity = Spawn(entities, saved.Position, saved.Velocity, saved.Stack, saved.PickupDelay);
+        entities.Get<DroppedItem>(entity).Age = saved.Age;
+        entities.Get<Body>(entity).OnGround = saved.OnGround;
         return entity;
     }
 
