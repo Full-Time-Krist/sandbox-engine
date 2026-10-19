@@ -70,6 +70,17 @@ public class BlockRegistryTests
         Assert.Throws<ArgumentException>(() => registry.Register(name, isOpaque: true));
     }
 
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(16)]
+    public void Register_LightOutOfRange_Throws(int light)
+    {
+        var registry = new BlockRegistry();
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => registry.Register("base:torch", isOpaque: false, light: light));
+        Assert.Equal(15, registry.Register("base:lamp", isOpaque: true, light: 15).Light);
+    }
+
     [Fact]
     public void Register_AfterFreeze_Throws()
     {

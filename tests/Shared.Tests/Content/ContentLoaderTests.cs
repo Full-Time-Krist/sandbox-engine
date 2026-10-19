@@ -65,6 +65,9 @@ public class ContentLoaderTests
     [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"hardness":-1}""", "base/stone.json")]
     [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"hardness":"hard"}""", "base/stone.json")]
     [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"toolTier":1}""", "base/stone.json")]
+    [InlineData("""{"type":"block","name":"base:torch","isOpaque":false,"light":16}""", "base/torch.json")]
+    [InlineData("""{"type":"block","name":"base:torch","isOpaque":false,"light":-1}""", "base/torch.json")]
+    [InlineData("""{"type":"block","name":"base:torch","isOpaque":false,"light":7.5}""", "base/torch.json")]
     [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"tool":"Pick Axe"}""", "base/stone.json")]
     [InlineData("""{"type":"item","name":"base:pick","maxStackSize":1,"tool":{"type":"pickaxe","tier":1}}""", "base/pick.json")]
     [InlineData("""{"type":"item","name":"base:pick","maxStackSize":1,"tool":{"type":"pickaxe","speed":0}}""", "base/pick.json")]
@@ -206,6 +209,18 @@ public class ContentLoaderTests
         Assert.Equal(new ToolInfo("pickaxe", 2, 4), content.Items.Get("base:pick").Tool);
         Assert.Null(content.Items.Get("base:rock").Tool);
         Assert.Equal(ItemRegistry.HandBehavior, content.Items.Get("base:pick").Behavior); // инструмент ломает как рука, только быстрее
+    }
+
+    [Fact]
+    public void Load_Light_FieldAndDefault()
+    {
+        var content = ContentLoader.Load([
+            File("base/torch.json", """{"type":"block","name":"base:torch","isOpaque":false,"light":14}"""),
+            File("base/glass.json", """{"type":"block","name":"base:glass","isOpaque":false}""")
+        ]);
+
+        Assert.Equal(14, content.Blocks.Get("base:torch").Light);
+        Assert.Equal(0, content.Blocks.Get("base:glass").Light);
     }
 
     [Fact]

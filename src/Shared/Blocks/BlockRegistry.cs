@@ -26,7 +26,8 @@ public sealed class BlockRegistry
 
     /// <param name="isSolid">Тела в него упираются. По умолчанию да: таких блоков большинство.</param>
     /// <param name="mining">Как блок ломается; null — <see cref="BlockMining.Default"/>.</param>
-    public BlockDefinition Register(string name, bool isOpaque, bool isSolid = true, BlockMining? mining = null)
+    /// <param name="light">Свет, который блок излучает сам, 0–<see cref="Lighting.ChunkLight.Max"/>.</param>
+    public BlockDefinition Register(string name, bool isOpaque, bool isSolid = true, BlockMining? mining = null, int light = 0)
     {
         if (IsFrozen)
             throw new InvalidOperationException($"Реестр заморожен, блок '{name}' зарегистрировать нельзя.");
@@ -34,10 +35,13 @@ public sealed class BlockRegistry
             throw new ArgumentException($"Имя блока '{name}' должно иметь вид 'namespace:name' (a–z, 0–9, _).", nameof(name));
         if (_byName.ContainsKey(name))
             throw new InvalidOperationException($"Блок '{name}' уже зарегистрирован.");
+        if ((uint)light > Lighting.ChunkLight.Max)
+            throw new ArgumentOutOfRangeException(nameof(light), light, $"Свет блока '{name}' должен быть от 0 до {Lighting.ChunkLight.Max}.");
         if (_byId.Count > ushort.MaxValue)
             throw new InvalidOperationException($"Превышено число типов блоков ({ushort.MaxValue + 1}).");
 
-        var definition = new BlockDefinition(new BlockId((ushort)_byId.Count), name, isOpaque, isSolid, mining ?? BlockMining.Default);
+        var definition = new BlockDefinition(new BlockId((ushort)_byId.Count), name, isOpaque, isSolid, mining ?? BlockMining.Default,
+            (byte)light);
         _byId.Add(definition);
         _byName.Add(name, definition);
         return definition;

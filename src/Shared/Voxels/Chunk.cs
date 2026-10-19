@@ -1,4 +1,5 @@
 using Shared.Blocks;
+using Shared.Lighting;
 
 namespace Shared.Voxels;
 
@@ -9,6 +10,9 @@ public sealed class Chunk(ChunkPos position)
     private readonly BlockId[] _blocks = new BlockId[ChunkMath.Volume];
 
     public ChunkPos Position { get; } = position;
+
+    /// <summary>Свет блоков. Считает его <see cref="LightEngine"/>; новый чанк тёмный.</summary>
+    public ChunkLight Light { get; } = new();
 
     /// <summary>Число блоков, отличных от воздуха. Пустые чанки не нужно ни отрисовывать, ни передавать.</summary>
     public int NonAirCount { get; private set; }

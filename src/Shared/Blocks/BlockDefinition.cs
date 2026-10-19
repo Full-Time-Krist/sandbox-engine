@@ -8,7 +8,8 @@ namespace Shared.Blocks;
 /// а высокая трава прозрачная и проходимая. Пока твёрдый блок — всегда полный куб.
 /// </param>
 /// <param name="Mining">Как блок ломается: твёрдость, нужный инструмент и его уровень.</param>
-public sealed record BlockDefinition(BlockId Id, string Name, bool IsOpaque, bool IsSolid, BlockMining Mining);
+/// <param name="Light">Сколько света блок излучает сам, 0–15 (<see cref="Lighting.LightEngine"/>); 0 — не светится.</param>
+public sealed record BlockDefinition(BlockId Id, string Name, bool IsOpaque, bool IsSolid, BlockMining Mining, byte Light = 0);
 
 /// <summary>Как ломается блок (<see cref="Items.Mining"/> считает время и добычу).</summary>
 /// <param name="Hardness">Секунды рукой, если блок добывается рукой; 0 — ломается сразу.</param>

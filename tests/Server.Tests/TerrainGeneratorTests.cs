@@ -292,4 +292,37 @@ public class TerrainGeneratorTests
 
         Assert.True(equalNeighbours < 5, $"У {equalNeighbours} пар соседних столбцов одинаковая высота");
     }
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(3, -2)]
+    [InlineData(-40, 25)]
+    [InlineData(37, -28)]
+    public void NaturalTops_MatchGeneratedColumns(int chunkX, int chunkZ)
+    {
+        // Над естественной высотой генератор не ставит ничего, а сразу под ней — непрозрачный блок (рельеф, ствол, листва).
+        var generator = Generator();
+        var tops = generator.NaturalTops(chunkX, chunkZ);
+        var map = new ChunkMap();
+        for (var y = (TerrainGenerator.MinSurface - 8) >> ChunkMath.Bits; y <= (TerrainGenerator.MaxSurface + 8) >> ChunkMath.Bits; y++)
+            map.Set(generator.Generate(new ChunkPos(chunkX, y, chunkZ)));
+
+        var sky = new NaturalSky(generator);
+        var aboveSurface = 0;
+        for (var lx = 0; lx < ChunkMath.Size; lx++)
+        for (var lz = 0; lz < ChunkMath.Size; lz++)
+        {
+            int x = (chunkX << ChunkMath.Bits) + lx, z = (chunkZ << ChunkMath.Bits) + lz;
+            var top = tops[lx + lz * ChunkMath.Size];
+            Assert.False(map.GetBlock(new BlockPos(x, top - 1, z)).IsAir, $"Под естественной высотой {top} столбца ({x}, {z}) воздух");
+            for (var y = top; y < TerrainGenerator.MaxSurface + 8; y++)
+                Assert.True(map.GetBlock(new BlockPos(x, y, z)).IsAir, $"Над естественной высотой {top} столбца ({x}, {z}) блок на {y}");
+
+            Assert.True(sky.IsOpen(x, z, top));
+            Assert.False(sky.IsOpen(x, z, top - 1));
+            if (top > generator.SurfaceHeight(x, z))
+                aboveSurface++;
+        }
+        // Деревья в выборке есть — иначе их учёт не проверен.
+        Assert.True(aboveSurface > 0, "В столбце чанков нет деревьев: выберите другой");
+    }
 }

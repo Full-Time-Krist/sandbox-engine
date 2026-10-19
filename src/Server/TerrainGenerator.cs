@@ -225,6 +225,40 @@ internal sealed class TerrainGenerator
         return (x, z); // в сплошном лесу 33 × 33 без просвета — как раньше
     }
 
+    /// <summary>
+    /// Естественная высота столбцов чанка по X и Z: над ней генератор не ставит ничего — ни рельефа, ни деревьев.
+    /// Индекс — <c>x + z × 32</c> (локальные координаты). Нужна свету: солнце над незагруженными чанками
+    /// (<see cref="NaturalSky"/>), не генерируя их.
+    /// </summary>
+    internal int[] NaturalTops(int chunkX, int chunkZ)
+    {
+        var originX = chunkX << ChunkMath.Bits;
+        var originZ = chunkZ << ChunkMath.Bits;
+        var tops = new int[ChunkMath.Size * ChunkMath.Size];
+        for (var lz = 0; lz < ChunkMath.Size; lz++)
+        for (var lx = 0; lx < ChunkMath.Size; lx++)
+            tops[lx + lz * ChunkMath.Size] = SurfaceHeight(originX + lx, originZ + lz);
+
+        foreach (var tree in TreesAround(originX - TreeCanopyRadius, originZ - TreeCanopyRadius,
+                     originX + ChunkMath.Size - 1 + TreeCanopyRadius, originZ + ChunkMath.Size - 1 + TreeCanopyRadius))
+        {
+            for (var x = Math.Max(tree.X - TreeCanopyRadius, originX); x <= Math.Min(tree.X + TreeCanopyRadius, originX + ChunkMath.Size - 1); x++)
+            for (var z = Math.Max(tree.Z - TreeCanopyRadius, originZ); z <= Math.Min(tree.Z + TreeCanopyRadius, originZ + ChunkMath.Size - 1); z++)
+            {
+                ref var top = ref tops[(x - originX) + (z - originZ) * ChunkMath.Size];
+                for (var y = tree.Top; y >= Math.Max(tree.Base, top); y--)
+                {
+                    if (TreeBlock(tree, x, y, z) != null)
+                    {
+                        top = y + 1;
+                        break;
+                    }
+                }
+            }
+        }
+        return tops;
+    }
+
     /// <summary>Есть ли блок какого-нибудь дерева в столбце (<paramref name="x"/>, <paramref name="z"/>) на высотах [<paramref name="fromY"/>; <paramref name="toY"/>].</summary>
     internal bool HasTreeBlock(int x, int z, int fromY, int toY)
     {

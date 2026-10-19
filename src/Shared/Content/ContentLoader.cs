@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Shared.Blocks;
 using Shared.Items;
+using Shared.Lighting;
 using Shared.Quests;
 
 namespace Shared.Content;
@@ -189,7 +190,7 @@ public static partial class ContentLoader
             switch (type)
             {
                 case "block":
-                    CheckProperties(root, file, "type", "name", "isOpaque", "isSolid", "textures", "hardness", "tool", "toolTier", "override");
+                    CheckProperties(root, file, "type", "name", "isOpaque", "isSolid", "textures", "hardness", "tool", "toolTier", "light", "override");
                     if (name == BlockRegistry.AirName)
                         throw Error(file, $"имя '{name}' зарезервировано для воздуха и не должно объявляться в JSON.");
                     if (!isOverride && !blockNames.Add(name))
@@ -197,7 +198,7 @@ public static partial class ContentLoader
                     (isOverride ? blockOverrides : blocks).Add(new BlockJson(file.Path, pack, name,
                         RequiredBoolean(root, "isOpaque", file),
                         OptionalBoolean(root, "isSolid", defaultValue: true, file),
-                        OptionalTextures(root, pack, file), BlockMiningOf(root, file)));
+                        OptionalTextures(root, pack, file), BlockMiningOf(root, file), LightOf(root, file)));
                     break;
 
                 case "item":
@@ -257,7 +258,7 @@ public static partial class ContentLoader
         var textures = ImmutableDictionary.CreateBuilder<string, BlockTextures>(StringComparer.Ordinal);
         foreach (var block in blocks.OrderBy(block => block.Name, StringComparer.Ordinal))
         {
-            blockRegistry.Register(block.Name, block.IsOpaque, block.IsSolid, block.Mining);
+            blockRegistry.Register(block.Name, block.IsOpaque, block.IsSolid, block.Mining, block.Light);
             if (block.Textures is not null)
                 textures.Add(block.Name, block.Textures);
         }
@@ -583,6 +584,17 @@ public static partial class ContentLoader
     [GeneratedRegex("^[a-z_]+$")]
     private static partial Regex ToolTypePattern();
 
+    /// <summary>Свет, который блок излучает сам: <c>light</c>, целое 0–15, по умолчанию 0.</summary>
+    private static int LightOf(JsonElement root, ContentJsonFile file)
+    {
+        if (!root.TryGetProperty("light", out _))
+            return 0;
+        var light = RequiredInt32(root, "light", file);
+        if ((uint)light > ChunkLight.Max)
+            throw Error(file, $"light должен быть от 0 до {ChunkLight.Max}, получено {light}.");
+        return light;
+    }
+
     /// <summary>
     /// Поля ломания блока: <c>hardness</c> (секунды рукой, по умолчанию 1), <c>tool</c> (вид инструмента) и <c>toolTier</c>
     /// (нужный уровень, по умолчанию 0). Уровень без вида инструмента не имеет смысла — ошибка.
@@ -697,7 +709,7 @@ public static partial class ContentLoader
         new($"Файл '{file.Path}': {message}");
 
     private sealed record BlockJson(string Path, string Pack, string Name, bool IsOpaque, bool IsSolid, BlockTextures? Textures,
-        BlockMining Mining);
+        BlockMining Mining, int Light);
     private sealed record ItemJson(string Path, string Pack, string Name, int MaxStackSize, string? PlacesBlock, string? Behavior,
         string? DisplayName, string? Icon, ToolInfo? Tool);
     private sealed record RecipeJson(string Path, string Pack, string Name, StackJson Result, ImmutableArray<StackJson> Ingredients,
