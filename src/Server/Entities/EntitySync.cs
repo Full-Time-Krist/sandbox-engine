@@ -28,7 +28,12 @@ internal sealed class EntitySync
         }
 
         foreach (var entity in entities.Query<Position, Synced>())
-            entities.Get<Synced>(entity).SentPosition = entities.Get<Position>(entity).Value;
+        {
+            ref var synced = ref entities.Get<Synced>(entity);
+            synced.SentPosition = entities.Get<Position>(entity).Value;
+            if (entities.Has<Facing>(entity))
+                synced.SentYaw = entities.Get<Facing>(entity).Yaw;
+        }
     }
 
     private void SyncSession(EntityWorld entities, ClientSession session)
@@ -57,6 +62,23 @@ internal sealed class EntitySync
                 session.Connection.Send(new EntitySpawned(entity, EntityKind.Item, position, entities.Get<DroppedItem>(entity).Stack));
             else if (entities.Get<Synced>(entity).SentPosition != position)
                 _moved.Add(new EntityPosition(entity, position));
+        }
+        foreach (var entity in entities.Query<Position, Mob>())
+        {
+            var position = entities.Get<Position>(entity).Value;
+            if (!session.View.WasSent(ChunkOf(position)))
+                continue;
+            var yaw = entities.Get<Facing>(entity).Yaw;
+            if (known.Add(entity))
+            {
+                session.Connection.Send(new EntitySpawned(entity, EntityKind.Mob, position, default, entities.Get<Mob>(entity).Kind, yaw));
+            }
+            else
+            {
+                var synced = entities.Get<Synced>(entity);
+                if (synced.SentPosition != position || synced.SentYaw != yaw)
+                    _moved.Add(new EntityPosition(entity, position, yaw));
+            }
         }
         if (_moved.Count > 0)
             session.Connection.Send(new EntitiesMoved([.. _moved]));

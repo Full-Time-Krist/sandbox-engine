@@ -1,0 +1,8 @@
+{
+  "type": "item",
+  "name": "base:zombie_spawn_egg",
+  "maxStackSize": 64,
+  "spawnsMob": "base:zombie",
+  "icon": "zombie_spawn_egg",
+  "displayName": "Яйцо призыва: зомби"
+}

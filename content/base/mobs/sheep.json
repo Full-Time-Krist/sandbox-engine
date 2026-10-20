@@ -1,0 +1,12 @@
+{
+  "type": "mob",
+  "name": "base:sheep",
+  "displayName": "Овца",
+  "health": 8,
+  "speed": 1.8,
+  "size": { "width": 0.9, "height": 1.3 },
+  "behavior": "base:passive",
+  "drops": [
+    { "item": "base:wool", "min": 1, "max": 2 }
+  ]
+}

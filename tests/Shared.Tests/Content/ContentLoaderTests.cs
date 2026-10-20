@@ -2,6 +2,7 @@ using System.Numerics;
 using Shared.Content;
 using Shared.Blocks;
 using Shared.Items;
+using Shared.Mobs;
 using Shared.Quests;
 
 namespace Shared.Tests.Content;
@@ -83,6 +84,16 @@ public class ContentLoaderTests
     [InlineData("""{"type":"block","name":"base:post","isOpaque":false,"shape":[[0,8,0,16,8,16]]}""", "base/post.json")]
     [InlineData("""{"type":"block","name":"base:post","isOpaque":false,"shape":[[0,0,0,16,"8",16]]}""", "base/post.json")]
     [InlineData("""{"type":"block","name":"base:post","isOpaque":true,"shape":[[4,0,4,12,16,12]]}""", "base/post.json")]
+    [InlineData("""{"type":"mob","name":"base:cow","speed":2,"size":{"width":1,"height":1},"behavior":"base:passive"}""", "base/cow.json")]
+    [InlineData("""{"type":"mob","name":"base:cow","health":0,"speed":2,"size":{"width":1,"height":1},"behavior":"base:passive"}""", "base/cow.json")]
+    [InlineData("""{"type":"mob","name":"base:cow","health":5,"speed":0,"size":{"width":1,"height":1},"behavior":"base:passive"}""", "base/cow.json")]
+    [InlineData("""{"type":"mob","name":"base:cow","health":5,"speed":2,"size":{"width":5,"height":1},"behavior":"base:passive"}""", "base/cow.json")]
+    [InlineData("""{"type":"mob","name":"base:cow","health":5,"speed":2,"size":{"width":1},"behavior":"base:passive"}""", "base/cow.json")]
+    [InlineData("""{"type":"mob","name":"base:cow","health":5,"speed":2,"size":{"width":1,"height":1},"behavior":"passive"}""", "base/cow.json")]
+    [InlineData("""{"type":"mob","name":"base:cow","health":5,"speed":2,"size":{"width":1,"height":1},"behavior":"base:passive","drops":[{"item":"base:stone","min":2,"max":1}]}""", "base/cow.json")]
+    [InlineData("""{"type":"mob","name":"base:cow","health":5,"speed":2,"size":{"width":1,"height":1},"behavior":"base:passive","drops":[{"item":"base:missing","min":0,"max":1}]}""", "base/cow.json")]
+    [InlineData("""{"type":"item","name":"base:egg","maxStackSize":64,"spawnsMob":"base:missing"}""", "base/egg.json")]
+    [InlineData("""{"type":"item","name":"base:egg","maxStackSize":64,"spawnsMob":"base:cow","placesBlock":"base:stone"}""", "base/egg.json")]
     [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"tool":"Pick Axe"}""", "base/stone.json")]
     [InlineData("""{"type":"item","name":"base:pick","maxStackSize":1,"tool":{"type":"pickaxe","tier":1}}""", "base/pick.json")]
     [InlineData("""{"type":"item","name":"base:pick","maxStackSize":1,"tool":{"type":"pickaxe","speed":0}}""", "base/pick.json")]
@@ -265,6 +276,33 @@ public class ContentLoaderTests
         Assert.True(content.Blocks.Get("base:torch").NeedsSupport);
         Assert.False(content.Blocks.Get("base:cube").NeedsSupport);
         Assert.False(content.Blocks.Get("base:glass").NeedsSupport);
+    }
+
+    /// <summary>
+    /// Мобы (шаг 9.1): поля — в определение, добыча — по предметам, название — отдельной таблицей; яйцо получает id моба
+    /// и поведение по умолчанию base:spawn_mob. Id мобов — по именам (с 1), как у блоков, независимо от порядка файлов.
+    /// </summary>
+    [Fact]
+    public void Load_Mobs_AndSpawnEggs()
+    {
+        var content = ContentLoader.Load([
+            File("base/stick.json", """{"type":"item","name":"base:stick","maxStackSize":64}"""),
+            File("base/egg.json", """{"type":"item","name":"base:egg","maxStackSize":64,"spawnsMob":"base:cow"}"""),
+            File("base/cow.json", """{"type":"mob","name":"base:cow","displayName":"Корова","health":10,"speed":1.5,"size":{"width":0.9,"height":1.4},"behavior":"base:passive","drops":[{"item":"base:stick","min":1,"max":3}]}"""),
+            File("base/bat.json", """{"type":"mob","name":"base:bat","health":4,"speed":3,"size":{"width":0.5,"height":0.5},"behavior":"base:passive"}""")
+        ]);
+
+        var cow = content.Mobs.Get("base:cow");
+        Assert.Equal(new MobId(2), cow.Id); // base:bat < base:cow
+        Assert.Equal(new MobId(1), content.Mobs.Get("base:bat").Id);
+        Assert.Equal((10, 1.5f, 0.9, 1.4, "base:passive"), (cow.Health, cow.Speed, Math.Round(cow.Width, 6), Math.Round(cow.Height, 6), cow.Behavior));
+        Assert.Equal([new MobDrop(content.Items.Get("base:stick").Id, 1, 3)], cow.Drops);
+        Assert.Empty(content.Mobs.Get("base:bat").Drops);
+        Assert.Equal("Корова", content.MobDisplayNames["base:cow"]);
+        Assert.False(content.MobDisplayNames.ContainsKey("base:bat"));
+        var egg = content.Items.Get("base:egg");
+        Assert.Equal((cow.Id, ItemRegistry.SpawnMobBehavior), (egg.SpawnsMob, egg.Behavior));
+        Assert.True(content.Items.Get("base:stick").SpawnsMob.IsNone);
     }
 
     [Fact]

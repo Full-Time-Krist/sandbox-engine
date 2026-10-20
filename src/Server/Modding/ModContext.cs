@@ -13,6 +13,7 @@ internal sealed class ModContext(string modId, ContentRegistries content, ItemBe
     public string ModId => modId;
     public BlockRegistry Blocks => content.Blocks;
     public ItemRegistry Items => content.Items;
+    public Shared.Mobs.MobRegistry Mobs => content.Mobs;
     public RecipeRegistry Recipes => content.Recipes;
     public QuestRegistry Quests => content.Quests;
 

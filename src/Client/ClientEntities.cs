@@ -1,20 +1,34 @@
 using Shared;
 using Shared.Entities;
 using Shared.Items;
+using Shared.Mobs;
 using Shared.Protocol;
 
 namespace Client;
 
-/// <summary>Сущность глазами клиента: что рисовать и где она была в двух последних тиках.</summary>
-internal sealed class ClientEntity(EntityKind kind, ItemStack item, Vector3d position)
+/// <summary>Сущность глазами клиента: что рисовать и где она была (и куда смотрела) в двух последних тиках.</summary>
+internal sealed class ClientEntity(EntityKind kind, ItemStack item, Vector3d position, MobId mob = default, float yaw = 0)
 {
     public EntityKind Kind { get; } = kind;
     public ItemStack Item { get; } = item;
+
+    /// <summary>Вид моба (<see cref="EntityKind.Mob"/>).</summary>
+    public MobId Mob { get; } = mob;
+
     public Vector3d Previous { get; set; } = position;
     public Vector3d Current { get; set; } = position;
+    public float PreviousYaw { get; set; } = yaw;
+    public float CurrentYaw { get; set; } = yaw;
 
     /// <summary>Положение между двумя последними тиками: <paramref name="alpha"/> 0 — прошлый тик, 1 — последний.</summary>
     public Vector3d At(float alpha) => Previous + (Current - Previous) * alpha;
+
+    /// <summary>Поворот между двумя последними тиками — по кратчайшей дуге: с 350° на 10° — через 0°, а не назад через 180°.</summary>
+    public float YawAt(float alpha)
+    {
+        var delta = MathF.IEEERemainder(CurrentYaw - PreviousYaw, MathF.Tau);
+        return PreviousYaw + delta * alpha;
+    }
 }
 
 /// <summary>
@@ -33,7 +47,10 @@ internal sealed class ClientEntities
     public void BeginTick()
     {
         foreach (var entity in _entities.Values)
+        {
             entity.Previous = entity.Current;
+            entity.PreviousYaw = entity.CurrentYaw;
+        }
     }
 
     /// <summary>Применяет сообщение о сущностях. Возвращает false, если оно не о них.</summary>
@@ -43,14 +60,17 @@ internal sealed class ClientEntities
         {
             case EntitySpawned spawned:
                 // Повторное появление (сервер забыл и снова показал) — просто новое состояние, без скачка из старого места.
-                _entities[spawned.Entity] = new ClientEntity(spawned.Kind, spawned.Item, spawned.Position);
+                _entities[spawned.Entity] = new ClientEntity(spawned.Kind, spawned.Item, spawned.Position, spawned.Mob, spawned.Yaw);
                 return true;
 
             case EntitiesMoved moved:
-                foreach (var (entity, position) in moved.Entities)
+                foreach (var (entity, position, yaw) in moved.Entities)
                 {
                     if (_entities.TryGetValue(entity, out var known))
+                    {
                         known.Current = position;
+                        known.CurrentYaw = yaw;
+                    }
                 }
                 return true;
 

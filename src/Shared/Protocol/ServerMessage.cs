@@ -25,8 +25,10 @@ public abstract record ServerMessage;
 /// не придут (меш у края области строится сразу).
 /// </param>
 /// <param name="WorldTime">Тик мира (<see cref="DayCycle"/>): дальше клиент считает его сам, сверяясь с <see cref="TimeSync"/>.</param>
+/// <param name="MobNames">Имена видов мобов по порядку id (с 1): сверяются так же, как блоки (с шага 9.1).</param>
 public sealed record JoinAccepted(int PlayerId, Vector3d StartPosition, LookAngles StartLook, GameMode Mode,
-    ImmutableArray<string> BlockNames, ImmutableArray<string> ItemNames, ChunkArea LoadArea, long WorldTime) : ServerMessage;
+    ImmutableArray<string> BlockNames, ImmutableArray<string> ItemNames, ChunkArea LoadArea, long WorldTime,
+    ImmutableArray<string> MobNames = default) : ServerMessage;
 
 /// <summary>
 /// Тик мира — сверка часов: раз в <see cref="TimeSync.IntervalTicks"/> и сразу, когда время перевели (<see cref="AdvanceTime"/>).
@@ -126,10 +128,13 @@ public sealed record HealthChanged(int Health, int MaxHealth) : ServerMessage;
 /// <param name="Cause">Причина — имя вида <c>base:fall</c>; текст для игрока подбирает клиент.</param>
 public sealed record DeathNotice(string Cause) : ServerMessage;
 
-/// <summary>Вид сущности: что клиент рисует. Пока только предметы на земле.</summary>
+/// <summary>Вид сущности: что клиент рисует.</summary>
 public enum EntityKind : byte
 {
     Item = 1,
+
+    /// <summary>Моб (с шага 9.1): какой — <see cref="EntitySpawned.Mob"/>.</summary>
+    Mob = 2,
 }
 
 /// <summary>
@@ -138,13 +143,16 @@ public enum EntityKind : byte
 /// </summary>
 /// <param name="Position">Точка тела: центр нижней грани короба.</param>
 /// <param name="Item">Стопка у предмета на земле (<see cref="EntityKind.Item"/>).</param>
-public sealed record EntitySpawned(EntityId Entity, EntityKind Kind, Vector3d Position, ItemStack Item) : ServerMessage;
+/// <param name="Mob">Вид моба (<see cref="EntityKind.Mob"/>).</param>
+/// <param name="Yaw">Поворот тела, радианы — как у камеры (0 — на −Z).</param>
+public sealed record EntitySpawned(EntityId Entity, EntityKind Kind, Vector3d Position, ItemStack Item, Mobs.MobId Mob = default,
+    float Yaw = 0) : ServerMessage;
 
 /// <summary>Сущности, сдвинувшиеся за тик, — одним сообщением в конце тика; неподвижные не шлются.</summary>
 public sealed record EntitiesMoved(ImmutableArray<EntityPosition> Entities) : ServerMessage;
 
-/// <summary>Новое положение сущности для <see cref="EntitiesMoved"/>.</summary>
-public readonly record struct EntityPosition(EntityId Entity, Vector3d Position);
+/// <summary>Новое положение и поворот сущности для <see cref="EntitiesMoved"/>.</summary>
+public readonly record struct EntityPosition(EntityId Entity, Vector3d Position, float Yaw = 0);
 
 /// <summary>Сущность больше не видна клиенту: удалена на сервере или ушла (вместе с чанком) за пределы отправленного.</summary>
 public sealed record EntityRemoved(EntityId Entity) : ServerMessage;

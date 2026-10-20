@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using Shared.Blocks;
 using Shared.Items;
 using Shared.Lighting;
+using Shared.Mobs;
 using Shared.Quests;
 
 namespace Shared.Content;
@@ -34,9 +35,12 @@ public sealed record ContentPack(string Name, string Directory, IReadOnlyCollect
 /// </param>
 /// <param name="Recipes">Рецепты (<c>type: "recipe"</c>); ссылки на предметы и станки уже проверены.</param>
 /// <param name="Quests">Задания (<c>type: "quest"</c>); цели и предшествующие задания проверены, циклов нет.</param>
+/// <param name="Mobs">Виды мобов (<c>type: "mob"</c>, с шага 9.1); добыча проверена.</param>
+/// <param name="MobDisplayNames">Названия мобов для игрока (поле <c>displayName</c>); моба без названия здесь нет.</param>
 public sealed record ContentRegistries(BlockRegistry Blocks, ItemRegistry Items,
     ImmutableDictionary<string, BlockTextures> BlockTextures, ImmutableDictionary<string, string> ItemDisplayNames,
-    ImmutableDictionary<string, string> ItemIcons, RecipeRegistry Recipes, QuestRegistry Quests);
+    ImmutableDictionary<string, string> ItemIcons, RecipeRegistry Recipes, QuestRegistry Quests,
+    MobRegistry Mobs, ImmutableDictionary<string, string> MobDisplayNames);
 
 /// <summary>
 /// Текстуры граней блока — полные имена <c>пакет:имя</c>. В JSON можно писать коротко (<c>"stone"</c>): имя дополняется
@@ -154,6 +158,9 @@ public static partial class ContentLoader
         var quests = new List<QuestJson>();
         var questOverrides = new List<QuestJson>();
         var questNames = new HashSet<string>(StringComparer.Ordinal);
+        var mobs = new List<MobJson>();
+        var mobOverrides = new List<MobJson>();
+        var mobNames = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var file in orderedFiles.OrderBy(file => file.Path, StringComparer.Ordinal))
         {
@@ -209,7 +216,8 @@ public static partial class ContentLoader
                     break;
 
                 case "item":
-                    CheckProperties(root, file, "type", "name", "maxStackSize", "placesBlock", "behavior", "displayName", "icon", "tool", "override");
+                    CheckProperties(root, file, "type", "name", "maxStackSize", "placesBlock", "behavior", "displayName", "icon", "tool",
+                        "spawnsMob", "override");
                     if (name == ItemRegistry.AirName)
                         throw Error(file, $"имя '{name}' зарезервировано для пустого предмета и не должно объявляться в JSON.");
                     if (!isOverride && !itemNames.Add(name))
@@ -224,8 +232,13 @@ public static partial class ContentLoader
                     if (behavior is not null && !ContentNames.IsValid(behavior))
                         throw Error(file, $"behavior '{behavior}' должен иметь вид 'namespace:name'.");
                     var icon = root.TryGetProperty("icon", out var iconValue) ? TextureName(iconValue, "icon", pack, file) : null;
+                    var spawnsMob = OptionalString(root, "spawnsMob", file);
+                    if (spawnsMob is not null && !ContentNames.IsValid(spawnsMob))
+                        throw Error(file, $"spawnsMob '{spawnsMob}' должен иметь вид 'namespace:name'.");
+                    if (spawnsMob is not null && placesBlock is not null)
+                        throw Error(file, "предмет не может ставить и блок (placesBlock), и моба (spawnsMob).");
                     (isOverride ? itemOverrides : items).Add(new ItemJson(file.Path, pack, name, maxStackSize, placesBlock, behavior,
-                        OptionalString(root, "displayName", file), icon, ToolOf(root, file)));
+                        OptionalString(root, "displayName", file), icon, ToolOf(root, file), spawnsMob));
                     break;
 
                 case "recipe":
@@ -251,8 +264,15 @@ public static partial class ContentLoader
                         RequiresOf(root, file)));
                     break;
 
+                case "mob":
+                    CheckProperties(root, file, "type", "name", "displayName", "health", "speed", "size", "behavior", "drops", "override");
+                    if (!isOverride && !mobNames.Add(name))
+                        throw Error(file, $"моб '{name}' объявлен более одного раза.");
+                    (isOverride ? mobOverrides : mobs).Add(MobOf(root, file, pack, name));
+                    break;
+
                 default:
-                    throw Error(file, $"неизвестный type '{type}'; допустимы 'block', 'item', 'recipe' и 'quest'.");
+                    throw Error(file, $"неизвестный type '{type}'; допустимы 'block', 'item', 'recipe', 'quest' и 'mob'.");
             }
         }
 
@@ -260,6 +280,13 @@ public static partial class ContentLoader
         ApplyOverrides(items, itemOverrides, ("предмет", "предмета"), item => item.Name, item => item.Pack, item => item.Path, packOrder, packDependencies);
         ApplyOverrides(recipes, recipeOverrides, ("рецепт", "рецепта"), recipe => recipe.Name, recipe => recipe.Pack, recipe => recipe.Path, packOrder, packDependencies);
         ApplyOverrides(quests, questOverrides, ("задание", "задания"), quest => quest.Name, quest => quest.Pack, quest => quest.Path, packOrder, packDependencies);
+        ApplyOverrides(mobs, mobOverrides, ("моб", "моба"), mob => mob.Name, mob => mob.Pack, mob => mob.Path, packOrder, packDependencies);
+
+        // Яйцо призыва ссылается на моба, а моб — на предметы-добычу. Id мобов раздаются по именам, как у блоков, поэтому
+        // известны заранее: предметы получают их сразу, а мобы регистрируются после предметов, с проверенной добычей.
+        var sortedMobs = mobs.OrderBy(mob => mob.Name, StringComparer.Ordinal).ToList();
+        var mobIds = sortedMobs.Select((mob, index) => (mob.Name, Id: new MobId((ushort)(index + 1))))
+            .ToDictionary(pair => pair.Name, pair => pair.Id, StringComparer.Ordinal);
 
         var blockRegistry = new BlockRegistry();
         var textures = ImmutableDictionary.CreateBuilder<string, BlockTextures>(StringComparer.Ordinal);
@@ -288,7 +315,11 @@ public static partial class ContentLoader
                 placedBlock = definition.Id;
             }
 
-            itemRegistry.Register(item.Name, item.MaxStackSize, placedBlock, item.Behavior, item.Tool);
+            var spawnedMob = MobId.None;
+            if (item.SpawnsMob is not null && !mobIds.TryGetValue(item.SpawnsMob, out spawnedMob))
+                throw new ContentLoadException($"Файл '{item.Path}': предмет '{item.Name}' ставит неизвестного моба '{item.SpawnsMob}'.");
+
+            itemRegistry.Register(item.Name, item.MaxStackSize, placedBlock, item.Behavior, item.Tool, spawnedMob);
             if (item.DisplayName is not null)
                 displayNames.Add(item.Name, item.DisplayName);
             if (item.Icon is not null)
@@ -297,9 +328,74 @@ public static partial class ContentLoader
 
         blockRegistry.Freeze();
         itemRegistry.Freeze();
+
+        var mobRegistry = new MobRegistry();
+        var mobDisplayNames = ImmutableDictionary.CreateBuilder<string, string>(StringComparer.Ordinal);
+        foreach (var mob in sortedMobs)
+        {
+            var drops = mob.Drops.Select(drop => itemRegistry.TryGet(drop.Item, out var item)
+                    ? new MobDrop(item.Id, drop.Min, drop.Max)
+                    : throw new ContentLoadException($"Файл '{mob.Path}': моб '{mob.Name}' роняет неизвестный предмет '{drop.Item}'."))
+                .ToImmutableArray();
+            var definition = mobRegistry.Register(mob.Name, mob.Health, mob.Speed, mob.Width, mob.Height, mob.Behavior, drops);
+            if (definition.Id != mobIds[mob.Name])
+                throw new InvalidOperationException($"Id моба '{mob.Name}' разошёлся с заранее розданным.");
+            if (mob.DisplayName is not null)
+                mobDisplayNames.Add(mob.Name, mob.DisplayName);
+        }
+        mobRegistry.Freeze();
+
         var recipeRegistry = new RecipeRegistry(recipes.Select(recipe => ResolveRecipe(recipe, blockRegistry, itemRegistry)));
         return new ContentRegistries(blockRegistry, itemRegistry, textures.ToImmutable(), displayNames.ToImmutable(), icons.ToImmutable(),
-            recipeRegistry, ResolveQuests(quests, blockRegistry, itemRegistry));
+            recipeRegistry, ResolveQuests(quests, blockRegistry, itemRegistry), mobRegistry, mobDisplayNames.ToImmutable());
+    }
+
+    /// <summary>
+    /// Моб: <c>health</c> (целое ≥ 1), <c>speed</c> (блоков в секунду, > 0), <c>size</c> (<c>{width, height}</c>, до 4 блоков),
+    /// <c>behavior</c> (имя поведения), <c>drops</c> (<c>[{item, min, max}]</c>, по умолчанию пусто), <c>displayName</c>.
+    /// </summary>
+    private static MobJson MobOf(JsonElement root, ContentJsonFile file, string pack, string name)
+    {
+        var health = RequiredInt32(root, "health", file);
+        if (health < 1)
+            throw Error(file, $"health должен быть не меньше 1, получено {health}.");
+        if (!root.TryGetProperty("speed", out _))
+            throw Error(file, "нет обязательного поля 'speed'.");
+        var speed = OptionalNumber(root, "speed", 0, file);
+        if (!(speed > 0))
+            throw Error(file, $"speed должна быть больше 0, получено {speed}.");
+        if (!root.TryGetProperty("size", out var size) || size.ValueKind != JsonValueKind.Object)
+            throw Error(file, "нет обязательного поля 'size' — объекта {width, height}.");
+        CheckProperties(size, file, "width", "height");
+        var width = OptionalNumber(size, "width", 0, file);
+        var height = OptionalNumber(size, "height", 0, file);
+        if (!(width > 0 && width <= 4 && height > 0 && height <= 4))
+            throw Error(file, $"size: ширина и высота — от 0 до 4 блоков, получено {width} × {height}.");
+        var behavior = RequiredString(root, "behavior", file);
+        if (!ContentNames.IsValid(behavior))
+            throw Error(file, $"behavior '{behavior}' должен иметь вид 'namespace:name'.");
+
+        var drops = ImmutableArray.CreateBuilder<(string Item, int Min, int Max)>();
+        if (root.TryGetProperty("drops", out var dropsValue))
+        {
+            if (dropsValue.ValueKind != JsonValueKind.Array)
+                throw Error(file, "поле 'drops' должно быть массивом [{item, min, max}].");
+            foreach (var drop in dropsValue.EnumerateArray())
+            {
+                if (drop.ValueKind != JsonValueKind.Object)
+                    throw Error(file, "каждая добыча в 'drops' — объект {item, min, max}.");
+                CheckProperties(drop, file, "item", "min", "max");
+                var item = RequiredString(drop, "item", file);
+                if (!ContentNames.IsValid(item))
+                    throw Error(file, $"предмет добычи '{item}' должен иметь вид 'namespace:name'.");
+                int min = RequiredInt32(drop, "min", file), max = RequiredInt32(drop, "max", file);
+                if (min < 0 || max < min)
+                    throw Error(file, $"у добычи '{item}' должно быть 0 ≤ min ≤ max, получено {min}–{max}.");
+                drops.Add((item, min, max));
+            }
+        }
+        return new MobJson(file.Path, pack, name, OptionalString(root, "displayName", file), health, speed, width, height, behavior,
+            drops.ToImmutable());
     }
 
     /// <summary>
@@ -758,7 +854,9 @@ public static partial class ContentLoader
     private sealed record BlockJson(string Path, string Pack, string Name, bool IsOpaque, bool IsSolid, BlockTextures? Textures,
         BlockMining Mining, int Light, BlockShape Shape, bool NeedsSupport, bool BlocksLight);
     private sealed record ItemJson(string Path, string Pack, string Name, int MaxStackSize, string? PlacesBlock, string? Behavior,
-        string? DisplayName, string? Icon, ToolInfo? Tool);
+        string? DisplayName, string? Icon, ToolInfo? Tool, string? SpawnsMob);
+    private sealed record MobJson(string Path, string Pack, string Name, string? DisplayName, int Health, float Speed, double Width,
+        double Height, string Behavior, ImmutableArray<(string Item, int Min, int Max)> Drops);
     private sealed record RecipeJson(string Path, string Pack, string Name, StackJson Result, ImmutableArray<StackJson> Ingredients,
         string? Station);
     private sealed record StackJson(string Item, int Count);

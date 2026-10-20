@@ -42,6 +42,12 @@ public interface IWorld
     bool TryPlaceBlock(BlockPos pos, BlockId block, IPlayer player);
 
     /// <summary>
+    /// Ставит моба вида <paramref name="mob"/> ногами в <paramref name="feet"/> (с шага 9.1). False, если вида нет, чанк
+    /// не загружен или тело во что-то упирается.
+    /// </summary>
+    bool TrySpawnMob(Shared.Mobs.MobId mob, Vector3d feet);
+
+    /// <summary>
     /// Кладёт стопку предметом на землю: точка — низ предмета, он падает и ложится, как добыча; подобрать его можно через
     /// 0,5 с. Пустая стопка — ничего. В незагруженном месте предмет стоит, пока туда не придёт игрок.
     /// </summary>

@@ -37,4 +37,7 @@ internal struct DroppedItem
 internal struct Synced
 {
     public Vector3d SentPosition;
+
+    /// <summary>Разосланный поворот (у сущностей с <see cref="Facing"/>): повернулся — тоже сдвинулся для рассылки.</summary>
+    public float SentYaw;
 }

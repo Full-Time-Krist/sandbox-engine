@@ -218,6 +218,7 @@ TEXTURES = {
     "furnace_side": furnace_side,
     "furnace_top": furnace_top,
     "torch": torch_block,
+    "wool": lambda rng: noisy(rng, (232, 232, 226), 10),
 }
 
 
@@ -314,6 +315,34 @@ def charcoal():
 
 ITEMS["torch"] = torch_item
 ITEMS["charcoal"] = charcoal
+
+
+def bone():
+    light, shade = (236, 232, 214), (196, 190, 168)
+    px = blank()
+    for i in range(9):  # стержень по диагонали
+        x, y = 4 + i, 11 - i
+        px[y][x] = light
+        px[y + 1][x] = shade
+    for x, y in ((3, 11), (2, 12), (3, 13), (4, 13), (12, 2), (13, 1), (13, 3), (14, 3)):  # утолщения на концах
+        px[y][x] = light
+    return px
+
+
+def spawn_egg(base, spots):
+    px = blank()
+    for y in range(2, 15):  # овал: уже сверху, шире снизу
+        half = [1, 2, 3, 3, 4, 4, 4, 5, 5, 5, 4, 4, 3][y - 2]
+        for x in range(8 - half, 8 + half):
+            px[y][x] = base
+    for x, y in ((6, 5), (9, 7), (7, 9), (10, 11), (5, 11), (8, 13)):
+        px[y][x] = spots
+    return px
+
+
+ITEMS["bone"] = bone
+ITEMS["zombie_spawn_egg"] = lambda: spawn_egg((64, 132, 72), (38, 72, 44))
+ITEMS["sheep_spawn_egg"] = lambda: spawn_egg((228, 228, 222), (232, 168, 168))
 
 
 # --- Стадии трещин: 0 — едва заметная, 9 — почти разваленный блок. Тёмные линии с прозрачностью поверх блока. ---

@@ -84,7 +84,22 @@ internal sealed class EntityPersistence(EntityWorld entities, WorldSave? save, I
                     entities.Destroy(entity);
             }
         }
+
+        // Мобы пока не сохраняются (шаг 9.5): уходят вместе с выгруженным чанком.
+        if (remove)
+        {
+            _mobsToRemove.Clear();
+            foreach (var entity in entities.Query<Mob, Position>())
+            {
+                if (wanted.Contains(BlockPos.Containing(entities.Get<Position>(entity).Value).Chunk))
+                    _mobsToRemove.Add(entity);
+            }
+            foreach (var entity in _mobsToRemove)
+                entities.Destroy(entity);
+        }
     }
+
+    private readonly List<Shared.Entities.EntityId> _mobsToRemove = [];
 
     /// <summary>Записывает все сущности (автосохранение, выход) и стирает опустевшие чанки.</summary>
     public void SaveAll()

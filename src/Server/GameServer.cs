@@ -43,6 +43,8 @@ public sealed class GameServer : IDisposable
     private readonly ConcurrentQueue<IConnection<ServerMessage, ClientMessage>> _pendingConnections = new();
     private readonly ImmutableArray<string> _blockNames;
     private readonly ImmutableArray<string> _itemNames;
+    private readonly ImmutableArray<string> _mobNames;
+    private readonly Shared.Mobs.MobRegistry _mobs;
     private readonly BlockRegistry _registry;
     private readonly BaseBlocks _blocks;
     private readonly ItemRegistry _items;
@@ -151,6 +153,8 @@ public sealed class GameServer : IDisposable
         _items = content.Items;
         _itemSystem = new ItemSystem(_items);
         _itemNames = [.. _items.All.Select(i => i.Name)];
+        _mobs = content.Mobs;
+        _mobNames = [.. _mobs.All.Select(m => m.Name)];
         _recipes = content.Recipes;
         _events = new GameEvents(modLog);
         _quests = new QuestTracker(content.Quests, _events);
@@ -305,6 +309,7 @@ public sealed class GameServer : IDisposable
         _itemSystem.Age(Entities);
         _itemSystem.Attract(Entities, _sessions);
         MovementSystem.Run(Entities, World.Chunks, _registry);
+        MobEntities.Move(Entities, _mobs, World.Chunks, _registry);
         _itemSystem.PickUp(Entities, _sessions, (session, stack) => _events.Raise(new ItemPickedUp(_editor, session, stack)));
         _itemSystem.Merge(Entities);
         _events.Dispatch();
@@ -643,7 +648,7 @@ public sealed class GameServer : IDisposable
         session.Look = saved?.Look ?? default;
         // Чанки придут в следующих тиках (StreamChunks), начиная с ближайших.
         session.Connection.Send(new JoinAccepted(session.PlayerId, start, session.Look, mode, _blockNames, _itemNames, session.View.LoadArea,
-            _worldTime));
+            _worldTime, _mobNames));
         // Инвентарь уходит целиком, поэтому изменения от его заполнения отправлять не нужно.
         session.Connection.Send(new InventoryContents(inventory.CopySlots(), inventory.SelectedSlot));
         inventory.TakeChanges();
@@ -1007,6 +1012,17 @@ public sealed class GameServer : IDisposable
     private sealed class WorldEditor(GameServer server) : IWorld
     {
         public BlockId GetBlock(BlockPos pos) => server.World.Chunks.GetBlock(pos);
+
+        public bool TrySpawnMob(Shared.Mobs.MobId mob, Vector3d feet)
+        {
+            if (!server._mobs.Contains(mob) || !feet.IsFinite)
+                return false;
+            var definition = server._mobs.Get(mob);
+            if (!MobEntities.Fits(definition, feet, server.World.Chunks, server._registry))
+                return false;
+            MobEntities.Spawn(server.Entities, definition, feet, yaw: (float)(server._random.NextDouble() * Math.Tau));
+            return true;
+        }
 
         public LightLevel GetLight(BlockPos pos) => new(server.World.Light.GetSky(pos), server.World.Light.GetBlock(pos));
 

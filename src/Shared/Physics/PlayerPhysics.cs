@@ -19,6 +19,20 @@ namespace Shared.Physics;
 public readonly record struct PlayerInput(Vector2 Move, bool Jump = false, bool Down = false, bool Sprint = false,
     Vector2 Facing = default);
 
+/// <summary>
+/// Кто ходит (с шага 9.1 — не только игрок, но и мобы): короб тела и скорости. Физика ходьбы (<see cref="PlayerPhysics.Step"/>)
+/// у всех одна: те же столкновения, подъём на уступ и падение.
+/// </summary>
+/// <param name="Width">Ширина короба по X и Z, в блоках.</param>
+/// <param name="Height">Высота короба, в блоках.</param>
+/// <param name="WalkSpeed">Скорость ходьбы, блоков в секунду.</param>
+/// <param name="SprintSpeed">Скорость бега (<see cref="PlayerInput.Sprint"/>).</param>
+public readonly record struct Walker(double Width, double Height, float WalkSpeed, float SprintSpeed)
+{
+    /// <summary>Короб тела, стоящего ногами в точке <paramref name="feet"/>.</summary>
+    public Aabb BodyAt(Vector3d feet) => BoxPhysics.BodyAt(feet, Width, Height);
+}
+
 /// <summary>Состояние тела игрока между тиками.</summary>
 /// <param name="Position">Точка ног: центр нижней грани тела. Абсолютная позиция, поэтому double.</param>
 /// <param name="Velocity">Скорость в блоках в секунду. Небольшие числа — хватает float.</param>
@@ -77,14 +91,21 @@ public static class PlayerPhysics
 
     private const double Dt = GameTime.TickDuration;
 
-    /// <summary>Короб тела, стоящего ногами в точке <paramref name="feet"/>.</summary>
-    public static Aabb BodyAt(Vector3d feet) => BoxPhysics.BodyAt(feet, Width, Height);
+    /// <summary>Игрок как ходок: его короб и скорости.</summary>
+    public static readonly Walker Player = new(Width, Height, WalkSpeed, SprintSpeed);
+
+    /// <summary>Короб тела игрока, стоящего ногами в точке <paramref name="feet"/>.</summary>
+    public static Aabb BodyAt(Vector3d feet) => Player.BodyAt(feet);
 
     /// <summary>
-    /// Один тик. Если тело задело бы незагруженный чанк, игрок стоит на месте и теряет скорость:
+    /// Один тик игрока. Если тело задело бы незагруженный чанк, игрок стоит на месте и теряет скорость:
     /// иначе при входе в мир или быстром полёте он провалился бы сквозь ещё не пришедшие чанки.
     /// </summary>
-    public static PlayerState Step(PlayerState state, PlayerInput input, ChunkMap chunks, BlockRegistry blocks)
+    public static PlayerState Step(PlayerState state, PlayerInput input, ChunkMap chunks, BlockRegistry blocks) =>
+        Step(state, input, Player, chunks, blocks);
+
+    /// <summary>Один тик любого ходока (<paramref name="walker"/>): игрока или моба. Правила — как у игрока.</summary>
+    public static PlayerState Step(PlayerState state, PlayerInput input, Walker walker, ChunkMap chunks, BlockRegistry blocks)
     {
         var move = float.IsFinite(input.Move.LengthSquared()) ? input.Move : Vector2.Zero;
         if (move.LengthSquared() > 1)
@@ -99,7 +120,7 @@ public static class PlayerPhysics
         }
         else
         {
-            var speed = input.Sprint ? SprintSpeed : WalkSpeed;
+            var speed = input.Sprint ? walker.SprintSpeed : walker.WalkSpeed;
             var control = state.OnGround ? GroundControl : AirControl;
             velocity.X += (move.X * speed - velocity.X) * control;
             velocity.Z += (move.Y * speed - velocity.Z) * control;
@@ -109,13 +130,13 @@ public static class PlayerPhysics
         }
 
         var wanted = new Vector3d(velocity.X * Dt, velocity.Y * Dt, velocity.Z * Dt);
-        if (BoxPhysics.Move(BodyAt(state.Position), wanted, chunks, blocks) is not { } moved)
+        if (BoxPhysics.Move(walker.BodyAt(state.Position), wanted, chunks, blocks) is not { } moved)
             return state with { Velocity = Vector3.Zero };
 
         // Шёл по земле и упёрся сбоку — пробуем тот же шаг с подъёмом; берём, если так ушли дальше по горизонтали.
         if (!state.Flying && state.OnGround && wanted.Y <= 0 && (moved.X != wanted.X || moved.Z != wanted.Z)
             && Vector2.Dot(move, input.Facing) >= StepUpCone * move.Length()
-            && StepUp(state.Position, wanted, chunks, blocks) is { } stepped
+            && StepUp(walker, state.Position, wanted, chunks, blocks) is { } stepped
             && Horizontal(stepped) > Horizontal(moved) + Aabb.Epsilon)
             moved = stepped;
 
@@ -142,7 +163,7 @@ public static class PlayerPhysics
     public static Vector3d? Sweep(Vector3d feet, Vector3d delta, ChunkMap chunks, BlockRegistry blocks)
     {
         var moved = BoxPhysics.Move(BodyAt(feet), delta, chunks, blocks);
-        if (moved is { } plain && plain != delta && StepUp(feet, delta, chunks, blocks) is { } stepped && Close(stepped, delta))
+        if (moved is { } plain && plain != delta && StepUp(Player, feet, delta, chunks, blocks) is { } stepped && Close(stepped, delta))
             return stepped;
         return moved;
     }
@@ -152,9 +173,9 @@ public static class PlayerPhysics
     /// <paramref name="wanted"/> и опускается на высоту подъёма и ещё на <paramref name="wanted"/>.Y, пока не встанет, —
     /// на уступ. Null — нечего поднимать (потолок) или путь задевает незагруженный чанк.
     /// </summary>
-    private static Vector3d? StepUp(Vector3d feet, Vector3d wanted, ChunkMap chunks, BlockRegistry blocks)
+    private static Vector3d? StepUp(Walker walker, Vector3d feet, Vector3d wanted, ChunkMap chunks, BlockRegistry blocks)
     {
-        var body = BodyAt(feet);
+        var body = walker.BodyAt(feet);
         if (BoxPhysics.Move(body, new Vector3d(0, StepHeight, 0), chunks, blocks) is not { } up || up.Y <= Aabb.Epsilon)
             return null;
         body = body.Offset(up);
@@ -172,10 +193,13 @@ public static class PlayerPhysics
     private static bool Close(Vector3d a, Vector3d b) =>
         Math.Abs(a.X - b.X) <= Aabb.Epsilon && Math.Abs(a.Y - b.Y) <= Aabb.Epsilon && Math.Abs(a.Z - b.Z) <= Aabb.Epsilon;
 
-    /// <summary>Пересекает ли тело в этой точке твёрдый блок. Незагруженный мир считается пустым.</summary>
-    public static bool Collides(Vector3d feet, ChunkMap chunks, BlockRegistry blocks)
+    /// <summary>Пересекает ли тело игрока в этой точке твёрдый блок. Незагруженный мир считается пустым.</summary>
+    public static bool Collides(Vector3d feet, ChunkMap chunks, BlockRegistry blocks) => Collides(Player, feet, chunks, blocks);
+
+    /// <summary>Пересекает ли тело ходока <paramref name="walker"/> в этой точке твёрдый блок. Незагруженный мир считается пустым.</summary>
+    public static bool Collides(Walker walker, Vector3d feet, ChunkMap chunks, BlockRegistry blocks)
     {
-        var body = BodyAt(feet);
+        var body = walker.BodyAt(feet);
         var (min, max) = BoxPhysics.BlockRange(body);
         foreach (var obstacle in BoxPhysics.SolidBlocks(min, max, chunks, blocks))
         {

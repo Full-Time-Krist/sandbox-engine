@@ -16,5 +16,6 @@ internal sealed class BaseMod : IMod
     {
         context.RegisterItemBehavior(ItemRegistry.HandBehavior, new HandBehavior());
         context.RegisterItemBehavior(ItemRegistry.PlaceBlockBehavior, new BlockItemBehavior());
+        context.RegisterItemBehavior(ItemRegistry.SpawnMobBehavior, new SpawnEggBehavior());
     }
 }

@@ -1,0 +1,7 @@
+{
+  "type": "block",
+  "name": "base:wool",
+  "isOpaque": true,
+  "textures": "wool",
+  "hardness": 0.8
+}

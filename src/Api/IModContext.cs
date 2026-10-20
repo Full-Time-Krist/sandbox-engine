@@ -16,6 +16,9 @@ public interface IModContext
     /// <summary>Предметы всего контента, уже загруженные и замороженные.</summary>
     ItemRegistry Items { get; }
 
+    /// <summary>Виды мобов всего контента (с шага 9.1): по ним — <see cref="IWorld.TrySpawnMob"/>.</summary>
+    Shared.Mobs.MobRegistry Mobs { get; }
+
     /// <summary>Рецепты всего контента (с заменами модов).</summary>
     RecipeRegistry Recipes { get; }
 

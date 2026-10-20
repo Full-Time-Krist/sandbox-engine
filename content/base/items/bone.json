@@ -1,0 +1,7 @@
+{
+  "type": "item",
+  "name": "base:bone",
+  "maxStackSize": 64,
+  "icon": "bone",
+  "displayName": "Кость"
+}

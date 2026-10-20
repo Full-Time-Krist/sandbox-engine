@@ -1,6 +1,7 @@
 using Shared.Blocks;
 using Shared.Content;
 using Shared.Items;
+using Shared.Mobs;
 using Shared.Modding;
 
 namespace Shared.Tests.Content;
@@ -32,6 +33,7 @@ public class GameContentTests
             ("base:stone", true, true, Uniform("stone")),
             ("base:stone_slab", false, true, Uniform("stone")),
             ("base:torch", false, false, Uniform("torch")),
+            ("base:wool", true, true, Uniform("wool")),
         ];
 
         var actual = _content.Blocks.All.Where(block => !block.Id.IsAir)
@@ -135,6 +137,10 @@ public class GameContentTests
         string[] natural = ["base:grass", "base:dirt", "base:sand", "base:log", "base:leaves", "base:stone", "base:copper_ore"];
         var have = new HashSet<string>(StringComparer.Ordinal);
         var order = new List<string>();
+        // Добыча с мобов (шаг 9.1) доступна без ремесла — мобов можно победить и рукой.
+        foreach (var mob in _content.Mobs.All)
+        foreach (var drop in mob.Drops)
+            have.Add(_content.Items.Get(drop.Item).Name);
 
         for (var changed = true; changed;)
         {
@@ -168,8 +174,9 @@ public class GameContentTests
         Assert.Contains("base:copper_pickaxe", have);
         Assert.True(order.IndexOf("base:wooden_pickaxe") < order.IndexOf("base:stone"), string.Join(", ", order));
         Assert.True(order.IndexOf("base:stone_pickaxe") < order.IndexOf("base:copper_ore"), string.Join(", ", order));
-        // Каждый ванильный предмет, кроме природных блоков, делается по рецепту.
-        Assert.All(_content.Items.All.Where(i => !i.Id.IsAir), item => Assert.Contains(item.Name, have));
+        // Каждый ванильный предмет, кроме природных блоков и добычи с мобов, делается по рецепту; яйца призыва — только в
+        // творческой палитре.
+        Assert.All(_content.Items.All.Where(i => !i.Id.IsAir && i.SpawnsMob.IsNone), item => Assert.Contains(item.Name, have));
     }
 
     /// <summary>Ремесло ванили: доски из бревна, инструменты у верстака, слиток в печи, одна штука инструмента за раз.</summary>
@@ -281,6 +288,30 @@ public class GameContentTests
         }
         Assert.Equal(["base:planks_slab", "base:stone_slab", "base:torch"],
             _content.Blocks.All.Where(b => !b.Shape.IsFullCube).Select(b => b.Name));
+    }
+
+    /// <summary>
+    /// Мобы (шаг 9.1): зомби — враг ночи (поведение base:hostile_melee), роняет кость; овца — животное (base:passive),
+    /// роняет шерсть; у каждого — яйцо призыва с картинкой, ставящее именно его.
+    /// </summary>
+    [Fact]
+    public void VanillaMobs()
+    {
+        var zombie = _content.Mobs.Get("base:zombie");
+        var sheep = _content.Mobs.Get("base:sheep");
+        Assert.Equal(("base:hostile_melee", 20), (zombie.Behavior, zombie.Health));
+        Assert.Equal(("base:passive", 8), (sheep.Behavior, sheep.Health));
+        Assert.Equal([new MobDrop(_content.Items.Get("base:bone").Id, 0, 2)], zombie.Drops);
+        Assert.Equal([new MobDrop(_content.Items.Get("base:wool").Id, 1, 2)], sheep.Drops);
+        Assert.Equal(("Зомби", "Овца"), (_content.MobDisplayNames["base:zombie"], _content.MobDisplayNames["base:sheep"]));
+
+        foreach (var mob in new[] { zombie, sheep })
+        {
+            var egg = _content.Items.Get(mob.Name + "_spawn_egg");
+            Assert.Equal((mob.Id, ItemRegistry.SpawnMobBehavior), (egg.SpawnsMob, egg.Behavior));
+            Assert.True(_content.ItemIcons.ContainsKey(egg.Name), egg.Name);
+        }
+        Assert.Equal(2, _content.Items.All.Count(i => !i.SpawnsMob.IsNone));
     }
 
     private static BlockTextures Uniform(string name) => new("base:" + name, "base:" + name, "base:" + name);

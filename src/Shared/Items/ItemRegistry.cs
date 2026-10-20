@@ -21,6 +21,9 @@ public sealed class ItemRegistry
     /// <summary>Поведение по умолчанию для предмета, который ставит блок.</summary>
     public const string PlaceBlockBehavior = "base:place_block";
 
+    /// <summary>Поведение по умолчанию для яйца призыва (<see cref="ItemDefinition.SpawnsMob"/>): ставит моба.</summary>
+    public const string SpawnMobBehavior = "base:spawn_mob";
+
     private readonly List<ItemDefinition> _byId = [];
     private readonly Dictionary<string, ItemDefinition> _byName = new(StringComparer.Ordinal);
 
@@ -43,7 +46,9 @@ public sealed class ItemRegistry
     /// <param name="behavior">Имя поведения; null — по умолчанию (<see cref="PlaceBlockBehavior"/> для предмета-блока,
     /// иначе <see cref="HandBehavior"/>).</param>
     /// <param name="tool">Свойства инструмента; null — не инструмент.</param>
-    public ItemDefinition Register(string name, int maxStackSize, BlockId? block = null, string? behavior = null, ToolInfo? tool = null)
+    /// <param name="spawnsMob">Какого моба ставит (яйцо призыва); по умолчанию — никакого.</param>
+    public ItemDefinition Register(string name, int maxStackSize, BlockId? block = null, string? behavior = null, ToolInfo? tool = null,
+        Mobs.MobId spawnsMob = default)
     {
         if (IsFrozen)
             throw new InvalidOperationException($"Реестр заморожен, предмет '{name}' зарегистрировать нельзя.");
@@ -60,8 +65,14 @@ public sealed class ItemRegistry
         if (behavior != null && !ContentNames.IsValid(behavior))
             throw new ArgumentException($"Имя поведения '{behavior}' должно иметь вид 'namespace:name'.", nameof(behavior));
 
-        var definition = new ItemDefinition(new ItemId((ushort)_byId.Count), name, maxStackSize, block,
-            behavior ?? (block != null ? PlaceBlockBehavior : HandBehavior), tool);
+        if (block != null && !spawnsMob.IsNone)
+            throw new ArgumentException($"Предмет '{name}' не может ставить и блок, и моба.", nameof(spawnsMob));
+
+        var defaultBehavior = block != null ? PlaceBlockBehavior : !spawnsMob.IsNone ? SpawnMobBehavior : HandBehavior;
+        var definition = new ItemDefinition(new ItemId((ushort)_byId.Count), name, maxStackSize, block, behavior ?? defaultBehavior, tool)
+        {
+            SpawnsMob = spawnsMob,
+        };
         Add(definition);
         if (block is { } placed)
             _byBlock.TryAdd(placed, definition.Id);

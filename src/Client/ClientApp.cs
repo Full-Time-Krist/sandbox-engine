@@ -10,6 +10,7 @@ using Shared.Blocks;
 using Shared.Content;
 using Shared.Items;
 using Shared.Lighting;
+using Shared.Mobs;
 using Shared.Modding;
 using Shared.Networking;
 using Shared.Protocol;
@@ -40,6 +41,7 @@ internal sealed class ClientApp(
 
     private BlockRegistry _registry = null!;
     private ItemRegistry _items = null!;
+    private MobRegistry _mobs = null!;
 
     /// <summary>
     /// Копия инвентаря для отображения. Авторитетная живёт на сервере: клиент меняет только выбор слота
@@ -64,6 +66,9 @@ internal sealed class ClientApp(
     private readonly WorldClock _worldClock = new();
     private ShaderProgram _lineShader = null!;
     private ColorMesh _selectionBox = null!;
+
+    /// <summary>Временный вид моба до моделей (шаг 9.2): красная рамка по коробу тела.</summary>
+    private ColorMesh _mobBox = null!;
     private ShaderProgram _crackShader = null!;
     private CrackRenderer _cracks = null!;
     private ShaderProgram _itemShader = null!;
@@ -139,6 +144,7 @@ internal sealed class ClientApp(
         var content = GameContent.Load(mods);
         _registry = content.Blocks;
         _items = content.Items;
+        _mobs = content.Mobs;
         _questRegistry = content.Quests;
         _inventory = new Inventory(_items);
         UpdateStatusText();
@@ -156,6 +162,7 @@ internal sealed class ClientApp(
         _chunkShader.SetUniform("u_Textures", 0); // сэмплер читает текстурный блок 0
         _lineShader = ShaderProgram.FromFiles(Gl, Path.Combine(shaders, "basic"));
         _selectionBox = LineGeometry.CreateBoxOutline(Gl, new Vector3(0.05f));
+        _mobBox = LineGeometry.CreateBoxOutline(Gl, new Vector3(0.9f, 0.15f, 0.15f));
         _crackShader = ShaderProgram.FromFiles(Gl, Path.Combine(shaders, "crack"));
         _crackShader.SetUniform("u_Textures", 0);
         _cracks = new CrackRenderer(Gl, _crackShader, crackLayer);
@@ -267,6 +274,7 @@ internal sealed class ClientApp(
                 case JoinAccepted accepted:
                     VerifyNames("блоков", accepted.BlockNames, _registry.All.Select(b => b.Name));
                     VerifyNames("предметов", accepted.ItemNames, _items.All.Select(i => i.Name));
+                    VerifyNames("мобов", accepted.MobNames.IsDefault ? [] : accepted.MobNames, _mobs.All.Select(m => m.Name));
                     _controller.Teleport(accepted.StartPosition);
                     _controller.LookAngles = accepted.StartLook;
                     _mode = accepted.Mode;
@@ -427,6 +435,7 @@ internal sealed class ClientApp(
         _itemRenderer.Draw(viewProjection, eye, _entities, alpha, _clock.Elapsed.TotalSeconds, _world, atmosphere);
 
         DrawSelection(eye);
+        DrawMobs(eye, alpha);
         DrawCracks(eye, viewProjection);
         // Задания идут только в выживании: в творческом подсказывать их незачем.
         // На экране смерти обычный интерфейс (перекрестие, хотбар, задания) не нужен.
@@ -440,6 +449,29 @@ internal sealed class ClientApp(
         _hud.DrawToasts(_framebufferSize, deltaTime);
         if (_deathCause != null)
             _hud.DrawDeath(_framebufferSize, DeathCauses.Text(_deathCause), MouseFramebufferPosition);
+    }
+
+    /// <summary>
+    /// Мобы — пока рамкой по коробу тела, повёрнутой по взгляду (модели — шаг 9.2). Положение и поворот — между тиками,
+    /// как у предметов на земле.
+    /// </summary>
+    private void DrawMobs(Vector3d eye, float alpha)
+    {
+        _lineShader.Use();
+        _lineShader.SetUniform("u_ViewProjection", _camera.ViewProjection);
+        foreach (var (_, entity) in _entities.All)
+        {
+            if (entity.Kind != EntityKind.Mob || !_mobs.Contains(entity.Mob))
+                continue;
+            var mob = _mobs.Get(entity.Mob);
+            var offset = (entity.At(alpha) - eye).ToVector3();
+            // Рамка [0; 1]³ — по центру основания, в размер тела, поворот как у камеры: −Z смотрит по взгляду.
+            _lineShader.SetUniform("u_Model", Matrix4x4.CreateTranslation(-0.5f, 0, -0.5f)
+                                              * Matrix4x4.CreateScale((float)mob.Width, (float)mob.Height, (float)mob.Width)
+                                              * Matrix4x4.CreateRotationY(-entity.YawAt(alpha))
+                                              * Matrix4x4.CreateTranslation(offset));
+            _mobBox.Draw();
+        }
     }
 
     private void DrawSelection(Vector3d eye)
@@ -727,6 +759,7 @@ internal sealed class ClientApp(
         _hud.Dispose();
         _journal.Dispose();
         _selectionBox.Dispose();
+        _mobBox.Dispose();
         _lineShader.Dispose();
         _chunkShader.Dispose();
     }

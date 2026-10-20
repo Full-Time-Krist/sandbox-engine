@@ -1,0 +1,8 @@
+{
+  "type": "item",
+  "name": "base:sheep_spawn_egg",
+  "maxStackSize": 64,
+  "spawnsMob": "base:sheep",
+  "icon": "sheep_spawn_egg",
+  "displayName": "Яйцо призыва: овца"
+}

@@ -1,0 +1,7 @@
+{
+  "type": "item",
+  "name": "base:wool",
+  "maxStackSize": 64,
+  "placesBlock": "base:wool",
+  "displayName": "Шерсть"
+}
