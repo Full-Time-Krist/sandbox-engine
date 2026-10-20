@@ -61,8 +61,15 @@ public sealed class GameServer : IDisposable
     /// </summary>
     public const int MaxChunksPerTick = 16;
 
-    /// <summary>Как часто сервер выгружает чанки, рядом с которыми нет игроков: раз в секунду.</summary>
+    /// <summary>Как часто сервер ищет чанки, рядом с которыми нет игроков: раз в секунду.</summary>
     private const int UnloadIntervalTicks = GameTime.TicksPerSecond;
+
+    /// <summary>
+    /// Сколько найденных ненужных чанков выгружается за тик. Выгрузка всех разом раз в секунду (в полёте — до 130 чанков)
+    /// снимала свет до 30 мс в Debug и вместе с приходом чанков давала тик до 60 мс (замер после шага 8.7); пачками по 16
+    /// очередь в полёте успевает разбираться (130 в секунду против 320).
+    /// </summary>
+    internal const int UnloadPerTick = 16;
 
     /// <summary>Автосохранение раз в минуту: при сбое теряется не больше минуты игры.</summary>
     public const int AutosaveIntervalTicks = 60 * GameTime.TicksPerSecond;
@@ -83,6 +90,7 @@ public sealed class GameServer : IDisposable
     /// <summary>Тик мира — часы суток (<see cref="DayCycle"/>): растёт каждый тик, хранится в сохранении, T переводит на «час».</summary>
     private long _worldTime;
     private int _unloadedSinceLog;
+    private readonly Queue<ChunkPos> _unloadQueue = new();
 
     public World World { get; }
 
@@ -313,8 +321,8 @@ public sealed class GameServer : IDisposable
         }
         _entitySync.Run(Entities, _sessions);
 
-        if (++_tick % UnloadIntervalTicks == 0)
-            UnloadUnusedChunks();
+        ++_tick;
+        UnloadUnusedChunks();
         if (_tick % AutosaveIntervalTicks == 0)
             Autosave();
 
@@ -424,21 +432,43 @@ public sealed class GameServer : IDisposable
         _lightChanged.Clear();
     }
 
-    /// <summary>Выгружает из памяти сервера чанки, которые не нужны ни одному игроку.</summary>
+    /// <summary>
+    /// Выгружает из памяти сервера чанки, которые не нужны ни одному игроку: раз в секунду ищет их (когда прошлые уже
+    /// разобраны), а выгружает по <see cref="UnloadPerTick"/> за тик — те, что всё ещё не нужны (игрок мог вернуться).
+    /// </summary>
     private void UnloadUnusedChunks()
     {
-        var unloaded = World.Unload(position => _sessions.Any(s => s.IsJoined && s.View.Keeps(position)));
-        // Сущности уходят вместе со своими чанками: записываются и убираются из памяти.
-        _entityPersistence.Save(unloaded, remove: true);
-        _unloadedSinceLog += unloaded.Count;
+        bool IsNeeded(ChunkPos position) => _sessions.Any(s => s.IsJoined && s.View.Keeps(position));
 
-        // Сводка раз в 10 секунд, а не каждую выгрузку: в полёте выгрузка идёт каждую секунду.
+        // Сводка раз в 10 секунд, а не каждую выгрузку: в полёте выгрузка идёт каждый тик.
         if (_tick % (UnloadIntervalTicks * 10) == 0 && _unloadedSinceLog > 0)
         {
             Console.WriteLine($"[Server] За 10 с выгружено {_unloadedSinceLog} чанков, в памяти {World.Chunks.Count}; " +
                 $"с запуска загружено из сохранения {World.LoadedCount}, сгенерировано {World.GeneratedCount}");
             _unloadedSinceLog = 0;
         }
+
+        // По столбцам и полосам (X, Z, Y): соседи попадают в одну пачку, и свет на сторонах между уходящими не пересчитывается
+        // (World.Unload). В порядке словаря пачки были вразброс, и выгрузка стоила вдвое дороже.
+        if (_tick % UnloadIntervalTicks == 0 && _unloadQueue.Count == 0)
+        {
+            foreach (var position in World.Chunks.All.Select(c => c.Position).Where(p => !IsNeeded(p))
+                         .OrderBy(p => p.X).ThenBy(p => p.Z).ThenBy(p => p.Y))
+                _unloadQueue.Enqueue(position);
+        }
+        if (_unloadQueue.Count == 0)
+            return;
+
+        var batch = new List<ChunkPos>(UnloadPerTick);
+        while (batch.Count < UnloadPerTick && _unloadQueue.TryDequeue(out var position))
+        {
+            if (!IsNeeded(position))
+                batch.Add(position);
+        }
+        var unloaded = World.Unload(batch);
+        // Сущности уходят вместе со своими чанками: записываются и убираются из памяти.
+        _entityPersistence.Save(unloaded, remove: true);
+        _unloadedSinceLog += unloaded.Count;
     }
 
     /// <summary>
@@ -977,6 +1007,10 @@ public sealed class GameServer : IDisposable
     private sealed class WorldEditor(GameServer server) : IWorld
     {
         public BlockId GetBlock(BlockPos pos) => server.World.Chunks.GetBlock(pos);
+
+        public LightLevel GetLight(BlockPos pos) => new(server.World.Light.GetSky(pos), server.World.Light.GetBlock(pos));
+
+        public WorldTime Time => new(server._worldTime);
 
         public bool IsBlockedByPlayer(BlockPos pos, BlockId block)
         {

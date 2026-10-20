@@ -141,6 +141,28 @@ public sealed class ExampleModTests : IDisposable
         Assert.Contains("[Mod example_mod] Tester добыл аметистовую руду: +1 в награду", _log);
     }
 
+    /// <summary>
+    /// Шаг 8.7: аметистовая руда светится (свет 7 — поле light в её JSON), а ПКМ палочкой пишет в лог свет перед гранью и
+    /// время суток — через IWorld.GetLight и IWorld.Time.
+    /// </summary>
+    [Fact]
+    public void AmethystOreGlows_WandSecondary_LogsLightAndTime()
+    {
+        var (client, _) = StartWithExampleMod();
+        var content = GameContent.Load([ExampleMod()]);
+        Assert.Equal(7, content.Blocks.Get("example_mod:amethyst_ore").Light);
+        var surface = TestServers.TopBlock(_server!.World, 0, 0);
+        _server.World.TrySetBlock(surface, content.Blocks.Get("example_mod:amethyst_ore").Id);
+        var feet = new Vector3d(0.5, surface.Y + 2, 0.5);
+        TestServers.Teleport(_server, client, feet);
+
+        client.Send(new UseItem(ItemAction.Secondary, feet + new Vector3d(0, PlayerPhysics.EyeHeight, 0), Down));
+        _server.Tick();
+
+        var above = surface + new BlockPos(0, 1, 0);
+        Assert.Contains($"[Mod example_mod] Tester: свет в {above} — небо 15, блоки 6, сейчас 15 из 15; {_server.ModWorld.Time}", _log);
+    }
+
     [Fact]
     public void ModQuest_AfterVanillaOne_CompletedByInventory_GivesModReward()
     {

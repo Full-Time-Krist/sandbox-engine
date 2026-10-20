@@ -131,7 +131,7 @@ public sealed class MovementTests : IDisposable
         Teleport(start);
         var client = new HonestClient(this, new PlayerState(start, OnGround: true));
 
-        client.Run(new PlayerInput(Vector2.UnitX), 50);
+        client.Run(new PlayerInput(Vector2.UnitX, Facing: Vector2.UnitX), 50);
 
         Assert.Empty(client.Teleports);
         Assert.Equal(floor.Y + 2, client.State.Position.Y, 1e-9);

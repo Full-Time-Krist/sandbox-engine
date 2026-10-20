@@ -5,8 +5,8 @@ using Shared.Items;
 namespace ExampleMod;
 
 /// <summary>
-/// Пример мода: аметистовая руда (блок и предмет — в <c>content/</c>, текстура — в <c>textures/</c>), волшебная палочка
-/// с поведением на C#, рецепт и задание (в <c>content/</c>) и четыре обработчика событий. Кроме того, <c>content/overrides/sand.json</c> заменяет ванильный
+/// Пример мода: светящаяся аметистовая руда (блок и предмет — в <c>content/</c>, текстура — в <c>textures/</c>), волшебная
+/// палочка с поведением на C# (ПКМ — свет и время суток в лог), рецепт и задание (в <c>content/</c>) и четыре обработчика событий. Кроме того, <c>content/overrides/sand.json</c> заменяет ванильный
 /// песок (<c>"override": true</c>) — новая текстура; для этого мод зависит от <c>base</c> в <c>mod.json</c>.
 /// Игра находит этот класс сама: он единственный реализует <see cref="IMod"/>.
 /// </summary>
@@ -22,7 +22,7 @@ public sealed class ExampleMod : IMod
         var copperIngot = context.Items.Get("base:copper_ingot").Id;
 
         // Предмет example_mod:wand ссылается на это поведение полем "behavior" в своём JSON.
-        context.RegisterItemBehavior("example_mod:wand", new WandBehavior(stone, amethystOre));
+        context.RegisterItemBehavior("example_mod:wand", new WandBehavior(stone, amethystOre, context.Log));
 
         // Аметистовая руда в выживании даёт вдвое больше: одну штуку роняет игра, вторая выпадает рядом от мода.
         context.Events.OnBlockBroken(e =>

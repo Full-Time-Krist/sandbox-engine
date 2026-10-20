@@ -183,9 +183,16 @@ public sealed class World : IDisposable
     /// Удаляет чанки, для которых <paramref name="isNeeded"/> вернул false, изменённые перед этим сохраняет.
     /// Возвращает позиции удалённых: их сущности сервер сохраняет и убирает сам.
     /// </summary>
-    internal List<ChunkPos> Unload(Func<ChunkPos, bool> isNeeded)
+    internal List<ChunkPos> Unload(Func<ChunkPos, bool> isNeeded) =>
+        Unload(Chunks.All.Where(c => !isNeeded(c.Position)).Select(c => c.Position).ToList());
+
+    /// <summary>
+    /// Удаляет загруженные чанки из <paramref name="positions"/> (незагруженные пропускаются), изменённые перед этим
+    /// сохраняет. Возвращает позиции удалённых.
+    /// </summary>
+    internal List<ChunkPos> Unload(IReadOnlyCollection<ChunkPos> positions)
     {
-        var unneeded = Chunks.All.Where(c => !isNeeded(c.Position)).ToList();
+        var unneeded = positions.Select(Chunks.Get).OfType<Chunk>().ToList();
         foreach (var chunk in unneeded)
         {
             if (_dirty.Remove(chunk.Position))

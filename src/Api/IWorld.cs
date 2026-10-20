@@ -11,6 +11,12 @@ public interface IWorld
     /// <summary>Блок в точке; в незагруженном чанке — воздух.</summary>
     BlockId GetBlock(BlockPos pos);
 
+    /// <summary>Свет в точке (с шага 8.7): небесный и блочный. В незагруженном чанке — темно (0, 0).</summary>
+    LightLevel GetLight(BlockPos pos);
+
+    /// <summary>Время мира (с шага 8.7): тик мира, доля суток, день или ночь, яркость неба.</summary>
+    WorldTime Time { get; }
+
     /// <summary>Стоит ли блок <paramref name="block"/> в точке <paramref name="pos"/> поперёк тела какого-нибудь игрока.</summary>
     bool IsBlockedByPlayer(BlockPos pos, BlockId block);
 

@@ -49,6 +49,23 @@ internal static class PaletteCodec
     /// <summary>Наибольший размер распакованных данных: палитра наибольшего размера и индексы её разрядности.</summary>
     private static int MaxRawSize(int maxPaletteSize) => 2 + maxPaletteSize * 2 + 1 + ChunkMath.Volume * BitsFor(maxPaletteSize) / 8;
 
+    /// <summary>Готовые байты однородных данных по версии и значению (<see cref="EncodeUniform"/>).</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(byte Version, ushort Value), byte[]> UniformCache = new();
+
+    /// <summary>
+    /// То же, что <see cref="Encode"/> для чанка, где все значения равны <paramref name="value"/> (пустой чанк, свет одним
+    /// значением), — без палитры и Deflate: байты считаются один раз и запоминаются. В полёте таких — девять из десяти
+    /// отправленных чанков, и полное кодирование стоило ~0,1 мс на каждый (замер после шага 8.7). Возвращает копию:
+    /// общий массив никто не испортит.
+    /// </summary>
+    public static byte[] EncodeUniform(byte version, ushort value) =>
+        (byte[])UniformCache.GetOrAdd((version, value), static key =>
+        {
+            var values = new ushort[ChunkMath.Volume];
+            values.AsSpan().Fill(key.Value);
+            return Encode(key.Version, values);
+        }).Clone();
+
     /// <param name="values">Все значения чанка в порядке <see cref="LocalPos.Index"/>.</param>
     public static byte[] Encode(byte version, ReadOnlySpan<ushort> values)
     {

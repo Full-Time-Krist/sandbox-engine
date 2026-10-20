@@ -12,7 +12,12 @@ namespace Shared.Physics;
 /// <param name="Jump">Прыжок; в полёте — вверх.</param>
 /// <param name="Down">В полёте — вниз. При ходьбе пока ничего не делает (приседания нет).</param>
 /// <param name="Sprint">Бег; в полёте — быстрый полёт.</param>
-public readonly record struct PlayerInput(Vector2 Move, bool Jump = false, bool Down = false, bool Sprint = false);
+/// <param name="Facing">
+/// Куда игрок смотрит по горизонтали, в мировых осях (как <paramref name="Move"/>), длина 1. Нужно для подъёма на уступ:
+/// он только перед собой (<see cref="PlayerPhysics.StepUpCone"/>). Нулевое — взгляд неизвестен, подъёма нет.
+/// </param>
+public readonly record struct PlayerInput(Vector2 Move, bool Jump = false, bool Down = false, bool Sprint = false,
+    Vector2 Facing = default);
 
 /// <summary>Состояние тела игрока между тиками.</summary>
 /// <param name="Position">Точка ног: центр нижней грани тела. Абсолютная позиция, поэтому double.</param>
@@ -54,6 +59,12 @@ public static class PlayerPhysics
     /// Подъём — только с земли и не в полёте: упёрся сбоку — тот же шаг пробуется с подъёмом (<see cref="StepUp"/>).
     /// </summary>
     public const double StepHeight = 1.0;
+
+    /// <summary>
+    /// Подъём — только перед собой (просьба пользователя): шаг по клавишам должен отклоняться от взгляда не больше чем на
+    /// 60° (косинус 0,5). Вперёд и вперёд-вбок — поднимается, назад и вбок — нет.
+    /// </summary>
+    public const float StepUpCone = 0.5f;
 
     /// <summary>Начальная скорость прыжка: при шаге 1/20 с вершина около 1,26 блока — на блок запрыгнуть можно, на два нет.</summary>
     public const float JumpVelocity = 9.8f;
@@ -103,6 +114,7 @@ public static class PlayerPhysics
 
         // Шёл по земле и упёрся сбоку — пробуем тот же шаг с подъёмом; берём, если так ушли дальше по горизонтали.
         if (!state.Flying && state.OnGround && wanted.Y <= 0 && (moved.X != wanted.X || moved.Z != wanted.Z)
+            && Vector2.Dot(move, input.Facing) >= StepUpCone * move.Length()
             && StepUp(state.Position, wanted, chunks, blocks) is { } stepped
             && Horizontal(stepped) > Horizontal(moved) + Aabb.Epsilon)
             moved = stepped;

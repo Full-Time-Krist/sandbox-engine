@@ -110,11 +110,30 @@ public class ShapeCollisionTests
         Assert.Equal(x, state.Position.X, Tolerance);
     }
 
-    private PlayerState Walk(PlayerState state, Vector2 move, int ticks, bool jump = false)
+    /// <summary>Идёт <paramref name="ticks"/> тиков; смотрит туда же, куда идёт, если не задано иное.</summary>
+    private PlayerState Walk(PlayerState state, Vector2 move, int ticks, bool jump = false, Vector2? facing = null)
     {
         for (var i = 0; i < ticks; i++)
-            state = PlayerPhysics.Step(state, new PlayerInput(move, Jump: jump), _chunks, _blocks);
+            state = PlayerPhysics.Step(state, new PlayerInput(move, Jump: jump, Facing: facing ?? move), _chunks, _blocks);
         return state;
+    }
+
+    /// <summary>
+    /// Подъём только перед собой: пятясь на уступ спиной или подходя к нему боком — не поднимается; по диагонали
+    /// «вперёд-вбок» (45° от взгляда) — поднимается.
+    /// </summary>
+    [Fact]
+    public void Player_StepsUp_OnlyInFrontOfItself()
+    {
+        for (var x = 3; x <= 12; x++)
+        for (var z = -5; z <= 5; z++)
+            Set(x, 0, z, _stone);
+        var start = new PlayerState(new Vector3d(0.5, 0, 0.5), OnGround: true);
+
+        AssertStopped(Walk(start, Vector2.UnitX, 30, facing: -Vector2.UnitX), y: 0, x: 3 - PlayerPhysics.Width / 2);
+        AssertStopped(Walk(start, Vector2.UnitX, 30, facing: Vector2.UnitY), y: 0, x: 3 - PlayerPhysics.Width / 2);
+        var diagonal = Vector2.Normalize(new Vector2(1, 1));
+        Assert.Equal(1, Walk(start, Vector2.UnitX, 30, facing: diagonal).Position.Y, Tolerance);
     }
 
     /// <summary>Подъём без прыжка (шаг 8.6, выбор пользователя — на блок): идёт по полу на уступ в блок — встаёт на него.</summary>
@@ -182,12 +201,12 @@ public class ShapeCollisionTests
         // Летит, но стоит на земле (давит вниз в полёте): подъёма всё равно нет.
         var flying = new PlayerState(new Vector3d(0.5, 0, 0.5), OnGround: true, Flying: true);
         for (var i = 0; i < 30; i++)
-            flying = PlayerPhysics.Step(flying, new PlayerInput(Vector2.UnitX, Down: true), _chunks, _blocks);
+            flying = PlayerPhysics.Step(flying, new PlayerInput(Vector2.UnitX, Down: true, Facing: Vector2.UnitX), _chunks, _blocks);
         AssertStopped(flying, y: 0, x: 3 - PlayerPhysics.Width / 2);
 
         // Висит у стены на высоте 0,2, не на опоре: шаг в стену без подъёма.
         var inAir = PlayerPhysics.Step(new PlayerState(new Vector3d(3 - PlayerPhysics.Width / 2 - 0.01, 0.2, 0.5)),
-            new PlayerInput(Vector2.UnitX), _chunks, _blocks);
+            new PlayerInput(Vector2.UnitX, Facing: Vector2.UnitX), _chunks, _blocks);
         Assert.True(inAir.Position.Y < 0.2);
     }
 
@@ -205,7 +224,7 @@ public class ShapeCollisionTests
         }
         var start = new Vector3d(3 - PlayerPhysics.Width / 2, 0, 0.5);
         var stepped = PlayerPhysics.Step(new PlayerState(start, Velocity: new Vector3(4, 0, 0), OnGround: true),
-            new PlayerInput(Vector2.UnitX), _chunks, _blocks);
+            new PlayerInput(Vector2.UnitX, Facing: Vector2.UnitX), _chunks, _blocks);
         var delta = stepped.Position - start;
         Assert.Equal(1, delta.Y, Tolerance);
 
@@ -249,7 +268,7 @@ public class ShapeCollisionTests
         var move = Vector2.Normalize(Vector2.One);
         var start = new PlayerState(new Vector3d(0.65, 0, 1.2), new Vector3(3, 0, 3), OnGround: true);
 
-        var next = PlayerPhysics.Step(start, new PlayerInput(move), _chunks, _blocks);
+        var next = PlayerPhysics.Step(start, new PlayerInput(move, Facing: move), _chunks, _blocks);
         var delta = next.Position - start.Position;
 
         Assert.Equal(0.5, delta.Y, Tolerance); // встал на плиту
@@ -291,7 +310,7 @@ public class ShapeCollisionTests
             // Держимся над площадкой: у края разворачиваемся к центру.
             if (Math.Abs(state.Position.X) > 9 || Math.Abs(state.Position.Z) > 9)
                 move = Vector2.Normalize(new Vector2((float)-state.Position.X, (float)-state.Position.Z));
-            var next = PlayerPhysics.Step(state, new PlayerInput(move, Jump: random.Next(40) == 0), _chunks, _blocks);
+            var next = PlayerPhysics.Step(state, new PlayerInput(move, Jump: random.Next(40) == 0, Facing: move), _chunks, _blocks);
             var delta = next.Position - state.Position;
             if (delta != default)
             {

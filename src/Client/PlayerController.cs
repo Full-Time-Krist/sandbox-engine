@@ -80,7 +80,8 @@ internal sealed class PlayerController(Camera camera, ChunkMap world, BlockRegis
             new Vector2(direction.X, direction.Z),
             Jump: input.IsKeyDown(Key.Space),
             Down: input.IsKeyDown(Key.ShiftLeft),
-            Sprint: input.IsKeyDown(Key.ControlLeft));
+            Sprint: input.IsKeyDown(Key.ControlLeft),
+            Facing: new Vector2(camera.FlatForward.X, camera.FlatForward.Z));
     }
 
     /// <summary>Выставляет глаз в позицию между двумя последними тиками.</summary>

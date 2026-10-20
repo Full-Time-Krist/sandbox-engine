@@ -18,7 +18,8 @@ public static class ChunkCodec
 
     private const string What = "чанка";
 
-    public static byte[] Encode(Chunk chunk) => Encode(chunk.Blocks);
+    /// <summary>Пустой чанк — готовыми байтами (<see cref="PaletteCodec.EncodeUniform"/>): их большинство в полёте.</summary>
+    public static byte[] Encode(Chunk chunk) => chunk.IsEmpty ? PaletteCodec.EncodeUniform(Version, BlockId.Air.Value) : Encode(chunk.Blocks);
 
     /// <param name="blocks">Все блоки чанка в порядке <see cref="LocalPos.Index"/>.</param>
     public static byte[] Encode(ReadOnlySpan<BlockId> blocks)

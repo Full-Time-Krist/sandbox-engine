@@ -102,7 +102,7 @@ public sealed class LightEngine
         // 7 мс на чанк воздуха).
         if (below is not null)
         {
-            foreach (var index in FacingLayer(2))
+            foreach (var index in FaceIndices[2])
             {
                 var aboveIndex = index - TopLayer * Layer;
                 // Столб оборвался: над блоком нет солнца или там поглотитель (он солнце принимает, но вниз не пропускает).
@@ -113,10 +113,17 @@ public sealed class LightEngine
             Propagate(sky: true);
         }
 
-        if (_hasEmitters)
+        // Свои светящиеся блоки — прямым проходом по массиву: в Debug 32 768 вызовов на каждый, даже пустой, чанк
+        // стоили 0,7 мс (замер после шага 8.7).
+        if (_hasEmitters && !chunk.IsEmpty)
         {
-            for (var index = 0; index < ChunkMath.Volume; index++)
-                Reseed(chunk, index, sky: false);
+            var blocks = chunk.Blocks;
+            for (var index = 0; index < blocks.Length; index++)
+            {
+                var block = blocks[index].Value;
+                if (block < _emission.Length && _emission[block] != 0)
+                    Reseed(chunk, index, sky: false);
+            }
         }
         EnqueueLitNeighborFaces(chunk, sky: false);
         Propagate(sky: false);
@@ -131,14 +138,16 @@ public sealed class LightEngine
     private void FillSkyColumns(Chunk chunk)
     {
         var above = Neighbor(chunk.Position, 2);
+        // Над незагруженным чанком сверху — солнце по ISkyAbove (то же, что Intrinsic у верхнего слоя).
+        var aboveOrigin = (chunk.Position with { Y = chunk.Position.Y + 1 }).Origin;
         Span<bool> open = stackalloc bool[Layer];
         var openCount = 0;
         for (var column = 0; column < Layer; column++)
         {
             var top = TopLayer * Layer + column;
-            open[column] = above is not null
-                ? above.Light.GetSky(column) == ChunkLight.Max && !IsSink(above, column) && !IsOpaque(chunk, top)
-                : Intrinsic(chunk, top, sky: true) == ChunkLight.Max;
+            open[column] = !IsOpaque(chunk, top) && (above is not null
+                ? above.Light.GetSky(column) == ChunkLight.Max && !IsSink(above, column)
+                : _sky.IsOpen(aboveOrigin.X + (column & ChunkMath.Mask), aboveOrigin.Z + (column >> ChunkMath.Bits), aboveOrigin.Y));
             if (open[column])
                 openCount++;
         }
@@ -151,10 +160,13 @@ public sealed class LightEngine
             for (var d = 0; d < Directions.Length; d++)
             {
                 // Вверх отдавать нечего: столб солнца здесь значит, что и над ним солнце (или чанк сверху не загружен).
-                if (d == 2 || Neighbor(chunk.Position, d) is null)
+                if (d == 2 || Neighbor(chunk.Position, d) is not { } neighbor)
                     continue;
-                foreach (var index in FacingLayer(d))
-                    _add.Enqueue(new Node(chunk, index, 0));
+                foreach (var index in FaceIndices[d])
+                {
+                    if (RaisesInto(chunk, index, d, neighbor, Across(index, d), sky: true))
+                        _add.Enqueue(new Node(chunk, index, 0));
+                }
             }
             return;
         }
@@ -171,16 +183,20 @@ public sealed class LightEngine
             }
         }
 
-        Span<bool> loaded = stackalloc bool[Directions.Length];
+        var neighbors = new Chunk?[Directions.Length];
         for (var d = 0; d < Directions.Length; d++)
-            loaded[d] = Neighbor(chunk.Position, d) is not null;
+            neighbors[d] = Neighbor(chunk.Position, d);
 
         for (var index = 0; index < ChunkMath.Volume; index++)
         {
             if (chunk.Light.GetSky(index) != ChunkLight.Max)
                 continue;
             int x = index & ChunkMath.Mask, y = index >> (ChunkMath.Bits * 2), z = (index >> ChunkMath.Bits) & ChunkMath.Mask;
-            var frontier = (x == TopLayer && loaded[0]) || (x == 0 && loaded[1]) || (y == 0 && loaded[3]) || (z == TopLayer && loaded[4]) || (z == 0 && loaded[5])
+            var frontier = (x == TopLayer && RaisesInto(chunk, index, 0, neighbors[0], Across(index, 0), sky: true))
+                || (x == 0 && RaisesInto(chunk, index, 1, neighbors[1], Across(index, 1), sky: true))
+                || (y == 0 && RaisesInto(chunk, index, 3, neighbors[3], Across(index, 3), sky: true))
+                || (z == TopLayer && RaisesInto(chunk, index, 4, neighbors[4], Across(index, 4), sky: true))
+                || (z == 0 && RaisesInto(chunk, index, 5, neighbors[5], Across(index, 5), sky: true))
                 || (x < TopLayer && LitBelowMax(chunk, index + 1)) || (x > 0 && LitBelowMax(chunk, index - 1))
                 || (z < TopLayer && LitBelowMax(chunk, index + ChunkMath.Size)) || (z > 0 && LitBelowMax(chunk, index - ChunkMath.Size));
             if (frontier)
@@ -199,13 +215,34 @@ public sealed class LightEngine
         {
             if (Neighbor(chunk.Position, d) is not { } neighbor)
                 continue;
-            foreach (var index in FacingLayer(Opposite(d)))
+            var back = Opposite(d);
+            foreach (var index in FaceIndices[back])
             {
-                if (Level(neighbor, index, sky) > 0)
+                if (Level(neighbor, index, sky) > 0 && RaisesInto(neighbor, index, back, chunk, Across(index, back), sky))
                     _add.Enqueue(new Node(neighbor, index, 0));
             }
         }
     }
+
+    /// <summary>
+    /// Поднимет ли свет блока соседа в направлении <paramref name="d"/> — по тому же правилу, что заливка. Граничный блок
+    /// ставится в очередь ради соседнего чанка, только если поднимет: у пустого чанка под солнцем и у освещённых граней
+    /// соседей свет по обе стороны обычно уже 15, и очередь из 12 тысяч узлов на чанк ничего не меняла (замер после
+    /// шага 8.7: 90 % чанков в полёте — такие, и свет пришедших занимал весь бюджет тика в Debug).
+    /// </summary>
+    /// <param name="neighbor">Соседний чанк в направлении <paramref name="d"/> (null — не загружен: поднимать нечего).</param>
+    /// <param name="neighborIndex">Блок в нём, к которому шаг из <paramref name="index"/> (<see cref="Across"/>).</param>
+    private bool RaisesInto(Chunk chunk, int index, int d, Chunk? neighbor, int neighborIndex, bool sky)
+    {
+        if (neighbor is null || IsOpaque(neighbor, neighborIndex))
+            return false;
+        var level = Outgoing(chunk, index, sky);
+        var next = sky && d == Down && level == ChunkLight.Max ? ChunkLight.Max : level - 1;
+        return next > Level(neighbor, neighborIndex, sky);
+    }
+
+    /// <summary>Блок соседнего чанка, к которому ведёт шаг в направлении <paramref name="d"/> из граничного блока <paramref name="index"/>.</summary>
+    private static int Across(int index, int d) => AcrossFrom(index, Opposite(d));
 
     /// <summary>
     /// Чанк <paramref name="removed"/> только что убран из <see cref="ChunkMap"/> (его свет — последний посчитанный).
@@ -227,7 +264,7 @@ public sealed class LightEngine
             {
                 if (Neighbor(removed.Position, d) is not { } neighbor)
                     continue;
-                foreach (var index in FacingLayer(Opposite(d)))
+                foreach (var index in FaceIndices[Opposite(d)])
                 {
                     var level = Level(neighbor, index, sky);
                     var from = Level(removed, AcrossFrom(index, d), sky);
@@ -407,6 +444,9 @@ public sealed class LightEngine
     }
 
     private static int Opposite(int d) => d ^ 1;
+
+    /// <summary>Индексы граничных слоёв по направлениям (<see cref="FacingLayer"/>) — посчитаны один раз.</summary>
+    private static readonly int[][] FaceIndices = [.. Enumerable.Range(0, Directions.Length).Select(d => FacingLayer(d).ToArray())];
 
     /// <summary>Индексы слоя чанка, обращённого в сторону <paramref name="d"/> (например, для +Y — верхний слой).</summary>
     private static IEnumerable<int> FacingLayer(int d)

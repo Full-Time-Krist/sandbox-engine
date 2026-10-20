@@ -2,5 +2,6 @@
   "type": "block",
   "name": "example_mod:amethyst_ore",
   "isOpaque": true,
+  "light": 7,
   "textures": "amethyst_ore"
 }

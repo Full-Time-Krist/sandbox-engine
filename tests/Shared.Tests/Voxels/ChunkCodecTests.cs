@@ -27,6 +27,35 @@ public class ChunkCodecTests
         Assert.True(expected.Blocks.SequenceEqual(actual.Blocks), "Блоки после распаковки отличаются");
     }
 
+    /// <summary>
+    /// Однородные данные кодируются готовыми байтами (после шага 8.7) — теми же, что даёт полное кодирование: сохранения и
+    /// сеть не замечают разницы. Пустой чанк — как его блоки; свет одним значением — как тот же свет массивом. Каждый
+    /// вызов — своя копия.
+    /// </summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(7)]
+    [InlineData(0xF0)]
+    public void UniformData_EncodesToSameBytesAsFullPath_AsACopy(int value)
+    {
+        var empty = new Chunk(default);
+        Assert.Equal(ChunkCodec.Encode(empty.Blocks), ChunkCodec.Encode(empty));
+
+        var uniform = new Shared.Lighting.ChunkLight();
+        uniform.Fill((byte)value);
+        var array = new Shared.Lighting.ChunkLight();
+        array.Fill((byte)value);
+        array.Set(0, (byte)(value ^ 1)); // заводит массив
+        array.Set(0, (byte)value);
+        Assert.True(uniform.IsUniform);
+        Assert.False(array.IsUniform);
+        var bytes = Shared.Lighting.LightCodec.Encode(uniform);
+        Assert.Equal(Shared.Lighting.LightCodec.Encode(array), bytes);
+
+        bytes[0] ^= 0xFF;
+        Assert.Equal(Shared.Lighting.LightCodec.Encode(array), Shared.Lighting.LightCodec.Encode(uniform));
+    }
+
     [Fact]
     public void EmptyChunk_RoundTrips_AndIsTiny()
     {

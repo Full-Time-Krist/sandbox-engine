@@ -173,16 +173,50 @@ public sealed class GameServerTests : IDisposable
         var spawnChunk = ChunkOf(spawn);
 
         var target = spawn + new Vector3(20 * ChunkMath.Size, 0, 0);
+        var view = ViewAt(target);
         TestServers.Teleport(server, client, target);
+        // Выгрузка идёт пачками по тикам (после шага 8.7): ждём, пока уйдёт всё ненужное.
         TestServers.TickUntil(server, () =>
         {
             Drain(client);
-            return !server.World.Chunks.Contains(spawnChunk);
-        }, "сервер выгрузит чанки у точки появления");
+            return !server.World.Chunks.Contains(spawnChunk) && server.World.Chunks.All.All(c => view.Keeps(c.Position));
+        }, "сервер выгрузит всё, что не нужно игроку");
+    }
 
-        // Всё, что осталось в памяти, нужно игроку.
-        var view = ViewAt(target);
-        Assert.All(server.World.Chunks.All, c => Assert.True(view.Keeps(c.Position), $"{c.Position} не выгружен"));
+    /// <summary>
+    /// Выгрузка — пачками по <see cref="GameServer.UnloadPerTick"/> за тик (после шага 8.7: разом раз в секунду она
+    /// давала тик до 60 мс в Debug), и чанк, снова ставший нужным, пока ждал в очереди, не выгружается.
+    /// </summary>
+    [Fact]
+    public void Unload_IsSpreadOverTicks_AndSkipsChunksNeededAgain()
+    {
+        var server = Create();
+        var messages = new List<ServerMessage>();
+        var client = TestServers.JoinAndLoad(server, messages);
+        var spawn = Assert.IsType<JoinAccepted>(messages[0]).StartPosition;
+        var home = ViewAt(spawn);
+        int AtHome() => server.World.Chunks.All.Count(c => home.Keeps(c.Position));
+        var before = AtHome();
+        Assert.True(before > 2 * GameServer.UnloadPerTick, "у точки появления должно быть больше двух пачек чанков");
+
+        TestServers.Teleport(server, client, spawn + new Vector3(20 * ChunkMath.Size, 0, 0));
+        // Первая пачка: за тик — не больше UnloadPerTick.
+        var previous = before;
+        TestServers.TickUntil(server, () =>
+        {
+            Drain(client);
+            var now = AtHome();
+            Assert.True(previous - now <= GameServer.UnloadPerTick, $"за тик выгружено {previous - now}");
+            previous = now;
+            return now < before;
+        }, "выгрузка начнётся");
+        Assert.True(previous > 0, "к первой пачке выгрузилось всё — проверять возвращение нечего");
+
+        // Игрок вернулся: оставшиеся в очереди чанки у дома снова нужны и не выгружаются.
+        TestServers.Teleport(server, client, spawn);
+        var left = server.World.Chunks.All.Where(c => home.Keeps(c.Position)).Select(c => c.Position).ToList();
+        TestServers.Tick(server, 3 * GameTime.TicksPerSecond);
+        Assert.All(left, p => Assert.True(server.World.Chunks.Contains(p), $"{p} выгружен, хотя снова нужен"));
     }
 
     [Fact]

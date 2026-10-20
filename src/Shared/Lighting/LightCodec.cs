@@ -23,19 +23,14 @@ public static class LightCodec
 
     public static byte[] Encode(ChunkLight light)
     {
+        if (light.IsUniform)
+            return PaletteCodec.EncodeUniform(Version, light.UniformValue);
         var values = ArrayPool<ushort>.Shared.Rent(ChunkMath.Volume);
         try
         {
             var span = values.AsSpan(0, ChunkMath.Volume);
-            if (light.IsUniform)
-            {
-                span.Fill(light.UniformValue);
-            }
-            else
-            {
-                for (var i = 0; i < span.Length; i++)
-                    span[i] = light.Get(i);
-            }
+            for (var i = 0; i < span.Length; i++)
+                span[i] = light.Get(i);
             return PaletteCodec.Encode(Version, span);
         }
         finally
