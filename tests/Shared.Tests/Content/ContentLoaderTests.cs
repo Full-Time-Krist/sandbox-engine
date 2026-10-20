@@ -68,6 +68,10 @@ public class ContentLoaderTests
     [InlineData("""{"type":"block","name":"base:torch","isOpaque":false,"light":16}""", "base/torch.json")]
     [InlineData("""{"type":"block","name":"base:torch","isOpaque":false,"light":-1}""", "base/torch.json")]
     [InlineData("""{"type":"block","name":"base:torch","isOpaque":false,"light":7.5}""", "base/torch.json")]
+    [InlineData("""{"type":"block","name":"base:torch","isOpaque":false,"model":"sphere"}""", "base/torch.json")]
+    [InlineData("""{"type":"block","name":"base:torch","isOpaque":false,"model":"Torch"}""", "base/torch.json")]
+    [InlineData("""{"type":"block","name":"base:torch","isOpaque":true,"model":"torch"}""", "base/torch.json")]
+    [InlineData("""{"type":"block","name":"base:torch","isOpaque":false,"needsSupport":"yes"}""", "base/torch.json")]
     [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"tool":"Pick Axe"}""", "base/stone.json")]
     [InlineData("""{"type":"item","name":"base:pick","maxStackSize":1,"tool":{"type":"pickaxe","tier":1}}""", "base/pick.json")]
     [InlineData("""{"type":"item","name":"base:pick","maxStackSize":1,"tool":{"type":"pickaxe","speed":0}}""", "base/pick.json")]
@@ -221,6 +225,25 @@ public class ContentLoaderTests
 
         Assert.Equal(14, content.Blocks.Get("base:torch").Light);
         Assert.Equal(0, content.Blocks.Get("base:glass").Light);
+    }
+
+    /// <summary>
+    /// Форма и опора: <c>model</c> попадает в таблицу форм для клиента (только не-кубы), <c>needsSupport</c> — в определение
+    /// блока (оно нужно серверу); без полей — куб без опоры.
+    /// </summary>
+    [Fact]
+    public void Load_ModelAndSupport_FieldsAndDefaults()
+    {
+        var content = ContentLoader.Load([
+            File("base/torch.json", """{"type":"block","name":"base:torch","isOpaque":false,"model":"torch","needsSupport":true}"""),
+            File("base/cube.json", """{"type":"block","name":"base:cube","isOpaque":false,"model":"cube"}"""),
+            File("base/glass.json", """{"type":"block","name":"base:glass","isOpaque":false}""")
+        ]);
+
+        Assert.Equal(new Dictionary<string, BlockModel> { ["base:torch"] = BlockModel.Torch }, content.BlockModels);
+        Assert.True(content.Blocks.Get("base:torch").NeedsSupport);
+        Assert.False(content.Blocks.Get("base:cube").NeedsSupport);
+        Assert.False(content.Blocks.Get("base:glass").NeedsSupport);
     }
 
     [Fact]

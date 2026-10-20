@@ -143,7 +143,7 @@ internal sealed class ClientApp(
         _inventory = new Inventory(_items);
         UpdateStatusText();
 
-        var visuals = new BlockVisuals(_registry, BlockVisuals.AppearancesFrom(content.BlockTextures));
+        var visuals = new BlockVisuals(_registry, BlockVisuals.AppearancesFrom(content.BlockTextures), content.BlockModels);
         var itemVisuals = new ItemVisuals(visuals, _items, content.ItemIcons);
         _blockTextures = LoadTextures(visuals.TextureNames, itemVisuals.TextureNames, new TextureFiles(mods));
         var crackLayer = visuals.TextureNames.Count + itemVisuals.TextureNames.Count;

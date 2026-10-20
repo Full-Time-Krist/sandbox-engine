@@ -19,22 +19,27 @@ internal sealed class BlockVisuals
             StringComparer.Ordinal);
 
     private readonly bool[] _isOpaque;
+    private readonly BlockModel[] _models;
     private readonly int[] _faceLayers;
     private readonly List<string> _textureNames = [MissingTexture];
     private readonly Dictionary<string, int> _layerByName = new() { [MissingTexture] = 0 };
 
-    public BlockVisuals(BlockRegistry registry, IReadOnlyDictionary<string, BlockAppearance> appearances)
+    /// <param name="models">Формы блоков не-кубов (<see cref="ContentRegistries.BlockModels"/>); null — все кубы.</param>
+    public BlockVisuals(BlockRegistry registry, IReadOnlyDictionary<string, BlockAppearance> appearances,
+        IReadOnlyDictionary<string, BlockModel>? models = null)
     {
         // Таблицы имеют фиксированный размер: блок, зарегистрированный позже, вышел бы за их пределы.
         if (!registry.IsFrozen)
             throw new InvalidOperationException("Реестр блоков нужно заморозить до построения таблиц внешнего вида.");
 
         _isOpaque = new bool[registry.Count];
+        _models = new BlockModel[registry.Count];
         _faceLayers = new int[registry.Count * BlockFace.All.Length];
 
         foreach (var definition in registry.All)
         {
             _isOpaque[definition.Id.Value] = definition.IsOpaque;
+            _models[definition.Id.Value] = models?.GetValueOrDefault(definition.Name) ?? BlockModel.Cube;
             if (definition.Id.IsAir)
                 continue;
 
@@ -48,6 +53,8 @@ internal sealed class BlockVisuals
     public IReadOnlyList<string> TextureNames => _textureNames;
 
     public bool IsOpaque(BlockId id) => _isOpaque[id.Value];
+
+    public BlockModel Model(BlockId id) => _models[id.Value];
 
     /// <summary>Слой текстуры для грани блока; <paramref name="faceIndex"/> — индекс в <see cref="BlockFace.All"/>.</summary>
     public int GetLayer(BlockId id, int faceIndex) => _faceLayers[id.Value * BlockFace.All.Length + faceIndex];

@@ -1,0 +1,13 @@
+{
+  "type": "quest",
+  "name": "base:torch",
+  "title": "Да будет свет",
+  "description": "Пережгите в печи бревно в древесный уголь, сделайте у верстака факелы из угля и палки и поставьте факел на землю.",
+  "goal": {
+    "type": "place",
+    "block": "base:torch"
+  },
+  "requires": [
+    "base:furnace"
+  ]
+}

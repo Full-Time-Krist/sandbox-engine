@@ -704,6 +704,10 @@ public sealed class GameServer : IDisposable
     /// <summary>Задания игрока на сервере. Для тестов: менять можно только между тиками, из потока теста.</summary>
     internal QuestBook PlayerQuests(int playerId) => _sessions.Single(s => s.IsJoined && s.PlayerId == playerId).Quests;
 
+    /// <summary>Мир сервера так, как его видят моды, и игрок от лица модов. Для тестов: только между тиками, из потока теста.</summary>
+    internal IWorld ModWorld => _editor;
+    internal IPlayer ModPlayer(int playerId) => _sessions.Single(s => s.IsJoined && s.PlayerId == playerId);
+
     /// <summary>Переносит клиента в <see cref="ClientSession.PlayerPosition"/>; перенос — не падение, высота считается заново.</summary>
     private void SendTeleport(ClientSession session)
     {
@@ -1013,6 +1017,9 @@ public sealed class GameServer : IDisposable
 
         public bool TryPlaceBlock(BlockPos pos, BlockId block, IPlayer player)
         {
+            // Факел и другие блоки с опорой ставятся только поверх твёрдого.
+            if (server._registry.Get(block).NeedsSupport && !server._registry.IsSolid(GetBlock(pos + Down)))
+                return false;
             if (!TrySetBlock(pos, block))
                 return false;
 
@@ -1028,7 +1035,34 @@ public sealed class GameServer : IDisposable
                 return false;
 
             server.BroadcastBlockChange(new BlockChanged(pos, block));
+            BreakUnsupported(pos);
             return true;
+        }
+
+        private static readonly BlockPos Up = new(0, 1, 0);
+        private static readonly BlockPos Down = new(0, -1, 0);
+
+        /// <summary>
+        /// Блок над <paramref name="below"/>, стоящий на опоре (<see cref="BlockDefinition.NeedsSupport"/>), ломается
+        /// с добычей, если опора больше не твёрдая, — кто бы её ни сменил: игрок, мод, правило. Без событий и заданий:
+        /// это не действие игрока. Вверх по столбику — циклом: у модов блок с опорой может быть твёрдым и сам держать
+        /// такой же, и рекурсия по высокому столбу переполнила бы стек.
+        /// </summary>
+        private void BreakUnsupported(BlockPos below)
+        {
+            while (!server._registry.IsSolid(GetBlock(below)))
+            {
+                var above = below + Up;
+                var block = GetBlock(above);
+                if (block.IsAir || !server._registry.Get(block).NeedsSupport || !server.World.TrySetBlock(above, BlockId.Air))
+                    return;
+
+                server.BroadcastBlockChange(new BlockChanged(above, BlockId.Air));
+                var drop = server._items.ForBlock(block);
+                if (!drop.IsAir)
+                    ItemEntities.SpawnDrop(server.Entities, above, new ItemStack(drop, 1), server._random);
+                below = above;
+            }
         }
     }
 }

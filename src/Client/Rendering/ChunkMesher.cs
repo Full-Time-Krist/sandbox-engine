@@ -1,4 +1,5 @@
 using System.Numerics;
+using Shared.Blocks;
 using Shared.Voxels;
 
 namespace Client.Rendering;
@@ -33,6 +34,9 @@ internal sealed class ChunkMeshData
 /// <para>
 /// Квадрат делится на два треугольника по той диагонали, вдоль которой перепад яркости меньше: значения внутри
 /// треугольника смешиваются линейно, и при неудачной диагонали тёмный угол тянулся бы полосой через всю грань.
+/// </para>
+/// <para>
+/// Блоки не-кубы (<see cref="BlockModel"/>) строятся своими гранями: факел — столбик в центре блока.
 /// </para>
 /// </remarks>
 internal sealed class ChunkMesher(BlockVisuals visuals)
@@ -69,6 +73,10 @@ internal sealed class ChunkMesher(BlockVisuals visuals)
 
     private static int Offset(Vector3 d) => ChunkSnapshot.Index((int)d.X, (int)d.Y, (int)d.Z) - ChunkSnapshot.Index(0, 0, 0);
 
+    /// <summary>Столбик факела в блоке: от угла <see cref="TorchMin"/> размером <see cref="TorchSize"/> (2 × 10 × 2 пикселя из 16).</summary>
+    internal static readonly Vector3 TorchMin = new(7 / 16f, 0, 7 / 16f);
+    internal static readonly Vector3 TorchSize = new(2 / 16f, 10 / 16f, 2 / 16f);
+
     /// <summary>Строит меш прямо по чанку и соседям. Для тестов и мест, где снимок не нужен.</summary>
     public void Build(Chunk chunk, in ChunkNeighbors neighbors, ChunkMeshData output)
     {
@@ -99,6 +107,12 @@ internal sealed class ChunkMesher(BlockVisuals visuals)
                     continue;
 
                 var origin = new Vector3(x, y, z);
+                if (visuals.Model(block) == BlockModel.Torch)
+                {
+                    AddTorch(snapshot, index, origin, block, output);
+                    continue;
+                }
+
                 for (var f = 0; f < FaceOffsets.Length; f++)
                 {
                     // Рамка снимка содержит соседние блоки, поэтому выхода за массив нет.
@@ -148,6 +162,37 @@ internal sealed class ChunkMesher(BlockVisuals visuals)
         var shade = OcclusionShade[occlusion];
         brightness = shade * MathF.Max(skyLevel, blockLevel);
         return new ChunkVertex(position, uv, layer, faceBrightness * shade, skyLevel, blockLevel);
+    }
+
+    /// <summary>
+    /// Факел: столбик тоньше блока, поэтому соседи его граней не закрывают — видны все, кроме нижней (она стоит на опоре).
+    /// Свет — своего блока (факел светится сам), без затенения углов: углы столбика не касаются соседних блоков.
+    /// </summary>
+    private void AddTorch(ChunkSnapshot snapshot, int index, Vector3 origin, BlockId block, ChunkMeshData output)
+    {
+        var packed = snapshot.Light[index];
+        float sky = packed >> 4, blockLight = packed & 0x0F;
+        Span<ChunkVertex> quad = stackalloc ChunkVertex[4];
+        for (var f = 0; f < BlockFace.All.Length; f++)
+        {
+            ref readonly var face = ref BlockFace.All[f];
+            if (face.Dy < 0)
+                continue;
+
+            var layer = visuals.GetLayer(block, f);
+            quad[0] = TorchVertex(face, face.A, origin, layer, sky, blockLight);
+            quad[1] = TorchVertex(face, face.B, origin, layer, sky, blockLight);
+            quad[2] = TorchVertex(face, face.C, origin, layer, sky, blockLight);
+            quad[3] = TorchVertex(face, face.D, origin, layer, sky, blockLight);
+            AddQuad(output, quad, flip: false);
+        }
+    }
+
+    /// <summary>Угол грани факела: угол единичного куба, сжатый до столбика; UV — та часть текстуры, что приходится на это место.</summary>
+    private static ChunkVertex TorchVertex(in BlockFace face, Vector3 corner, Vector3 origin, int layer, float sky, float blockLight)
+    {
+        var point = TorchMin + corner * TorchSize;
+        return new ChunkVertex(origin + point, face.UvAt(point), layer, face.Brightness, sky, blockLight);
     }
 
     private static void Add(byte packed, ref int sky, ref int block, ref int count)

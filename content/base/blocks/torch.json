@@ -1,0 +1,11 @@
+{
+  "type": "block",
+  "name": "base:torch",
+  "isOpaque": false,
+  "isSolid": false,
+  "model": "torch",
+  "needsSupport": true,
+  "textures": "torch",
+  "hardness": 0,
+  "light": 15
+}

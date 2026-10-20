@@ -1,0 +1,8 @@
+{
+  "type": "item",
+  "name": "base:torch",
+  "maxStackSize": 64,
+  "placesBlock": "base:torch",
+  "icon": "torch",
+  "displayName": "Факел"
+}

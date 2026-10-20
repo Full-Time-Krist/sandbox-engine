@@ -29,6 +29,12 @@ internal readonly struct BlockFace(int dx, int dy, int dz, float brightness, Vec
 
     public Vector3 Normal => new(Dx, Dy, Dz);
 
+    /// <summary>
+    /// Текстурные координаты точки на плоскости этой грани — по тому же правилу, что у углов. Для граней меньше блока
+    /// (факел): квадрат грани берёт из текстуры ту часть, которая приходится на его место в блоке.
+    /// </summary>
+    public Vector2 UvAt(Vector3 point) => ComputeUv(Dx, Dy, Dz, point);
+
     public FaceKind Kind => Dy > 0 ? FaceKind.Top : Dy < 0 ? FaceKind.Bottom : FaceKind.Side;
 
     public static readonly BlockFace[] All =

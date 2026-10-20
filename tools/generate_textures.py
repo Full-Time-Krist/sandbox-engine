@@ -185,6 +185,23 @@ def furnace_top(rng):
     return px
 
 
+HANDLE, HANDLE_LIGHT = (96, 64, 34), (130, 92, 52)  # дерево: рукояти инструментов, палка, факел
+FLAME = ((255, 244, 180), (255, 200, 70), (236, 128, 36))  # сверху вниз: почти белое, жёлтое, оранжевое
+
+
+def torch_block(rng):
+    # Факел в мире — столбик из столбцов 7–8 и строк 6–15 (верх — строки 7–8). Строки одноцветные во всю ширину:
+    # мип-уровни усредняют соседние пиксели, и тонкий столбик вдали не смешается с пустым фоном.
+    px = []
+    for y in range(SIZE):
+        if 6 <= y <= 8:
+            color = FLAME[y - 6]
+        else:
+            color = HANDLE_LIGHT if y % 3 == 0 else HANDLE
+        px.append([color] * SIZE)
+    return px
+
+
 TEXTURES = {
     "stone": stone,
     "dirt": dirt,
@@ -200,6 +217,7 @@ TEXTURES = {
     "crafting_table_side": crafting_table_side,
     "furnace_side": furnace_side,
     "furnace_top": furnace_top,
+    "torch": torch_block,
 }
 
 
@@ -210,7 +228,6 @@ MATERIALS = {  # навершие: основной цвет и блик
     "stone": ((120, 120, 124), (165, 165, 170)),
     "copper": ((196, 110, 58), (236, 160, 98)),
 }
-HANDLE, HANDLE_LIGHT = (96, 64, 34), (130, 92, 52)
 
 
 def blank():
@@ -270,6 +287,33 @@ ITEMS = {f"{material}_{kind}": (lambda kind=kind, material=material: tool(kind, 
          for material in MATERIALS for kind in ("pickaxe", "axe", "shovel")}
 ITEMS["stick"] = stick
 ITEMS["copper_ingot"] = copper_ingot
+
+
+def torch_item():
+    px = blank()
+    for y in range(6, 15):  # палка по центру
+        px[y][7] = HANDLE_LIGHT
+        px[y][8] = HANDLE
+    for y, xs in ((2, (7, 8)), (3, (6, 7, 8, 9)), (4, (6, 7, 8, 9)), (5, (7, 8))):  # пламя: светлая сердцевина
+        for x in xs:
+            px[y][x] = FLAME[0] if y >= 4 and x in (7, 8) else (FLAME[1] if y <= 3 or x in (7, 8) else FLAME[2])
+    return px
+
+
+def charcoal():
+    base, light, dark = (52, 48, 46), (84, 78, 74), (30, 28, 27)
+    px = blank()
+    for y in range(4, 13):  # неровный кусок угля: светлый верх и левый край, тёмные низ и правый
+        left, right = 3 + abs(8 - y) // 2, 13 - abs(7 - y) // 2
+        for x in range(left, right):
+            px[y][x] = light if y == 4 or x == left else (dark if y == 12 or x == right - 1 else base)
+    for x, y in ((6, 7), (9, 9), (8, 6), (10, 8)):  # блики
+        px[y][x] = light
+    return px
+
+
+ITEMS["torch"] = torch_item
+ITEMS["charcoal"] = charcoal
 
 
 # --- Стадии трещин: 0 — едва заметная, 9 — почти разваленный блок. Тёмные линии с прозрачностью поверх блока. ---

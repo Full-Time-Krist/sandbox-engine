@@ -1,0 +1,14 @@
+{
+  "type": "recipe",
+  "name": "base:charcoal",
+  "result": {
+    "item": "base:charcoal"
+  },
+  "ingredients": [
+    {
+      "item": "base:log",
+      "count": 1
+    }
+  ],
+  "station": "base:furnace"
+}

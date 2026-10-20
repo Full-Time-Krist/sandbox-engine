@@ -29,6 +29,7 @@ public class GameContentTests
             ("base:planks", true, true, Uniform("planks")),
             ("base:sand", true, true, Uniform("sand")),
             ("base:stone", true, true, Uniform("stone")),
+            ("base:torch", false, false, Uniform("torch")),
         ];
 
         var actual = _content.Blocks.All.Where(block => !block.Id.IsAir)
@@ -224,6 +225,38 @@ public class GameContentTests
                     break;
             }
         }
+    }
+
+    /// <summary>
+    /// Факел (шаг 8.5): прозрачный и проходимый столбик, светит на 15 (как солнце), стоит на опоре, ломается сразу; уголь — из бревна
+    /// в печи, факелы — по 4 из угля и палки у верстака; задание «Да будет свет» — после печи.
+    /// </summary>
+    [Fact]
+    public void VanillaTorch()
+    {
+        var torch = _content.Blocks.Get("base:torch");
+        Assert.Equal((false, false, (byte)15, true), (torch.IsOpaque, torch.IsSolid, torch.Light, torch.NeedsSupport));
+        Assert.Equal(new BlockMining(0, null, 0), torch.Mining);
+        Assert.Equal(BlockModel.Torch, _content.BlockModels["base:torch"]);
+        Assert.Equal(["base:torch"], _content.BlockModels.Keys);
+        Assert.All(_content.Blocks.All.Where(b => b.Name != "base:torch"), block => Assert.False(block.NeedsSupport, block.Name));
+        Assert.Equal("base:torch", _content.ItemIcons["base:torch"]);
+        Assert.Equal("base:charcoal", _content.ItemIcons["base:charcoal"]);
+
+        ItemId Item(string name) => _content.Items.Get(name).Id;
+        var charcoal = _content.Recipes.Get("base:charcoal");
+        Assert.Equal(_content.Blocks.Get("base:furnace").Id, charcoal.Station);
+        Assert.Equal([new ItemStack(Item("base:log"), 1)], charcoal.Ingredients);
+        Assert.Equal(new ItemStack(Item("base:charcoal"), 1), charcoal.Result);
+        var torches = _content.Recipes.Get("base:torch");
+        Assert.Equal(_content.Blocks.Get("base:crafting_table").Id, torches.Station);
+        Assert.Equal([new ItemStack(Item("base:charcoal"), 1), new ItemStack(Item("base:stick"), 1)], torches.Ingredients);
+        Assert.Equal(new ItemStack(Item("base:torch"), 4), torches.Result);
+
+        var quest = _content.Quests.All.Single(q => q.Name == "base:torch");
+        Assert.Equal("Да будет свет", quest.Title);
+        Assert.Equal(["base:furnace"], quest.Requires);
+        Assert.Equal((Shared.Quests.QuestGoalKind.Place, torch.Id), (quest.Goal.Kind, quest.Goal.Block));
     }
 
     private static BlockTextures Uniform(string name) => new("base:" + name, "base:" + name, "base:" + name);
