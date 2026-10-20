@@ -837,7 +837,7 @@ public sealed class GameServer : IDisposable
         }
 
         // Сервер сам повторяет луч по своей копии мира: клиент не может указать произвольный блок.
-        var target = VoxelRaycast.Cast(World.Chunks, use.EyePosition, use.LookDirection, GameRules.BlockReach);
+        var target = VoxelRaycast.Cast(World.Chunks, _registry, use.EyePosition, use.LookDirection, GameRules.BlockReach);
         _behaviors[session.Inventory.Selected.Item.Value].Use(use.Action,
             new ItemUseContext(_editor, _items, session, target, use.EyePosition, new Breaker(this, session)));
     }
@@ -983,11 +983,18 @@ public sealed class GameServer : IDisposable
             if (!server._registry.IsSolid(block))
                 return false;
 
-            var box = Aabb.OfBlock(pos);
+            // По коробам формы: полублок, поставленный под ноги парящему над ним игроку, его не задевает.
+            var boxes = server._registry.ShapeOf(block).Boxes;
             foreach (var session in server._sessions)
             {
-                if (session.IsJoined && PlayerPhysics.BodyAt(session.PlayerPosition).Intersects(box))
-                    return true;
+                if (!session.IsJoined)
+                    continue;
+                var body = PlayerPhysics.BodyAt(session.PlayerPosition);
+                foreach (var box in boxes)
+                {
+                    if (body.Intersects(Aabb.Of(pos, box)))
+                        return true;
+                }
             }
             return false;
         }
@@ -1017,8 +1024,8 @@ public sealed class GameServer : IDisposable
 
         public bool TryPlaceBlock(BlockPos pos, BlockId block, IPlayer player)
         {
-            // Факел и другие блоки с опорой ставятся только поверх твёрдого.
-            if (server._registry.Get(block).NeedsSupport && !server._registry.IsSolid(GetBlock(pos + Down)))
+            // Факел и другие блоки с опорой ставятся только на твёрдый блок с полным верхом.
+            if (server._registry.Get(block).NeedsSupport && !server._registry.CanSupport(GetBlock(pos + Down)))
                 return false;
             if (!TrySetBlock(pos, block))
                 return false;
@@ -1044,13 +1051,14 @@ public sealed class GameServer : IDisposable
 
         /// <summary>
         /// Блок над <paramref name="below"/>, стоящий на опоре (<see cref="BlockDefinition.NeedsSupport"/>), ломается
-        /// с добычей, если опора больше не твёрдая, — кто бы её ни сменил: игрок, мод, правило. Без событий и заданий:
+        /// с добычей, если опора больше не держит (<see cref="BlockRegistry.CanSupport"/>: сломали или заменили на плиту), —
+        /// кто бы её ни сменил: игрок, мод, правило. Без событий и заданий:
         /// это не действие игрока. Вверх по столбику — циклом: у модов блок с опорой может быть твёрдым и сам держать
         /// такой же, и рекурсия по высокому столбу переполнила бы стек.
         /// </summary>
         private void BreakUnsupported(BlockPos below)
         {
-            while (!server._registry.IsSolid(GetBlock(below)))
+            while (!server._registry.CanSupport(GetBlock(below)))
             {
                 var above = below + Up;
                 var block = GetBlock(above);

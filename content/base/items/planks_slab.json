@@ -1,0 +1,7 @@
+{
+  "type": "item",
+  "name": "base:planks_slab",
+  "maxStackSize": 64,
+  "placesBlock": "base:planks_slab",
+  "displayName": "Деревянная плита"
+}

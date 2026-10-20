@@ -1,0 +1,10 @@
+{
+  "type": "block",
+  "name": "base:planks_slab",
+  "isOpaque": false,
+  "model": "slab",
+  "blocksLight": true,
+  "textures": "planks",
+  "hardness": 3.0,
+  "tool": "axe"
+}

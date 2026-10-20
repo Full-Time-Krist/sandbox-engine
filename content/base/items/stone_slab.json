@@ -1,0 +1,7 @@
+{
+  "type": "item",
+  "name": "base:stone_slab",
+  "maxStackSize": 64,
+  "placesBlock": "base:stone_slab",
+  "displayName": "Каменная плита"
+}

@@ -12,8 +12,11 @@ layout(location = 6) in float i_Yaw;
 layout(location = 7) in vec3 i_Layers;  // слои верха, бока, низа
 layout(location = 8) in float i_Sprite;
 layout(location = 9) in vec2 i_Light;   // свет блока, где лежит предмет: небесный и блочный
+layout(location = 10) in vec3 i_BoxMin; // общий короб формы блока в долях блока (полублок — нижняя половина)
+layout(location = 11) in vec3 i_BoxMax;
 
 uniform mat4 u_ViewProjection;
+uniform float u_CubeSize; // сторона кубика в блоках (ItemEntityRenderer.CubeSize)
 
 out vec2 v_Uv;
 flat out float v_Layer;
@@ -46,9 +49,17 @@ void main()
     }
     else
     {
+        // Кубик сжимается до короба формы и лежит на земле его низом. Угол единичного куба — из вершины меша
+        // (она — угол куба [0; 1]³ со смещённым центром основания, умноженный на сторону кубика).
+        vec3 unit = a_Position / u_CubeSize + vec3(0.5, 0.0, 0.5);
+        vec3 point = mix(i_BoxMin, i_BoxMax, unit);
+        vec3 shaped = (point - vec3(0.5, i_BoxMin.y, 0.5)) * u_CubeSize;
+        // Бока берут ту часть текстуры, что на их высоте (v = 1 − y, как у блоков): у полублока — нижнюю половину.
+        if (a_Face > 0.5 && a_Face < 1.5)
+            v_Uv.y = 1.0 - point.y;
         float c = cos(i_Yaw);
         float s = sin(i_Yaw);
-        local = vec3(c * a_Position.x + s * a_Position.z, a_Position.y, -s * a_Position.x + c * a_Position.z);
+        local = vec3(c * shaped.x + s * shaped.z, shaped.y, -s * shaped.x + c * shaped.z);
     }
 
     gl_Position = u_ViewProjection * vec4(i_Offset + local, 1.0);

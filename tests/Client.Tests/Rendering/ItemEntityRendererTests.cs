@@ -1,5 +1,6 @@
 using System.Numerics;
 using Client.Rendering;
+using Shared.Blocks;
 using Shared.Content;
 using Shared;
 using Shared.Items;
@@ -32,6 +33,14 @@ public class ItemEntityRendererTests
 
         Assert.False(look.Sprite);
         Assert.Equal(new Vector3(Layer("base:grass_top"), Layer("base:grass_side"), Layer("base:dirt")), look.Layers);
+    }
+
+    /// <summary>Кубик предмета-блока сжимается до общего короба формы: плита лежит половинкой, обычный блок — целым.</summary>
+    [Fact]
+    public void BlockItem_CubeBox_IsShapeBounds()
+    {
+        Assert.Equal(BlockShape.Slab.Bounds, ItemLook.For(_items.Get("base:stone_slab"), _visuals).Box);
+        Assert.Equal(BlockShape.Cube.Bounds, ItemLook.For(_items.Get("base:grass"), _visuals).Box);
     }
 
     [Fact]

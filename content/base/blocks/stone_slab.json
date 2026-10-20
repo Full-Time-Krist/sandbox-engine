@@ -1,0 +1,11 @@
+{
+  "type": "block",
+  "name": "base:stone_slab",
+  "isOpaque": false,
+  "model": "slab",
+  "blocksLight": true,
+  "textures": "stone",
+  "hardness": 2.25,
+  "tool": "pickaxe",
+  "toolTier": 1
+}

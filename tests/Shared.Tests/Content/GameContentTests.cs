@@ -27,8 +27,10 @@ public class GameContentTests
             ("base:leaves", true, true, Uniform("leaves")),
             ("base:log", true, true, new("base:log_top", "base:log_side", "base:log_top")),
             ("base:planks", true, true, Uniform("planks")),
+            ("base:planks_slab", false, true, Uniform("planks")),
             ("base:sand", true, true, Uniform("sand")),
             ("base:stone", true, true, Uniform("stone")),
+            ("base:stone_slab", false, true, Uniform("stone")),
             ("base:torch", false, false, Uniform("torch")),
         ];
 
@@ -237,8 +239,7 @@ public class GameContentTests
         var torch = _content.Blocks.Get("base:torch");
         Assert.Equal((false, false, (byte)15, true), (torch.IsOpaque, torch.IsSolid, torch.Light, torch.NeedsSupport));
         Assert.Equal(new BlockMining(0, null, 0), torch.Mining);
-        Assert.Equal(BlockModel.Torch, _content.BlockModels["base:torch"]);
-        Assert.Equal(["base:torch"], _content.BlockModels.Keys);
+        Assert.Same(BlockShape.Torch, torch.Shape);
         Assert.All(_content.Blocks.All.Where(b => b.Name != "base:torch"), block => Assert.False(block.NeedsSupport, block.Name));
         Assert.Equal("base:torch", _content.ItemIcons["base:torch"]);
         Assert.Equal("base:charcoal", _content.ItemIcons["base:charcoal"]);
@@ -257,6 +258,29 @@ public class GameContentTests
         Assert.Equal("Да будет свет", quest.Title);
         Assert.Equal(["base:furnace"], quest.Requires);
         Assert.Equal((Shared.Quests.QuestGoalKind.Place, torch.Id), (quest.Goal.Kind, quest.Goal.Block));
+    }
+
+    /// <summary>
+    /// Плиты (шаг 8.6): нижние полублоки камня и досок — твёрдые, но прозрачные (не закрывают соседей), ломаются как свой
+    /// материал; по 6 из 3 блоков у верстака. Остальные блоки ванили — кубы, кроме факела.
+    /// </summary>
+    [Fact]
+    public void VanillaSlabs()
+    {
+        var table = _content.Blocks.Get("base:crafting_table").Id;
+        foreach (var (slab, material) in new[] { ("base:stone_slab", "base:stone"), ("base:planks_slab", "base:planks") })
+        {
+            var block = _content.Blocks.Get(slab);
+            Assert.Same(BlockShape.Slab, block.Shape);
+            Assert.Equal((false, true, false, true), (block.IsOpaque, block.IsSolid, block.NeedsSupport, block.BlocksLight));
+            Assert.Equal(_content.Blocks.Get(material).Mining, block.Mining);
+            var recipe = _content.Recipes.Get(slab);
+            Assert.Equal(table, recipe.Station);
+            Assert.Equal([new ItemStack(_content.Items.Get(material).Id, 3)], recipe.Ingredients);
+            Assert.Equal(new ItemStack(_content.Items.Get(slab).Id, 6), recipe.Result);
+        }
+        Assert.Equal(["base:planks_slab", "base:stone_slab", "base:torch"],
+            _content.Blocks.All.Where(b => !b.Shape.IsFullCube).Select(b => b.Name));
     }
 
     private static BlockTextures Uniform(string name) => new("base:" + name, "base:" + name, "base:" + name);

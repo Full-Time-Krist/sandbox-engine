@@ -103,6 +103,42 @@ public sealed class MovementTests : IDisposable
         Assert.Equal(client.State.Position, ServerPosition);
     }
 
+    /// <summary>
+    /// Подъём без прыжка (шаг 8.6): честный клиент идёт по лестнице — уступ в блок, плита, ещё полблока — и сервер его
+    /// не поправляет: путь подъёма проверка движения принимает, запаса подъёма хватает.
+    /// </summary>
+    [Fact]
+    public void HonestClient_StepsUpStairsAndSlab_IsNeverCorrected()
+    {
+        var stone = _registry.Get("base:stone").Id;
+        var slab = _registry.Get("base:stone_slab").Id;
+        var floor = BlockPos.Containing(_spawn) + new BlockPos(0, 14, 0);
+        // Высота пола по x: до 3 — 0, с 3 — 1, с 6 — плита (1,5), с 8 — 2. Над ним — воздух на 4 блока.
+        for (var x = -2; x <= 14; x++)
+        for (var z = -2; z <= 2; z++)
+        {
+            for (var y = 0; y <= 7; y++)
+                Assert.True(_server.World.TrySetBlock(floor + new BlockPos(x, y, z), BlockId.Air));
+            Assert.True(_server.World.TrySetBlock(floor + new BlockPos(x, -1, z), stone));
+            if (x >= 3)
+                Assert.True(_server.World.TrySetBlock(floor + new BlockPos(x, 0, z), stone));
+            if (x is >= 6 and < 8)
+                Assert.True(_server.World.TrySetBlock(floor + new BlockPos(x, 1, z), slab));
+            if (x >= 8)
+                Assert.True(_server.World.TrySetBlock(floor + new BlockPos(x, 1, z), stone));
+        }
+        var start = new Vector3d(floor.X + 0.5, floor.Y, floor.Z + 0.5);
+        Teleport(start);
+        var client = new HonestClient(this, new PlayerState(start, OnGround: true));
+
+        client.Run(new PlayerInput(Vector2.UnitX), 50);
+
+        Assert.Empty(client.Teleports);
+        Assert.Equal(floor.Y + 2, client.State.Position.Y, 1e-9);
+        Assert.True(client.State.Position.X > floor.X + 9, $"дошёл до {client.State.Position}");
+        Assert.Equal(client.State.Position, ServerPosition);
+    }
+
     [Fact]
     public void HonestClient_Creative_FastFlightAndFall_IsNeverCorrected()
     {

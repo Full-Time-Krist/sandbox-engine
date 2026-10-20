@@ -47,6 +47,29 @@ public sealed class ItemIconsTests : IDisposable
         Assert.Equal((Layer("base:grass_side"), 153), (v[8].Layer, (int)(v[8].Color & 0xFF)));
     }
 
+    /// <summary>
+    /// Иконка плиты (шаг 8.6) — нижняя половина кубика: верх опущен на четверть иконки, бока вдвое ниже и берут нижнюю
+    /// половину текстуры; низ иконки там же, где у куба.
+    /// </summary>
+    [Fact]
+    public void SlabIcon_IsLowerHalfOfCube()
+    {
+        const int Scale = 2;
+        var s = ItemIcons.Size * Scale;
+        ItemIcons.Draw(_canvas, _items.Get("base:stone_slab"), _visuals, 100, 50, Scale);
+        var v = _canvas.Vertices.ToArray();
+
+        Assert.Equal(3, _canvas.QuadCount);
+        // Верх: дальний угол ромба — на s/4 ниже, чем у куба; ромб того же размера.
+        Assert.Equal(new Vector2(100 + s / 2, 50 + s / 4), v[0].Position);
+        Assert.Equal(new Vector2(100 + s / 2, 50 + s * 3 / 4), v[2].Position);
+        // Южный бок: от верха плиты до низа иконки, высотой s/4, текстура — от середины до низа.
+        Assert.Equal(new Vector2(100, 50 + s / 2), v[4].Position);
+        Assert.Equal(new Vector2(100 + s / 2, 50 + s), v[6].Position);
+        Assert.Equal((0.5f, 1f), (v[4].Uv.Y, v[6].Uv.Y));
+        Assert.All(v, x => Assert.Equal(Layer("base:stone"), x.Layer));
+    }
+
     [Theory]
     [InlineData(1)]
     [InlineData(3)]

@@ -1,3 +1,4 @@
+using System.Numerics;
 using Shared.Content;
 using Shared.Blocks;
 using Shared.Items;
@@ -72,6 +73,16 @@ public class ContentLoaderTests
     [InlineData("""{"type":"block","name":"base:torch","isOpaque":false,"model":"Torch"}""", "base/torch.json")]
     [InlineData("""{"type":"block","name":"base:torch","isOpaque":true,"model":"torch"}""", "base/torch.json")]
     [InlineData("""{"type":"block","name":"base:torch","isOpaque":false,"needsSupport":"yes"}""", "base/torch.json")]
+    [InlineData("""{"type":"block","name":"base:slab","isOpaque":true,"model":"slab"}""", "base/slab.json")]
+    [InlineData("""{"type":"block","name":"base:post","isOpaque":false,"model":"torch","shape":[[0,0,0,16,8,16]]}""", "base/post.json")]
+    [InlineData("""{"type":"block","name":"base:post","isOpaque":false,"shape":[]}""", "base/post.json")]
+    [InlineData("""{"type":"block","name":"base:post","isOpaque":false,"shape":[0,0,0,16,8,16]}""", "base/post.json")]
+    [InlineData("""{"type":"block","name":"base:post","isOpaque":false,"shape":[[0,0,0,16,8]]}""", "base/post.json")]
+    [InlineData("""{"type":"block","name":"base:post","isOpaque":false,"shape":[[0,0,0,17,8,16]]}""", "base/post.json")]
+    [InlineData("""{"type":"block","name":"base:post","isOpaque":false,"shape":[[-1,0,0,16,8,16]]}""", "base/post.json")]
+    [InlineData("""{"type":"block","name":"base:post","isOpaque":false,"shape":[[0,8,0,16,8,16]]}""", "base/post.json")]
+    [InlineData("""{"type":"block","name":"base:post","isOpaque":false,"shape":[[0,0,0,16,"8",16]]}""", "base/post.json")]
+    [InlineData("""{"type":"block","name":"base:post","isOpaque":true,"shape":[[4,0,4,12,16,12]]}""", "base/post.json")]
     [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"tool":"Pick Axe"}""", "base/stone.json")]
     [InlineData("""{"type":"item","name":"base:pick","maxStackSize":1,"tool":{"type":"pickaxe","tier":1}}""", "base/pick.json")]
     [InlineData("""{"type":"item","name":"base:pick","maxStackSize":1,"tool":{"type":"pickaxe","speed":0}}""", "base/pick.json")]
@@ -228,19 +239,29 @@ public class ContentLoaderTests
     }
 
     /// <summary>
-    /// Форма и опора: <c>model</c> попадает в таблицу форм для клиента (только не-кубы), <c>needsSupport</c> — в определение
-    /// блока (оно нужно серверу); без полей — куб без опоры.
+    /// Форма и опора попадают в определение блока: <c>model</c> — готовая форма, <c>shape</c> — свои короба в пикселях
+    /// (переводятся в доли блока), <c>needsSupport</c> — опора; без полей — куб без опоры.
     /// </summary>
     [Fact]
-    public void Load_ModelAndSupport_FieldsAndDefaults()
+    public void Load_ShapeAndSupport_FieldsAndDefaults()
     {
         var content = ContentLoader.Load([
             File("base/torch.json", """{"type":"block","name":"base:torch","isOpaque":false,"model":"torch","needsSupport":true}"""),
+            File("base/slab.json", """{"type":"block","name":"base:slab","isOpaque":false,"model":"slab"}"""),
             File("base/cube.json", """{"type":"block","name":"base:cube","isOpaque":false,"model":"cube"}"""),
+            File("base/post.json", """{"type":"block","name":"base:post","isOpaque":false,"shape":[[6,0,6,10,16,10],[0,12,0,16,16,16]]}"""),
             File("base/glass.json", """{"type":"block","name":"base:glass","isOpaque":false}""")
         ]);
 
-        Assert.Equal(new Dictionary<string, BlockModel> { ["base:torch"] = BlockModel.Torch }, content.BlockModels);
+        Assert.Same(BlockShape.Torch, content.Blocks.Get("base:torch").Shape);
+        Assert.Same(BlockShape.Slab, content.Blocks.Get("base:slab").Shape);
+        Assert.Same(BlockShape.Cube, content.Blocks.Get("base:cube").Shape);
+        Assert.Same(BlockShape.Cube, content.Blocks.Get("base:glass").Shape);
+        var post = content.Blocks.Get("base:post").Shape;
+        Assert.Null(post.Name);
+        Assert.Equal([new ShapeBox(new(0.375f, 0, 0.375f), new(0.625f, 1, 0.625f)), new ShapeBox(new(0, 0.75f, 0), new(1, 1, 1))], post.Boxes);
+        Assert.False(post.IsFullCube);
+        Assert.Equal(new ShapeBox(Vector3.Zero, Vector3.One), post.Bounds);
         Assert.True(content.Blocks.Get("base:torch").NeedsSupport);
         Assert.False(content.Blocks.Get("base:cube").NeedsSupport);
         Assert.False(content.Blocks.Get("base:glass").NeedsSupport);

@@ -12,7 +12,9 @@ namespace Shared.Lighting;
 /// <para>
 /// Правило: непрозрачный блок света не пропускает — его небесный свет 0, блочный равен его собственному свечению.
 /// В прозрачном блоке свет — наибольшее из собственного свечения и света соседей минус один. Небесный свет 15 идёт
-/// вниз без потерь (столб солнца), в остальные стороны — тоже с минус одним. Сверху верхний слой чанка получает
+/// вниз без потерь (столб солнца), в остальные стороны — тоже с минус одним. Прозрачный блок, не пропускающий свет
+/// (<see cref="BlockDefinition.BlocksLight"/>, плита), — поглотитель: свет в него входит по тому же правилу, а соседям
+/// он отдаёт только собственное свечение (небесного — ничего), столб солнца на нём обрывается. Сверху верхний слой чанка получает
 /// солнце от чанка выше, а если тот не загружен — по <see cref="ISkyAbove"/>. Незагруженные соседи света не дают.
 /// Результат — наименьший свет, удовлетворяющий правилу, и он не зависит от порядка изменений (это проверяют тесты
 /// сверкой с расчётом «с нуля»).
@@ -36,6 +38,7 @@ public sealed class LightEngine
     private readonly ChunkMap _chunks;
     private readonly ISkyAbove _sky;
     private readonly bool[] _opaque;
+    private readonly bool[] _sink;
     private readonly byte[] _emission;
     private readonly bool _hasEmitters;
 
@@ -52,10 +55,12 @@ public sealed class LightEngine
         _chunks = chunks;
         _sky = sky;
         _opaque = new bool[blocks.Count];
+        _sink = new bool[blocks.Count];
         _emission = new byte[blocks.Count];
         foreach (var block in blocks.All)
         {
             _opaque[block.Id.Value] = block.IsOpaque;
+            _sink[block.Id.Value] = !block.IsOpaque && block.BlocksLight;
             _emission[block.Id.Value] = block.Light;
             _hasEmitters |= block.Light > 0;
         }
@@ -100,7 +105,9 @@ public sealed class LightEngine
             foreach (var index in FacingLayer(2))
             {
                 var aboveIndex = index - TopLayer * Layer;
-                if (below.Light.GetSky(index) == ChunkLight.Max && chunk.Light.GetSky(aboveIndex) != ChunkLight.Max)
+                // Столб оборвался: над блоком нет солнца или там поглотитель (он солнце принимает, но вниз не пропускает).
+                if (below.Light.GetSky(index) == ChunkLight.Max
+                    && (chunk.Light.GetSky(aboveIndex) != ChunkLight.Max || IsSink(chunk, aboveIndex)))
                     Seed(below, index, sky: true);
             }
             Propagate(sky: true);
@@ -130,7 +137,7 @@ public sealed class LightEngine
         {
             var top = TopLayer * Layer + column;
             open[column] = above is not null
-                ? above.Light.GetSky(column) == ChunkLight.Max && !IsOpaque(chunk, top)
+                ? above.Light.GetSky(column) == ChunkLight.Max && !IsSink(above, column) && !IsOpaque(chunk, top)
                 : Intrinsic(chunk, top, sky: true) == ChunkLight.Max;
             if (open[column])
                 openCount++;
@@ -157,7 +164,11 @@ public sealed class LightEngine
             if (!open[column])
                 continue;
             for (var index = TopLayer * Layer + column; index >= 0 && !IsOpaque(chunk, index); index -= Layer)
+            {
                 chunk.Light.SetSky(index, ChunkLight.Max);
+                if (IsSink(chunk, index))
+                    break; // поглотитель солнце принимает, но вниз не пропускает
+            }
         }
 
         Span<bool> loaded = stackalloc bool[Directions.Length];
@@ -324,7 +335,7 @@ public sealed class LightEngine
 
         while (_add.TryDequeue(out var node))
         {
-            var level = Level(node.Chunk, node.Index, sky);
+            var level = Outgoing(node.Chunk, node.Index, sky);
             if (level == 0)
                 continue;
             for (var d = 0; d < Directions.Length; d++)
@@ -414,6 +425,12 @@ public sealed class LightEngine
     }
 
     private bool IsOpaque(Chunk chunk, int index) => IsOpaque(chunk.Blocks[index].Value);
+
+    private bool IsSink(Chunk chunk, int index) => chunk.Blocks[index].Value is var block && block < _sink.Length && _sink[block];
+
+    /// <summary>Сколько света блок отдаёт соседям: свой свет, а поглотитель — только собственное свечение.</summary>
+    private int Outgoing(Chunk chunk, int index, bool sky) =>
+        !IsSink(chunk, index) ? Level(chunk, index, sky) : sky ? 0 : Math.Min(Level(chunk, index, sky), Intrinsic(chunk, index, sky: false));
 
     // Id не из реестра (испорченные данные) — непрозрачный, как в физике он твёрдый.
     private bool IsOpaque(ushort block) => block >= _opaque.Length || _opaque[block];

@@ -66,7 +66,7 @@ public class Vector3dTests
         world.Set(new Chunk(block.Chunk));
         world.TrySetBlock(block, new BlockId(1));
 
-        var hit = VoxelRaycast.Cast(world, new Vector3d(Far + 0.97, 5.5, 5.5), Vector3.UnitX, 6f);
+        var hit = VoxelRaycast.Cast(world, new Shared.Blocks.BlockRegistry(), new Vector3d(Far + 0.97, 5.5, 5.5), Vector3.UnitX, 6f);
 
         Assert.NotNull(hit);
         Assert.Equal(block, hit.Value.Block);

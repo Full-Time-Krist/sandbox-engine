@@ -19,27 +19,30 @@ internal sealed class BlockVisuals
             StringComparer.Ordinal);
 
     private readonly bool[] _isOpaque;
-    private readonly BlockModel[] _models;
+    private readonly BlockShape[] _shapes;
+    private readonly bool[] _hidesFace;
     private readonly int[] _faceLayers;
     private readonly List<string> _textureNames = [MissingTexture];
     private readonly Dictionary<string, int> _layerByName = new() { [MissingTexture] = 0 };
 
-    /// <param name="models">Формы блоков не-кубов (<see cref="ContentRegistries.BlockModels"/>); null — все кубы.</param>
-    public BlockVisuals(BlockRegistry registry, IReadOnlyDictionary<string, BlockAppearance> appearances,
-        IReadOnlyDictionary<string, BlockModel>? models = null)
+    public BlockVisuals(BlockRegistry registry, IReadOnlyDictionary<string, BlockAppearance> appearances)
     {
         // Таблицы имеют фиксированный размер: блок, зарегистрированный позже, вышел бы за их пределы.
         if (!registry.IsFrozen)
             throw new InvalidOperationException("Реестр блоков нужно заморозить до построения таблиц внешнего вида.");
 
         _isOpaque = new bool[registry.Count];
-        _models = new BlockModel[registry.Count];
+        _shapes = new BlockShape[registry.Count];
+        _hidesFace = new bool[registry.Count * BlockFace.All.Length];
         _faceLayers = new int[registry.Count * BlockFace.All.Length];
 
         foreach (var definition in registry.All)
         {
             _isOpaque[definition.Id.Value] = definition.IsOpaque;
-            _models[definition.Id.Value] = models?.GetValueOrDefault(definition.Name) ?? BlockModel.Cube;
+            _shapes[definition.Id.Value] = definition.Shape;
+            for (var face = 0; face < BlockFace.All.Length; face++)
+                _hidesFace[definition.Id.Value * BlockFace.All.Length + face] = definition.IsOpaque
+                    || (!definition.Shape.IsFullCube && Covers(definition.Shape, BlockFace.All[face]));
             if (definition.Id.IsAir)
                 continue;
 
@@ -54,7 +57,26 @@ internal sealed class BlockVisuals
 
     public bool IsOpaque(BlockId id) => _isOpaque[id.Value];
 
-    public BlockModel Model(BlockId id) => _models[id.Value];
+    /// <summary>
+    /// Закрывает ли блок <paramref name="neighbor"/> грань соседа, обращённую к нему: грань с индексом
+    /// <paramref name="faceIndex"/> (в <see cref="BlockFace.All"/>) смотрит на этот блок. Закрывает непрозрачный блок —
+    /// и не-куб, чей короб занимает всю прилегающую сторону клетки: низ плиты закрывает верх камня под ней. Прозрачный
+    /// куб (воздух, стекло мода) не закрывает ничего: сквозь него видно; не-кубу прозрачность задана формой, а грани у него
+    /// сплошные.
+    /// </summary>
+    public bool HidesFace(BlockId neighbor, int faceIndex) => _hidesFace[neighbor.Value * BlockFace.All.Length + faceIndex];
+
+    /// <summary>Занимает ли форма всю сторону клетки, к которой смотрит грань соседа <paramref name="face"/> (то есть свою противоположную).</summary>
+    private static bool Covers(BlockShape shape, BlockFace face) => shape.Boxes.Any(box =>
+        (face.Dx == 0 || (face.Dx > 0 ? box.Min.X == 0 : box.Max.X == 1))
+        && (face.Dy == 0 || (face.Dy > 0 ? box.Min.Y == 0 : box.Max.Y == 1))
+        && (face.Dz == 0 || (face.Dz > 0 ? box.Min.Z == 0 : box.Max.Z == 1))
+        && (face.Dx != 0 || (box.Min.X == 0 && box.Max.X == 1))
+        && (face.Dy != 0 || (box.Min.Y == 0 && box.Max.Y == 1))
+        && (face.Dz != 0 || (box.Min.Z == 0 && box.Max.Z == 1)));
+
+    /// <summary>Форма блока (<see cref="BlockDefinition.Shape"/>): мешер, рамка, трещины и иконка рисуются по ней.</summary>
+    public BlockShape Shape(BlockId id) => _shapes[id.Value];
 
     /// <summary>Слой текстуры для грани блока; <paramref name="faceIndex"/> — индекс в <see cref="BlockFace.All"/>.</summary>
     public int GetLayer(BlockId id, int faceIndex) => _faceLayers[id.Value * BlockFace.All.Length + faceIndex];

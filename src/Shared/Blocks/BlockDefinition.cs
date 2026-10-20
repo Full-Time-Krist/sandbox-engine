@@ -10,11 +10,22 @@ namespace Shared.Blocks;
 /// <param name="Mining">Как блок ломается: твёрдость, нужный инструмент и его уровень.</param>
 /// <param name="Light">Сколько света блок излучает сам, 0–15 (<see cref="Lighting.LightEngine"/>); 0 — не светится.</param>
 /// <param name="NeedsSupport">
-/// Стоит только на твёрдом блоке: игрок ставит его лишь поверх твёрдого, а когда опора перестаёт быть твёрдой
-/// (её сломали или заменили), блок ломается с добычей. Факел.
+/// Стоит только на блоке, который может его держать (<see cref="BlockRegistry.CanSupport"/>: твёрдый с полным верхом):
+/// игрок ставит его лишь на такой, а когда опора перестаёт держать (её сломали или заменили), блок ломается с добычей. Факел.
 /// </param>
 public sealed record BlockDefinition(BlockId Id, string Name, bool IsOpaque, bool IsSolid, BlockMining Mining, byte Light = 0,
-    bool NeedsSupport = false);
+    bool NeedsSupport = false)
+{
+    /// <summary>Форма: короба внутри клетки (<see cref="BlockShape"/>). По ним блок рисуется, в него целятся и о него ударяются.</summary>
+    public BlockShape Shape { get; init; } = BlockShape.Cube;
+
+    /// <summary>
+    /// Прозрачный блок, сквозь который свет не проходит (плита): свет соседей и солнце в него входят — он освещён, как
+    /// воздух, — но дальше он отдаёт только собственное свечение, и столб солнца на нём обрывается. Под крышей из плит
+    /// темно. У непрозрачного блока ничего не меняет: в него свет и так не входит.
+    /// </summary>
+    public bool BlocksLight { get; init; }
+}
 
 /// <summary>Как ломается блок (<see cref="Items.Mining"/> считает время и добычу).</summary>
 /// <param name="Hardness">Секунды рукой, если блок добывается рукой; 0 — ломается сразу.</param>

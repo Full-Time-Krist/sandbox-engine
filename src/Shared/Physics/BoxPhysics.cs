@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Numerics;
 using Shared.Blocks;
 using Shared.Voxels;
@@ -27,7 +28,8 @@ public readonly record struct BodyState(Vector3d Position, Vector3 Velocity = de
 /// </summary>
 /// <remarks>
 /// <para>
-/// Столкновения — короб тела против полных кубов твёрдых блоков (<see cref="BlockRegistry.IsSolid"/>).
+/// Столкновения — короб тела против коробов формы твёрдых блоков (<see cref="BlockRegistry.IsSolid"/>,
+/// <see cref="BlockShape"/>): у куба один короб на клетку, у полублока — нижняя половина.
 /// Перемещение за тик раскладывается по осям: сначала Y, затем X и Z, и по каждой оси обрезается о ближайший
 /// блок на пути. Раздельные оси дают скольжение вдоль стен. Блоки берутся из короба «тело + весь путь за тик»,
 /// поэтому на любой скорости тело не проскакивает сквозь тонкую стену.
@@ -86,28 +88,37 @@ public static class BoxPhysics
     private static float Settle(float speed) => MathF.Abs(speed) < RestSpeed ? 0 : speed;
 
     /// <summary>
-    /// Стоит ли тело на твёрдом блоке: низ короба ровно на верхней грани хотя бы одного блока под ним (короб может
-    /// стоять сразу на нескольких). Незагруженный мир опорой не считается — тогда решает полный шаг.
+    /// Стоит ли тело на твёрдом блоке: низ короба ровно на верхней грани хотя бы одного короба формы под ним (тело может
+    /// стоять сразу на нескольких; верх полублока — на половине клетки). Незагруженный мир опорой не считается — тогда
+    /// решает полный шаг.
     /// </summary>
-    private static bool HasSupport(Vector3d feet, in BodyShape shape, ChunkMap chunks, BlockRegistry blocks)
+    public static bool HasSupport(Vector3d feet, in BodyShape shape, ChunkMap chunks, BlockRegistry blocks)
     {
-        var top = Math.Round(feet.Y);
-        if (Math.Abs(feet.Y - top) > Aabb.Epsilon)
-            return false;
-
-        var box = BodyAt(feet, shape.Width, shape.Height);
-        var y = (int)top - 1;
+        var body = BodyAt(feet, shape.Width, shape.Height);
+        // Верх опоры — в клетке чуть ниже ног: у куба это клетка под ногами, у полублока — та, где стоят ноги.
+        var y = (int)Math.Floor(feet.Y - Aabb.Epsilon);
         // Касание гранью соседнего столбца — не опора: края сужаются на допуск, как в Aabb.
-        var minX = (int)Math.Floor(box.Min.X + Aabb.Epsilon);
-        var maxX = (int)Math.Floor(box.Max.X - Aabb.Epsilon);
-        var minZ = (int)Math.Floor(box.Min.Z + Aabb.Epsilon);
-        var maxZ = (int)Math.Floor(box.Max.Z - Aabb.Epsilon);
+        var minX = (int)Math.Floor(body.Min.X + Aabb.Epsilon);
+        var maxX = (int)Math.Floor(body.Max.X - Aabb.Epsilon);
+        var minZ = (int)Math.Floor(body.Min.Z + Aabb.Epsilon);
+        var maxZ = (int)Math.Floor(body.Max.Z - Aabb.Epsilon);
         for (var x = minX; x <= maxX; x++)
         for (var z = minZ; z <= maxZ; z++)
         {
             var pos = new BlockPos(x, y, z);
-            if (chunks.Contains(pos.Chunk) && blocks.IsSolid(chunks.GetBlock(pos)))
-                return true;
+            if (!chunks.Contains(pos.Chunk))
+                continue;
+            var block = chunks.GetBlock(pos);
+            if (!blocks.IsSolid(block))
+                continue;
+            foreach (var box in blocks.ShapeOf(block).Boxes)
+            {
+                var obstacle = Aabb.Of(pos, box);
+                if (Math.Abs(obstacle.Max.Y - feet.Y) <= Aabb.Epsilon
+                    && body.Max.X > obstacle.Min.X + Aabb.Epsilon && body.Min.X < obstacle.Max.X - Aabb.Epsilon
+                    && body.Max.Z > obstacle.Min.Z + Aabb.Epsilon && body.Min.Z < obstacle.Max.Z - Aabb.Epsilon)
+                    return true;
+            }
         }
         return false;
     }
@@ -151,11 +162,14 @@ public static class BoxPhysics
     internal static (BlockPos Min, BlockPos Max) BlockRange(Aabb box) =>
         (BlockPos.Containing(box.Min), BlockPos.Containing(box.Max));
 
-    private static SolidBlockEnumerable SolidBlocks(BlockPos min, BlockPos max, ChunkMap chunks, BlockRegistry blocks) =>
+    internal static SolidBlockEnumerable SolidBlocks(BlockPos min, BlockPos max, ChunkMap chunks, BlockRegistry blocks) =>
         new(min, max, chunks, blocks);
 
-    /// <summary>Перебор коробов твёрдых блоков в диапазоне. Структура, а не yield: без выделения памяти каждый тик.</summary>
-    private readonly struct SolidBlockEnumerable(BlockPos min, BlockPos max, ChunkMap chunks, BlockRegistry blocks)
+    /// <summary>
+    /// Перебор коробов твёрдых блоков в диапазоне — всех коробов формы каждого. Структура, а не yield: без выделения
+    /// памяти каждый тик.
+    /// </summary>
+    internal readonly struct SolidBlockEnumerable(BlockPos min, BlockPos max, ChunkMap chunks, BlockRegistry blocks)
     {
         public Enumerator GetEnumerator() => new(min, max, chunks, blocks);
 
@@ -163,6 +177,9 @@ public static class BoxPhysics
         {
             // Начинаем «перед» первым блоком: MoveNext сначала сдвигает.
             private int _x = min.X - 1, _y = min.Y, _z = min.Z;
+            private BlockPos _block;
+            private ImmutableArray<ShapeBox> _boxes;
+            private int _box;
 
             public Aabb Current { get; private set; }
 
@@ -170,6 +187,13 @@ public static class BoxPhysics
             {
                 while (true)
                 {
+                    // Сначала — оставшиеся короба текущего блока.
+                    if (!_boxes.IsDefault && ++_box < _boxes.Length)
+                    {
+                        Current = Aabb.Of(_block, _boxes[_box]);
+                        return true;
+                    }
+
                     if (++_x > max.X)
                     {
                         _x = min.X;
@@ -181,10 +205,14 @@ public static class BoxPhysics
                         }
                     }
 
-                    var block = new BlockPos(_x, _y, _z);
-                    if (blocks.IsSolid(chunks.GetBlock(block)))
+                    _block = new BlockPos(_x, _y, _z);
+                    _boxes = default;
+                    var id = chunks.GetBlock(_block);
+                    if (blocks.IsSolid(id))
                     {
-                        Current = Aabb.OfBlock(block);
+                        _boxes = blocks.ShapeOf(id).Boxes;
+                        _box = 0;
+                        Current = Aabb.Of(_block, _boxes[0]);
                         return true;
                     }
                 }

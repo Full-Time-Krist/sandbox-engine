@@ -12,7 +12,7 @@ using Shared.Voxels;
 namespace Server.Tests;
 
 /// <summary>
-/// Факел (шаг 8.5): ставится только поверх твёрдого, светит, ломается с добычей, когда опора перестаёт быть твёрдой —
+/// Факел (шаг 8.5) и неполные блоки на сервере (шаг 8.6): факел ставится только поверх твёрдого, светит, ломается с добычей, когда опора перестаёт быть твёрдой —
 /// кто бы её ни сменил (игрок, мод через <see cref="IWorld"/>).
 /// </summary>
 public sealed class TorchTests : IDisposable
@@ -107,6 +107,10 @@ public sealed class TorchTests : IDisposable
         Assert.True(World.TryPlaceBlock(stone + Up, _torch, Player));
         Assert.False(World.TryPlaceBlock(stone + Up + Up, _torch, Player)); // на факел: он не твёрдый
         Assert.True(BlockAt(stone + Up + Up).IsAir);
+        // На плиту — тоже нет: она твёрдая, но верх у неё на половине клетки, и факел висел бы над ней.
+        Assert.True(World.TrySetBlock(stone + East + East, _registry.Get("base:stone_slab").Id));
+        Assert.True(World.TrySetBlock(stone + East + East + Up, BlockId.Air));
+        Assert.False(World.TryPlaceBlock(stone + East + East + Up, _torch, Player));
         // Обычный блок опоры не требует.
         Assert.True(World.TryPlaceBlock(stone + East, _planks, Player));
     }
@@ -132,6 +136,19 @@ public sealed class TorchTests : IDisposable
                 changes.Add(change);
         }
         Assert.Equal([new BlockChanged(stone, BlockId.Air), new BlockChanged(stone + Up, BlockId.Air)], changes);
+    }
+
+    /// <summary>Опору заменили плитой — твёрдой, но без полного верха: факел падает.</summary>
+    [Fact]
+    public void SupportReplacedBySlab_TorchBreaks()
+    {
+        var stone = StoneInClearing();
+        Assert.True(World.TryPlaceBlock(stone + Up, _torch, Player));
+
+        Assert.True(World.TrySetBlock(stone, _registry.Get("base:stone_slab").Id));
+
+        Assert.True(BlockAt(stone + Up).IsAir);
+        Assert.Equal(1, TestServers.OnGround(_server, TorchItem));
     }
 
     [Fact]
@@ -174,6 +191,49 @@ public sealed class TorchTests : IDisposable
         Assert.True(BlockAt(surface + Up).IsAir);
         // Подобрать её за два тика игрок не успеет: задержка подбора 0,5 с.
         Assert.Equal(1, TestServers.OnGround(_server, TorchItem));
+    }
+
+    /// <summary>
+    /// «Блок в теле игрока» — по коробам формы (шаг 8.6): плита под ногами парящего над её верхом игрока его не задевает,
+    /// куб в той же клетке — задевает; ноги ниже верха плиты — задевает и плита.
+    /// </summary>
+    [Fact]
+    public void IsBlockedByPlayer_UsesShapeBoxes()
+    {
+        var stone = StoneInClearing();
+        var slab = _registry.Get("base:stone_slab").Id;
+        var cell = stone + Up;
+
+        TestServers.Teleport(_server, _client, new Vector3d(cell.X + 0.5, cell.Y + 0.5, cell.Z + 0.5));
+        Assert.False(World.IsBlockedByPlayer(cell, slab));
+        Assert.True(World.IsBlockedByPlayer(cell, _stone));
+
+        TestServers.Teleport(_server, _client, new Vector3d(cell.X + 0.5, cell.Y + 0.4, cell.Z + 0.5));
+        Assert.True(World.IsBlockedByPlayer(cell, slab));
+    }
+
+    /// <summary>
+    /// Сервер целится по форме (шаг 8.6): луч над столбиком факела, но в его клетке, ломает доски за ним, а факел цел.
+    /// С кубической клеткой луч попал бы в факел.
+    /// </summary>
+    [Fact]
+    public void Primary_AboveTorchColumn_BreaksBlockBehind()
+    {
+        var stone = StoneInClearing();
+        var torchPos = stone + Up;
+        var wall = torchPos + East;
+        Assert.True(World.TryPlaceBlock(torchPos, _torch, Player));
+        Assert.True(World.TrySetBlock(wall, _planks));
+        _server.SetGameMode(_client.PlayerId, GameMode.Creative);
+        // Глаз в клетке к западу от факела, на высоте 0,8 над низом его клетки — выше столбика (10 пикселей).
+        var eye = new Vector3d(torchPos.X - 0.5, torchPos.Y + 0.8, torchPos.Z + 0.5);
+        TestServers.Teleport(_server, _client, eye - new Vector3d(0, PlayerPhysics.EyeHeight, 0));
+
+        _client.Send(new UseItem(ItemAction.Primary, eye, Vector3.UnitX));
+        TestServers.Tick(_server, TestServers.HoldBreakTicks);
+
+        Assert.True(BlockAt(wall).IsAir);
+        Assert.Equal(_torch, BlockAt(torchPos));
     }
 
     /// <summary>

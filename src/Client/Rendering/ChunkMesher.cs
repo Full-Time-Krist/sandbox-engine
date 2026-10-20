@@ -36,7 +36,7 @@ internal sealed class ChunkMeshData
 /// треугольника смешиваются линейно, и при неудачной диагонали тёмный угол тянулся бы полосой через всю грань.
 /// </para>
 /// <para>
-/// Блоки не-кубы (<see cref="BlockModel"/>) строятся своими гранями: факел — столбик в центре блока.
+/// Блоки не-кубы (<see cref="BlockShape"/>: факел, полублок) строятся по коробам формы (<see cref="AddShape"/>).
 /// </para>
 /// </remarks>
 internal sealed class ChunkMesher(BlockVisuals visuals)
@@ -73,10 +73,6 @@ internal sealed class ChunkMesher(BlockVisuals visuals)
 
     private static int Offset(Vector3 d) => ChunkSnapshot.Index((int)d.X, (int)d.Y, (int)d.Z) - ChunkSnapshot.Index(0, 0, 0);
 
-    /// <summary>Столбик факела в блоке: от угла <see cref="TorchMin"/> размером <see cref="TorchSize"/> (2 × 10 × 2 пикселя из 16).</summary>
-    internal static readonly Vector3 TorchMin = new(7 / 16f, 0, 7 / 16f);
-    internal static readonly Vector3 TorchSize = new(2 / 16f, 10 / 16f, 2 / 16f);
-
     /// <summary>Строит меш прямо по чанку и соседям. Для тестов и мест, где снимок не нужен.</summary>
     public void Build(Chunk chunk, in ChunkNeighbors neighbors, ChunkMeshData output)
     {
@@ -107,9 +103,9 @@ internal sealed class ChunkMesher(BlockVisuals visuals)
                     continue;
 
                 var origin = new Vector3(x, y, z);
-                if (visuals.Model(block) == BlockModel.Torch)
+                if (visuals.Shape(block) is { IsFullCube: false } shape)
                 {
-                    AddTorch(snapshot, index, origin, block, output);
+                    AddShape(snapshot, index, origin, block, shape, output);
                     continue;
                 }
 
@@ -117,7 +113,7 @@ internal sealed class ChunkMesher(BlockVisuals visuals)
                 {
                     // Рамка снимка содержит соседние блоки, поэтому выхода за массив нет.
                     var front = index + FaceOffsets[f];
-                    if (visuals.IsOpaque(blocks[front]))
+                    if (visuals.HidesFace(blocks[front], f))
                         continue;
 
                     ref readonly var face = ref BlockFace.All[f];
@@ -165,33 +161,46 @@ internal sealed class ChunkMesher(BlockVisuals visuals)
     }
 
     /// <summary>
-    /// Факел: столбик тоньше блока, поэтому соседи его граней не закрывают — видны все, кроме нижней (она стоит на опоре).
-    /// Свет — своего блока (факел светится сам), без затенения углов: углы столбика не касаются соседних блоков.
+    /// Блок не-куб: у каждого короба формы — шесть граней. Грань на границе клетки, как у куба, скрывает сосед
+    /// (<see cref="BlockVisuals.HidesFace"/>), и освещена она светом этого соседа; грань внутри клетки (бока факела, верх полублока) видна всегда и освещена светом
+    /// самого блока. Затенения углов нет: углы коробов не касаются соседних блоков. UV — та часть текстуры, что приходится
+    /// на место грани в блоке: у полублока бока — нижняя половина картинки.
     /// </summary>
-    private void AddTorch(ChunkSnapshot snapshot, int index, Vector3 origin, BlockId block, ChunkMeshData output)
+    private void AddShape(ChunkSnapshot snapshot, int index, Vector3 origin, BlockId block, BlockShape shape, ChunkMeshData output)
     {
-        var packed = snapshot.Light[index];
-        float sky = packed >> 4, blockLight = packed & 0x0F;
         Span<ChunkVertex> quad = stackalloc ChunkVertex[4];
-        for (var f = 0; f < BlockFace.All.Length; f++)
+        foreach (var box in shape.Boxes)
         {
-            ref readonly var face = ref BlockFace.All[f];
-            if (face.Dy < 0)
-                continue;
+            for (var f = 0; f < BlockFace.All.Length; f++)
+            {
+                ref readonly var face = ref BlockFace.All[f];
+                var front = index + FaceOffsets[f];
+                var onBoundary = OnBoundary(face, box);
+                if (onBoundary && visuals.HidesFace(snapshot.Blocks[front], f))
+                    continue;
 
-            var layer = visuals.GetLayer(block, f);
-            quad[0] = TorchVertex(face, face.A, origin, layer, sky, blockLight);
-            quad[1] = TorchVertex(face, face.B, origin, layer, sky, blockLight);
-            quad[2] = TorchVertex(face, face.C, origin, layer, sky, blockLight);
-            quad[3] = TorchVertex(face, face.D, origin, layer, sky, blockLight);
-            AddQuad(output, quad, flip: false);
+                var packed = snapshot.Light[onBoundary ? front : index];
+                float sky = packed >> 4, blockLight = packed & 0x0F;
+                var layer = visuals.GetLayer(block, f);
+                quad[0] = BoxVertex(face, face.A, box, origin, layer, sky, blockLight);
+                quad[1] = BoxVertex(face, face.B, box, origin, layer, sky, blockLight);
+                quad[2] = BoxVertex(face, face.C, box, origin, layer, sky, blockLight);
+                quad[3] = BoxVertex(face, face.D, box, origin, layer, sky, blockLight);
+                AddQuad(output, quad, flip: false);
+            }
         }
     }
 
-    /// <summary>Угол грани факела: угол единичного куба, сжатый до столбика; UV — та часть текстуры, что приходится на это место.</summary>
-    private static ChunkVertex TorchVertex(in BlockFace face, Vector3 corner, Vector3 origin, int layer, float sky, float blockLight)
+    /// <summary>Лежит ли грань короба на границе клетки — там, где её может закрыть сосед.</summary>
+    private static bool OnBoundary(in BlockFace face, ShapeBox box) =>
+        face.Dx > 0 ? box.Max.X == 1 : face.Dx < 0 ? box.Min.X == 0
+        : face.Dy > 0 ? box.Max.Y == 1 : face.Dy < 0 ? box.Min.Y == 0
+        : face.Dz > 0 ? box.Max.Z == 1 : box.Min.Z == 0;
+
+    /// <summary>Угол грани короба: угол единичного куба, сжатый до короба.</summary>
+    private static ChunkVertex BoxVertex(in BlockFace face, Vector3 corner, ShapeBox box, Vector3 origin, int layer, float sky, float blockLight)
     {
-        var point = TorchMin + corner * TorchSize;
+        var point = box.Min + corner * box.Size;
         return new ChunkVertex(origin + point, face.UvAt(point), layer, face.Brightness, sky, blockLight);
     }
 

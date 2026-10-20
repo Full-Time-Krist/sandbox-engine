@@ -36,25 +36,24 @@ internal static class ItemIcons
             return;
         }
 
-        // Изометрия 2 : 1 в квадрате s × s: верх — ромб s × s/2, бока — по s/2 в ширину и s/2 в высоту по вертикали.
-        // Углы кратны s/4 = 4 × масштаб, то есть лежат на целых пикселях.
-        Vector2 P(float fx, float fy) => origin + new Vector2(fx * s, fy * s);
-        var top = P(0.5f, 0);
-        var right = P(1, 0.25f);
-        var center = P(0.5f, 0.5f);
-        var left = P(0, 0.25f);
-        var bottomLeft = P(0, 0.75f);
-        var bottom = P(0.5f, 1);
-        var bottomRight = P(1, 0.75f);
+        // Изометрия 2 : 1 в квадрате s × s: у полного куба верх — ромб s × s/2, бока — по s/2 в ширину и s/2 в высоту.
+        // Рисуется общий короб формы блока (у полублока — нижняя половина). Углы у куба и полублока кратны s/4 =
+        // 4 × масштаб, то есть лежат на целых пикселях.
+        var box = visuals.Blocks.Shape(block).Bounds;
+        Vector2 P(Vector3 p) => origin + new Vector2((0.5f + 0.5f * (p.X - p.Z)) * s, (0.25f * (p.X + p.Z) + 0.5f * (1 - p.Y)) * s);
+        float x0 = box.Min.X, y0 = box.Min.Y, z0 = box.Min.Z, x1 = box.Max.X, y1 = box.Max.Y, z1 = box.Max.Z;
 
-        // UV — как у граней в мире (BlockFace): у верха u = x, v = z, дальний северо-западный угол — вверху ромба;
-        // у боков v = 0 — верх текстуры у верха блока.
-        Face(Top, top, right, center, left);
-        Face(South, left, center, bottom, bottomLeft);
-        Face(East, center, right, bottomRight, bottom);
+        // UV — как у граней в мире (BlockFace.UvAt): у верха u = x, v = z, дальний северо-западный угол — вверху ромба;
+        // у боков v = 1 − y — верх текстуры у верха блока, у полублока бока берут нижнюю половину картинки.
+        Face(Top, new(x0, y1, z0), new(x1, y1, z0), new(x1, y1, z1), new(x0, y1, z1));
+        Face(South, new(x0, y1, z1), new(x1, y1, z1), new(x1, y0, z1), new(x0, y0, z1));
+        Face(East, new(x1, y1, z1), new(x1, y1, z0), new(x1, y0, z0), new(x1, y0, z1));
 
-        void Face(int face, Vector2 a, Vector2 b, Vector2 c, Vector2 d) =>
-            canvas.DrawTexturedQuad(a, b, c, d, Vector2.Zero, Vector2.UnitX, Vector2.One, Vector2.UnitY,
-                visuals.Blocks.GetLayer(block, face), UiColor.White.Shade(BlockFace.All[face].Brightness));
+        void Face(int face, Vector3 a, Vector3 b, Vector3 c, Vector3 d)
+        {
+            var f = BlockFace.All[face];
+            canvas.DrawTexturedQuad(P(a), P(b), P(c), P(d), f.UvAt(a), f.UvAt(b), f.UvAt(c), f.UvAt(d),
+                visuals.Blocks.GetLayer(block, face), UiColor.White.Shade(f.Brightness));
+        }
     }
 }

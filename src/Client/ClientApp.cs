@@ -143,7 +143,7 @@ internal sealed class ClientApp(
         _inventory = new Inventory(_items);
         UpdateStatusText();
 
-        var visuals = new BlockVisuals(_registry, BlockVisuals.AppearancesFrom(content.BlockTextures), content.BlockModels);
+        var visuals = new BlockVisuals(_registry, BlockVisuals.AppearancesFrom(content.BlockTextures));
         var itemVisuals = new ItemVisuals(visuals, _items, content.ItemIcons);
         _blockTextures = LoadTextures(visuals.TextureNames, itemVisuals.TextureNames, new TextureFiles(mods));
         var crackLayer = visuals.TextureNames.Count + itemVisuals.TextureNames.Count;
@@ -393,7 +393,7 @@ internal sealed class ClientApp(
         var actionsAllowed = HandleFrameInput();
         _controller.UpdateEye(alpha);
         var eye = _controller.EyePosition;
-        _target = VoxelRaycast.Cast(_world.Chunks, eye, _camera.Forward, GameRules.BlockReach);
+        _target = VoxelRaycast.Cast(_world.Chunks, _registry, eye, _camera.Forward, GameRules.BlockReach);
         if (actionsAllowed)
         {
             HandleItemActions();
@@ -447,17 +447,20 @@ internal sealed class ClientApp(
         if (_target is not { } target)
             return;
 
-        // Рамка чуть больше блока, иначе её линии совпадут с рёбрами граней и будут мерцать (z-fighting).
+        // Рамка чуть больше короба, иначе её линии совпадут с рёбрами граней и будут мерцать (z-fighting).
+        // У блока не-куба — вокруг каждого короба формы: у факела — вокруг столбика, у полублока — вокруг половины.
         const float Grow = 0.004f;
         var block = target.Block;
         var offset = (new Vector3d(block.X, block.Y, block.Z) - eye).ToVector3();
-        var model = Matrix4x4.CreateScale(1f + Grow)
-                    * Matrix4x4.CreateTranslation(offset - new Vector3(Grow / 2));
 
         _lineShader.Use();
         _lineShader.SetUniform("u_ViewProjection", _camera.ViewProjection);
-        _lineShader.SetUniform("u_Model", model);
-        _selectionBox.Draw();
+        foreach (var box in _registry.ShapeOf(_world.Chunks.GetBlock(block)).Boxes)
+        {
+            _lineShader.SetUniform("u_Model", Matrix4x4.CreateScale(box.Size + new Vector3(Grow))
+                                              * Matrix4x4.CreateTranslation(offset + box.Min - new Vector3(Grow / 2)));
+            _selectionBox.Draw();
+        }
     }
 
     protected override void OnResize(Vector2D<int> framebufferSize) => UpdateAspectRatio(framebufferSize);
@@ -686,7 +689,7 @@ internal sealed class ClientApp(
 
         var progress = (_clock.Elapsed.TotalSeconds - breaking.Start) / breaking.Seconds;
         var offset = (new Vector3d(breaking.Pos.X, breaking.Pos.Y, breaking.Pos.Z) - eye).ToVector3();
-        _cracks.Draw(viewProjection, offset, CrackRenderer.StageFor(progress));
+        _cracks.Draw(viewProjection, offset, _registry.ShapeOf(breaking.Block).Bounds, CrackRenderer.StageFor(progress));
     }
 
     /// <summary>

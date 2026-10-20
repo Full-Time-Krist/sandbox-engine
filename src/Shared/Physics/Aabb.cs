@@ -1,3 +1,4 @@
+using Shared.Blocks;
 using Shared.Voxels;
 
 namespace Shared.Physics;
@@ -19,9 +20,14 @@ public readonly record struct Aabb(Vector3d Min, Vector3d Max)
     /// </summary>
     public const double Epsilon = 1e-6;
 
-    /// <summary>Короб блока: куб от (X, Y, Z) до (X + 1, Y + 1, Z + 1).</summary>
+    /// <summary>Короб всей клетки: куб от (X, Y, Z) до (X + 1, Y + 1, Z + 1). Для блока — <see cref="Of"/> по коробам его формы.</summary>
     public static Aabb OfBlock(BlockPos block) =>
         new(new Vector3d(block.X, block.Y, block.Z), new Vector3d(block.X + 1, block.Y + 1, block.Z + 1));
+
+    /// <summary>Короб формы блока (<see cref="ShapeBox"/>) в клетке <paramref name="block"/>.</summary>
+    public static Aabb Of(BlockPos block, ShapeBox box) => new(
+        new Vector3d(block.X + box.Min.X, block.Y + box.Min.Y, block.Z + box.Min.Z),
+        new Vector3d(block.X + box.Max.X, block.Y + box.Max.Y, block.Z + box.Max.Z));
 
     public Aabb Offset(Vector3d delta) => new(Min + delta, Max + delta);
 

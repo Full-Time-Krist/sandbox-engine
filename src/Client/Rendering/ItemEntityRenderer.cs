@@ -2,6 +2,7 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using Engine.Graphics;
 using Shared;
+using Shared.Blocks;
 using Shared.Items;
 using Shared.Voxels;
 using Silk.NET.OpenGL;
@@ -21,9 +22,9 @@ internal readonly struct ItemVertex(Vector3 position, Vector2 uv, float face, fl
     public readonly float Sprite = sprite;
 }
 
-/// <summary>Данные одного предмета для отрисовки — по одному на экземпляр (instancing), 40 байт.</summary>
+/// <summary>Данные одного предмета для отрисовки — по одному на экземпляр (instancing), 64 байта.</summary>
 [StructLayout(LayoutKind.Sequential)]
-internal readonly struct ItemInstance(Vector3 offset, float yaw, Vector3 layers, float sprite, Vector2 light)
+internal readonly struct ItemInstance(Vector3 offset, float yaw, Vector3 layers, float sprite, Vector2 light, ShapeBox box)
 {
     /// <summary>Точка предмета относительно глаза (рендер относительно камеры).</summary>
     public readonly Vector3 Offset = offset;
@@ -34,10 +35,13 @@ internal readonly struct ItemInstance(Vector3 offset, float yaw, Vector3 layers,
     public readonly float Sprite = sprite;
     /// <summary>Свет блока, где лежит предмет: небесный и блочный, 0–15.</summary>
     public readonly Vector2 Light = light;
+    /// <summary>Общий короб формы блока (в долях блока): кубик сжимается до него — полублок лежит половинкой.</summary>
+    public readonly Vector3 BoxMin = box.Min;
+    public readonly Vector3 BoxMax = box.Max;
 }
 
-/// <summary>Как выглядит предмет на земле: кубик со слоями граней блока или плоская картинка.</summary>
-internal readonly record struct ItemLook(bool Sprite, Vector3 Layers)
+/// <summary>Как выглядит предмет на земле: кубик со слоями граней блока (сжатый до формы блока) или плоская картинка.</summary>
+internal readonly record struct ItemLook(bool Sprite, Vector3 Layers, ShapeBox Box)
 {
     // Номера граней в BlockFace.All.
     private const int Side = 0;
@@ -54,10 +58,11 @@ internal readonly record struct ItemLook(bool Sprite, Vector3 Layers)
         if (icon != ItemVisuals.NoIcon || item.Block is not { } block)
         {
             float layer = Math.Max(icon, 0);
-            return new ItemLook(true, new Vector3(layer));
+            return new ItemLook(true, new Vector3(layer), BlockShape.Cube.Bounds);
         }
         return new ItemLook(false, new Vector3(
-            visuals.Blocks.GetLayer(block, Top), visuals.Blocks.GetLayer(block, Side), visuals.Blocks.GetLayer(block, Bottom)));
+            visuals.Blocks.GetLayer(block, Top), visuals.Blocks.GetLayer(block, Side), visuals.Blocks.GetLayer(block, Bottom)),
+            visuals.Blocks.Shape(block).Bounds);
     }
 }
 
@@ -113,6 +118,8 @@ internal sealed class ItemEntityRenderer : IDisposable
         _vao.SetAttribute(7, 3, VertexAttribType.Float, (uint)Marshal.OffsetOf<ItemInstance>(nameof(ItemInstance.Layers)), binding: 1);
         _vao.SetAttribute(8, 1, VertexAttribType.Float, (uint)Marshal.OffsetOf<ItemInstance>(nameof(ItemInstance.Sprite)), binding: 1);
         _vao.SetAttribute(9, 2, VertexAttribType.Float, (uint)Marshal.OffsetOf<ItemInstance>(nameof(ItemInstance.Light)), binding: 1);
+        _vao.SetAttribute(10, 3, VertexAttribType.Float, (uint)Marshal.OffsetOf<ItemInstance>(nameof(ItemInstance.BoxMin)), binding: 1);
+        _vao.SetAttribute(11, 3, VertexAttribType.Float, (uint)Marshal.OffsetOf<ItemInstance>(nameof(ItemInstance.BoxMax)), binding: 1);
     }
 
     /// <summary>Сколько предметов нарисовано в последнем кадре.</summary>
@@ -161,7 +168,7 @@ internal sealed class ItemEntityRenderer : IDisposable
             var position = entity.At(alpha);
             var offset = (position - eye).ToVector3() + new Vector3(0, bob, 0);
             var yaw = (float)(seconds * SpinPerSecond) + phase;
-            _frame.Add(new ItemInstance(offset, yaw, look.Layers, look.Sprite ? 1 : 0, LightOf(world, position)));
+            _frame.Add(new ItemInstance(offset, yaw, look.Layers, look.Sprite ? 1 : 0, LightOf(world, position), look.Box));
         }
 
         Drawn = _frame.Count;
@@ -171,6 +178,7 @@ internal sealed class ItemEntityRenderer : IDisposable
         _instances.SetData(CollectionsMarshal.AsSpan(_frame), BufferUsageARB.StreamDraw);
         _shader.Use();
         _shader.SetUniform("u_ViewProjection", viewProjection);
+        _shader.SetUniform("u_CubeSize", CubeSize);
         atmosphere.Apply(_shader);
         _vao.DrawArraysInstanced(PrimitiveType.Triangles, _vertexCount, _frame.Count);
     }

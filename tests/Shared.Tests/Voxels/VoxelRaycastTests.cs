@@ -8,6 +8,9 @@ public class VoxelRaycastTests
 {
     private static readonly BlockId Stone = new(1);
 
+    /// <summary>Реестр без блоков: id 1 в нём не зарегистрирован, и форма у него — куб.</summary>
+    private static readonly BlockRegistry Blocks = new();
+
     /// <summary>Мир из чанков вокруг начала координат (от −1 до 0 по каждой оси) с заданными блоками.</summary>
     private static ChunkMap WorldWith(params BlockPos[] blocks)
     {
@@ -27,7 +30,7 @@ public class VoxelRaycastTests
     {
         var world = WorldWith(new BlockPos(0, 5, 0));
 
-        var hit = VoxelRaycast.Cast(world, new Vector3(0.5f, 10.5f, 0.5f), -Vector3.UnitY, 10f);
+        var hit = VoxelRaycast.Cast(world, Blocks, new Vector3(0.5f, 10.5f, 0.5f), -Vector3.UnitY, 10f);
 
         Assert.NotNull(hit);
         Assert.Equal(new BlockPos(0, 5, 0), hit.Value.Block);
@@ -49,7 +52,7 @@ public class VoxelRaycastTests
         var target = new BlockPos(5 + dx * 3, 5 + dy * 3, 5 + dz * 3);
         var world = WorldWith(target);
 
-        var hit = VoxelRaycast.Cast(world, origin, direction, 10f);
+        var hit = VoxelRaycast.Cast(world, Blocks, origin, direction, 10f);
 
         Assert.NotNull(hit);
         Assert.Equal(target, hit.Value.Block);
@@ -62,7 +65,7 @@ public class VoxelRaycastTests
     {
         var world = WorldWith(new BlockPos(-1, 0, 0));
 
-        var hit = VoxelRaycast.Cast(world, new Vector3(0.5f, 0.5f, 0.5f), -Vector3.UnitX, 5f);
+        var hit = VoxelRaycast.Cast(world, Blocks, new Vector3(0.5f, 0.5f, 0.5f), -Vector3.UnitX, 5f);
 
         Assert.NotNull(hit);
         Assert.Equal(new BlockPos(-1, 0, 0), hit.Value.Block);
@@ -75,7 +78,7 @@ public class VoxelRaycastTests
     {
         var world = WorldWith(new BlockPos(10, 0, 0));
 
-        Assert.Null(VoxelRaycast.Cast(world, new Vector3(0.5f, 0.5f, 0.5f), Vector3.UnitX, 6f));
+        Assert.Null(VoxelRaycast.Cast(world, Blocks, new Vector3(0.5f, 0.5f, 0.5f), Vector3.UnitX, 6f));
     }
 
     [Fact]
@@ -83,7 +86,7 @@ public class VoxelRaycastTests
     {
         var world = new ChunkMap();
 
-        Assert.Null(VoxelRaycast.Cast(world, new Vector3(0.5f, 0.5f, 0.5f), Vector3.UnitX, 50f));
+        Assert.Null(VoxelRaycast.Cast(world, Blocks, new Vector3(0.5f, 0.5f, 0.5f), Vector3.UnitX, 50f));
     }
 
     [Fact]
@@ -91,7 +94,7 @@ public class VoxelRaycastTests
     {
         var world = WorldWith(new BlockPos(2, 2, 2));
 
-        var hit = VoxelRaycast.Cast(world, new Vector3(2.5f, 2.5f, 2.5f), Vector3.UnitX, 6f);
+        var hit = VoxelRaycast.Cast(world, Blocks, new Vector3(2.5f, 2.5f, 2.5f), Vector3.UnitX, 6f);
 
         Assert.Equal(new BlockHit(new BlockPos(2, 2, 2), default, 0f), hit);
     }
@@ -101,7 +104,7 @@ public class VoxelRaycastTests
     {
         var world = WorldWith(new BlockPos(1, 0, 0));
 
-        Assert.Null(VoxelRaycast.Cast(world, new Vector3(0.5f, 0.5f, 0.5f), Vector3.Zero, 6f));
+        Assert.Null(VoxelRaycast.Cast(world, Blocks, new Vector3(0.5f, 0.5f, 0.5f), Vector3.Zero, 6f));
     }
 
     [Fact]
@@ -110,7 +113,7 @@ public class VoxelRaycastTests
         // Точка x = 5,0 лежит в блоке 5; при движении к −X луч сразу входит в блок 4.
         var world = WorldWith(new BlockPos(4, 0, 0));
 
-        var hit = VoxelRaycast.Cast(world, new Vector3(5f, 0.5f, 0.5f), -Vector3.UnitX, 6f);
+        var hit = VoxelRaycast.Cast(world, Blocks, new Vector3(5f, 0.5f, 0.5f), -Vector3.UnitX, 6f);
 
         Assert.NotNull(hit);
         Assert.Equal(new BlockPos(4, 0, 0), hit.Value.Block);
@@ -136,7 +139,7 @@ public class VoxelRaycastTests
             if (!world.GetBlock(BlockPos.Containing(origin)).IsAir)
                 continue;
 
-            var hit = VoxelRaycast.Cast(world, origin, direction, 15f);
+            var hit = VoxelRaycast.Cast(world, Blocks, origin, direction, 15f);
             var expected = BruteForce(world, origin, direction, 15f);
 
             if (expected is null)

@@ -1,0 +1,15 @@
+{
+  "type": "recipe",
+  "name": "base:stone_slab",
+  "result": {
+    "item": "base:stone_slab",
+    "count": 6
+  },
+  "ingredients": [
+    {
+      "item": "base:stone",
+      "count": 3
+    }
+  ],
+  "station": "base:crafting_table"
+}

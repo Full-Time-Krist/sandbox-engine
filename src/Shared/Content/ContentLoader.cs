@@ -34,14 +34,9 @@ public sealed record ContentPack(string Name, string Directory, IReadOnlyCollect
 /// </param>
 /// <param name="Recipes">Рецепты (<c>type: "recipe"</c>); ссылки на предметы и станки уже проверены.</param>
 /// <param name="Quests">Задания (<c>type: "quest"</c>); цели и предшествующие задания проверены, циклов нет.</param>
-/// <param name="BlockModels">
-/// Формы блоков (поле <c>model</c>), как и текстуры, нужны только клиенту. Здесь только блоки не-кубы: остальные —
-/// <see cref="BlockModel.Cube"/>.
-/// </param>
 public sealed record ContentRegistries(BlockRegistry Blocks, ItemRegistry Items,
     ImmutableDictionary<string, BlockTextures> BlockTextures, ImmutableDictionary<string, string> ItemDisplayNames,
-    ImmutableDictionary<string, string> ItemIcons, RecipeRegistry Recipes, QuestRegistry Quests,
-    ImmutableDictionary<string, BlockModel> BlockModels);
+    ImmutableDictionary<string, string> ItemIcons, RecipeRegistry Recipes, QuestRegistry Quests);
 
 /// <summary>
 /// Текстуры граней блока — полные имена <c>пакет:имя</c>. В JSON можно писать коротко (<c>"stone"</c>): имя дополняется
@@ -196,20 +191,21 @@ public static partial class ContentLoader
             {
                 case "block":
                     CheckProperties(root, file, "type", "name", "isOpaque", "isSolid", "textures", "hardness", "tool", "toolTier", "light",
-                        "model", "needsSupport", "override");
+                        "model", "shape", "needsSupport", "blocksLight", "override");
                     if (name == BlockRegistry.AirName)
                         throw Error(file, $"имя '{name}' зарезервировано для воздуха и не должно объявляться в JSON.");
                     if (!isOverride && !blockNames.Add(name))
                         throw Error(file, $"блок '{name}' объявлен более одного раза.");
                     var isOpaque = RequiredBoolean(root, "isOpaque", file);
-                    var model = ModelOf(root, file);
+                    var shape = ShapeOf(root, file);
                     // Непрозрачный блок закрывает грани соседей: у тонкого факела вокруг были бы дыры в мире.
-                    if (model != BlockModel.Cube && isOpaque)
-                        throw Error(file, $"блок с формой '{ModelName(model)}' не может быть непрозрачным (isOpaque: false).");
+                    if (!shape.IsFullCube && isOpaque)
+                        throw Error(file, $"блок формы {shape} не может быть непрозрачным (isOpaque: false).");
                     (isOverride ? blockOverrides : blocks).Add(new BlockJson(file.Path, pack, name, isOpaque,
                         OptionalBoolean(root, "isSolid", defaultValue: true, file),
-                        OptionalTextures(root, pack, file), BlockMiningOf(root, file), LightOf(root, file), model,
-                        OptionalBoolean(root, "needsSupport", defaultValue: false, file)));
+                        OptionalTextures(root, pack, file), BlockMiningOf(root, file), LightOf(root, file), shape,
+                        OptionalBoolean(root, "needsSupport", defaultValue: false, file),
+                        OptionalBoolean(root, "blocksLight", defaultValue: false, file)));
                     break;
 
                 case "item":
@@ -267,14 +263,12 @@ public static partial class ContentLoader
 
         var blockRegistry = new BlockRegistry();
         var textures = ImmutableDictionary.CreateBuilder<string, BlockTextures>(StringComparer.Ordinal);
-        var models = ImmutableDictionary.CreateBuilder<string, BlockModel>(StringComparer.Ordinal);
         foreach (var block in blocks.OrderBy(block => block.Name, StringComparer.Ordinal))
         {
-            blockRegistry.Register(block.Name, block.IsOpaque, block.IsSolid, block.Mining, block.Light, block.NeedsSupport);
+            blockRegistry.Register(block.Name, block.IsOpaque, block.IsSolid, block.Mining, block.Light, block.NeedsSupport, block.Shape,
+                block.BlocksLight);
             if (block.Textures is not null)
                 textures.Add(block.Name, block.Textures);
-            if (block.Model != BlockModel.Cube)
-                models.Add(block.Name, block.Model);
         }
 
         var itemRegistry = new ItemRegistry();
@@ -305,7 +299,7 @@ public static partial class ContentLoader
         itemRegistry.Freeze();
         var recipeRegistry = new RecipeRegistry(recipes.Select(recipe => ResolveRecipe(recipe, blockRegistry, itemRegistry)));
         return new ContentRegistries(blockRegistry, itemRegistry, textures.ToImmutable(), displayNames.ToImmutable(), icons.ToImmutable(),
-            recipeRegistry, ResolveQuests(quests, blockRegistry, itemRegistry), models.ToImmutable());
+            recipeRegistry, ResolveQuests(quests, blockRegistry, itemRegistry));
     }
 
     /// <summary>
@@ -598,23 +592,44 @@ public static partial class ContentLoader
     [GeneratedRegex("^[a-z_]+$")]
     private static partial Regex ToolTypePattern();
 
-    /// <summary>Форма блока: <c>model</c> — <c>cube</c> (по умолчанию) или <c>torch</c>.</summary>
-    private static BlockModel ModelOf(JsonElement root, ContentJsonFile file)
+    /// <summary>
+    /// Форма блока: <c>model</c> — готовая (<c>cube</c> по умолчанию, <c>torch</c>, <c>slab</c>) или <c>shape</c> — свои короба
+    /// в пикселях: <c>[[x1, y1, z1, x2, y2, z2], …]</c>, каждый внутри блока (0–16) и с объёмом. Оба поля сразу — ошибка.
+    /// </summary>
+    private static BlockShape ShapeOf(JsonElement root, ContentJsonFile file)
     {
         var model = OptionalString(root, "model", file);
-        if (model is null)
-            return BlockModel.Cube;
-        foreach (var known in Enum.GetValues<BlockModel>())
+        if (root.TryGetProperty("shape", out var shape))
         {
-            if (ModelName(known) == model)
-                return known;
+            if (model is not null)
+                throw Error(file, "у блока или model, или shape, не оба сразу.");
+            return CustomShape(shape, file);
         }
-        throw Error(file, $"неизвестная форма model '{model}'; допустимы " +
-            string.Join(", ", Enum.GetValues<BlockModel>().Select(known => $"'{ModelName(known)}'")) + ".");
+        if (model is null)
+            return BlockShape.Cube;
+        return BlockShape.Named.FirstOrDefault(named => named.Name == model)
+            ?? throw Error(file, $"неизвестная форма model '{model}'; допустимы " +
+                string.Join(", ", BlockShape.Named.Select(named => $"'{named.Name}'")) + "; свои короба — поле shape.");
     }
 
-    /// <summary>Имя формы в JSON: <see cref="BlockModel.Torch"/> — <c>torch</c>.</summary>
-    private static string ModelName(BlockModel model) => model.ToString().ToLowerInvariant();
+    private static BlockShape CustomShape(JsonElement shape, ContentJsonFile file)
+    {
+        const string Format = "shape — массив коробов [x1, y1, z1, x2, y2, z2] в пикселях от 0 до 16";
+        if (shape.ValueKind != JsonValueKind.Array || shape.GetArrayLength() == 0)
+            throw Error(file, Format + ", хотя бы один.");
+        var boxes = ImmutableArray.CreateBuilder<ShapeBox>();
+        foreach (var box in shape.EnumerateArray())
+        {
+            if (box.ValueKind != JsonValueKind.Array || box.GetArrayLength() != 6
+                || box.EnumerateArray().Any(v => v.ValueKind != JsonValueKind.Number || v.GetDouble() is < 0 or > BlockShape.Pixels))
+                throw Error(file, $"{Format}; получено {box.GetRawText()}.");
+            var v = box.EnumerateArray().Select(c => (float)c.GetDouble()).ToArray();
+            if (v[0] >= v[3] || v[1] >= v[4] || v[2] >= v[5])
+                throw Error(file, $"у короба shape {box.GetRawText()} начало должно быть меньше конца по каждой оси.");
+            boxes.Add(ShapeBox.FromPixels(v[0], v[1], v[2], v[3], v[4], v[5]));
+        }
+        return new BlockShape(null, boxes.ToImmutable());
+    }
 
     /// <summary>Свет, который блок излучает сам: <c>light</c>, целое 0–15, по умолчанию 0.</summary>
     private static int LightOf(JsonElement root, ContentJsonFile file)
@@ -741,7 +756,7 @@ public static partial class ContentLoader
         new($"Файл '{file.Path}': {message}");
 
     private sealed record BlockJson(string Path, string Pack, string Name, bool IsOpaque, bool IsSolid, BlockTextures? Textures,
-        BlockMining Mining, int Light, BlockModel Model, bool NeedsSupport);
+        BlockMining Mining, int Light, BlockShape Shape, bool NeedsSupport, bool BlocksLight);
     private sealed record ItemJson(string Path, string Pack, string Name, int MaxStackSize, string? PlacesBlock, string? Behavior,
         string? DisplayName, string? Icon, ToolInfo? Tool);
     private sealed record RecipeJson(string Path, string Pack, string Name, StackJson Result, ImmutableArray<StackJson> Ingredients,

@@ -12,7 +12,7 @@ namespace Shared.Tests.Lighting;
 public class LightEngineTests
 {
     private readonly BlockRegistry _blocks = new();
-    private readonly BlockId _stone, _glass, _torch, _lamp, _glowshroom;
+    private readonly BlockId _stone, _glass, _torch, _lamp, _glowshroom, _slab, _glowslab;
 
     public LightEngineTests()
     {
@@ -21,6 +21,9 @@ public class LightEngineTests
         _torch = _blocks.Register("test:torch", isOpaque: false, isSolid: false, light: 14).Id;
         _lamp = _blocks.Register("test:lamp", isOpaque: true, light: 10).Id;
         _glowshroom = _blocks.Register("test:glowshroom", isOpaque: false, isSolid: false, light: 5).Id;
+        // Поглотители (шаг 8.6): плита и светящаяся плита — свет в них входит, а отдают они только своё свечение.
+        _slab = _blocks.Register("test:slab", isOpaque: false, shape: BlockShape.Slab, blocksLight: true).Id;
+        _glowslab = _blocks.Register("test:glowslab", isOpaque: false, light: 7, shape: BlockShape.Slab, blocksLight: true).Id;
         _blocks.Freeze();
     }
 
@@ -297,6 +300,51 @@ public class LightEngineTests
         }
     }
 
+    /// <summary>
+    /// Плита не пропускает свет (шаг 8.6): под крышей из плит солнца нет (свет заходит только сбоку и слабее), а сама
+    /// плита освещена солнцем — её верх и соседей рисовать есть чем. Убрали крышу — солнце вернулось.
+    /// </summary>
+    [Fact]
+    public void SlabRoof_StopsSun_ButSlabItselfIsLit()
+    {
+        var (chunks, engine) = Create(build: c => Fill(c, -32, -32, -32, 31, -1, 31, _stone));
+        foreach (var x in Enumerable.Range(-10, 21))
+        foreach (var z in Enumerable.Range(-10, 21))
+            Set(chunks, engine, new BlockPos(x, 10, z), _slab);
+
+        Assert.Equal(ChunkLight.Max, engine.GetSky(new BlockPos(0, 10, 0)));
+        // Ближайший столб солнца — за краем крыши, в 11 блоках: свет только оттуда, сбоку.
+        Assert.Equal(ChunkLight.Max - 11, engine.GetSky(new BlockPos(0, 9, 0)));
+        Assert.Equal(ChunkLight.Max - 11, engine.GetSky(new BlockPos(0, 0, 0)));
+        AssertMatchesReference(chunks, OpenSky.Instance);
+
+        Set(chunks, engine, new BlockPos(0, 10, 0), BlockId.Air);
+        Assert.Equal(ChunkLight.Max, engine.GetSky(new BlockPos(0, 0, 0)));
+        AssertMatchesReference(chunks, OpenSky.Instance);
+    }
+
+    /// <summary>
+    /// Светящаяся плита отдаёт соседям своё свечение, а чужой, более яркий свет — нет. Тоннель в камне в один блок:
+    /// факел (−2, 0, 0), плита (0, 0, 0), обойти её свету негде.
+    /// </summary>
+    [Fact]
+    public void GlowingSlab_GivesOwnLight_NotTheBrighterOneItReceives()
+    {
+        var closed = new HeightSky((_, _) => 100);
+        var (chunks, engine) = Create(closed, c =>
+        {
+            Fill(c, -6, -3, -3, 6, 3, 3, _stone);
+            Fill(c, -5, 0, 0, 5, 0, 0, BlockId.Air);
+        });
+        Set(chunks, engine, new BlockPos(-2, 0, 0), _torch);
+        Set(chunks, engine, new BlockPos(0, 0, 0), _glowslab);
+
+        Assert.Equal(12, engine.GetBlock(new BlockPos(0, 0, 0)));  // от факела: 14 − 2
+        Assert.Equal(6, engine.GetBlock(new BlockPos(1, 0, 0)));   // за плитой — только её 7 − 1
+        Assert.Equal(5, engine.GetBlock(new BlockPos(2, 0, 0)));
+        AssertMatchesReference(chunks, closed);
+    }
+
     [Theory]
     [InlineData(1)]
     [InlineData(2)]
@@ -308,7 +356,7 @@ public class LightEngineTests
         var (chunks, engine) = Create(sky, c => BuildRandomWorld(c, random));
         AssertMatchesReference(chunks, sky);
 
-        BlockId[] palette = [BlockId.Air, BlockId.Air, _stone, _stone, _glass, _torch, _lamp, _glowshroom];
+        BlockId[] palette = [BlockId.Air, BlockId.Air, _stone, _stone, _glass, _torch, _lamp, _glowshroom, _slab, _glowslab];
         for (var batch = 0; batch < 10; batch++)
         {
             for (var i = 0; i < 30; i++)
@@ -349,6 +397,34 @@ public class LightEngineTests
             engine.ChunkRemoved(removed);
             AssertMatchesReference(chunks, sky);
         }
+    }
+
+    /// <summary>
+    /// Плита в нижнем слое верхнего чанка, под открытым небом: столб солнца обрывается на ней при любом порядке прихода
+    /// чанков — нижние после верхних (солнце сверху берётся у чанка выше) и верхние после нижних (столб под ней снимается).
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void SlabOnChunkBoundary_StopsSun_InEitherChunkOrder(bool upperFirst)
+    {
+        var source = new ChunkMap();
+        foreach (var position in Region())
+            source.Set(new Chunk(position));
+        Fill(source, -32, -32, -32, 31, -20, 31, _stone);
+        foreach (var x in new[] { 5, -5 })
+        foreach (var z in new[] { 5, -5 })
+            Assert.True(source.TrySetBlock(new BlockPos(x, 0, z), _slab));
+
+        var chunks = new ChunkMap();
+        var engine = new LightEngine(_blocks, chunks, OpenSky.Instance);
+        foreach (var chunk in source.All.OrderBy(c => upperFirst ? -c.Position.Y : c.Position.Y).ToList())
+        {
+            chunks.Set(chunk);
+            engine.ChunkAdded(chunk);
+            AssertMatchesReference(chunks, OpenSky.Instance);
+        }
+        Assert.Equal(ChunkLight.Max - 1, engine.GetSky(new BlockPos(5, -1, 5)));
     }
 
     [Fact]
@@ -462,14 +538,14 @@ public class LightEngineTests
         for (var i = 0; i < 12; i++)
         {
             int x = random.Next(-32, 24), y = random.Next(-30, 30), z = random.Next(-32, 24);
-            BlockId[] kinds = [_stone, _stone, BlockId.Air, _glass];
+            BlockId[] kinds = [_stone, _stone, BlockId.Air, _glass, _slab];
             var block = kinds[random.Next(kinds.Length)];
             Fill(chunks, x, y, z, x + random.Next(1, 9), y + random.Next(0, 2), z + random.Next(1, 9), block);
         }
 
         for (var i = 0; i < 6; i++)
         {
-            BlockId[] sources = [_torch, _lamp, _glowshroom];
+            BlockId[] sources = [_torch, _lamp, _glowshroom, _glowslab];
             var block = sources[random.Next(sources.Length)];
             chunks.TrySetBlock(new BlockPos(random.Next(-32, 32), random.Next(-32, 32), random.Next(-32, 32)), block);
         }
@@ -502,6 +578,7 @@ public class LightEngineTests
     {
         var result = chunks.All.ToDictionary(c => c.Position, _ => new byte[ChunkMath.Volume]);
         bool IsOpaque(BlockPos p) => _blocks.Get(chunks.GetBlock(p)).IsOpaque;
+        bool IsSink(BlockPos p) => _blocks.Get(chunks.GetBlock(p)) is { IsOpaque: false, BlocksLight: true };
 
         foreach (var isSky in (bool[])[true, false])
         {
@@ -527,7 +604,8 @@ public class LightEngineTests
             BlockPos[] steps = [new(1, 0, 0), new(-1, 0, 0), new(0, 1, 0), new(0, -1, 0), new(0, 0, 1), new(0, 0, -1)];
             while (queue.TryDequeue(out var pos))
             {
-                var level = levels[pos];
+                // Поглотитель отдаёт только своё свечение: небесного — ничего.
+                var level = IsSink(pos) ? (isSky ? 0 : _blocks.Get(chunks.GetBlock(pos)).Light) : levels[pos];
                 foreach (var step in steps)
                 {
                     var next = pos + step;

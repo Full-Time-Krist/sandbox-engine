@@ -1,0 +1,15 @@
+{
+  "type": "recipe",
+  "name": "base:planks_slab",
+  "result": {
+    "item": "base:planks_slab",
+    "count": 6
+  },
+  "ingredients": [
+    {
+      "item": "base:planks",
+      "count": 3
+    }
+  ],
+  "station": "base:crafting_table"
+}

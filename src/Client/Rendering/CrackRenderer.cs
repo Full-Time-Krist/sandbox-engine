@@ -1,5 +1,6 @@
 using System.Numerics;
 using Engine.Graphics;
+using Shared.Blocks;
 using Silk.NET.OpenGL;
 
 namespace Client.Rendering;
@@ -47,11 +48,13 @@ internal sealed class CrackRenderer : IDisposable
     public static int StageFor(double progress) => Math.Clamp((int)(progress * Stages), 0, Stages - 1);
 
     /// <param name="offset">Смещение угла блока от глаза (рендер относительно камеры).</param>
-    public void Draw(Matrix4x4 viewProjection, Vector3 offset, int stage)
+    /// <param name="bounds">Общий короб формы блока: трещины ложатся на него (у полублока — на нижнюю половину).</param>
+    public void Draw(Matrix4x4 viewProjection, Vector3 offset, ShapeBox bounds, int stage)
     {
         _shader.Use();
         _shader.SetUniform("u_ViewProjection", viewProjection);
-        _shader.SetUniform("u_Model", Matrix4x4.CreateScale(1f + Grow) * Matrix4x4.CreateTranslation(offset - new Vector3(Grow / 2)));
+        _shader.SetUniform("u_Model", Matrix4x4.CreateScale(bounds.Size + new Vector3(Grow))
+                                      * Matrix4x4.CreateTranslation(offset + bounds.Min - new Vector3(Grow / 2)));
         _shader.SetUniform("u_Layer", (float)(_firstLayer + stage));
 
         _gl.Enable(EnableCap.Blend);

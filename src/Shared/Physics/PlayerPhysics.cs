@@ -27,7 +27,8 @@ public readonly record struct PlayerState(Vector3d Position, Vector3 Velocity = 
 /// ни зависимости от времени кадра: шаг всегда равен тику.
 /// </summary>
 /// <remarks>
-/// Столкновения — общий для всех тел шаг <see cref="BoxPhysics.Move"/>: короб против полных кубов твёрдых блоков.
+/// Столкновения — общий для всех тел шаг <see cref="BoxPhysics.Move"/>: короб против коробов формы твёрдых блоков.
+/// Идущий по земле игрок сам поднимается на уступ до <see cref="StepHeight"/> (на блок или плиту) без прыжка.
 /// </remarks>
 public static class PlayerPhysics
 {
@@ -47,6 +48,12 @@ public static class PlayerPhysics
     public const float FlySprintSpeed = 22f;
     public const float Gravity = 32f;
     public const float TerminalVelocity = 78f;
+
+    /// <summary>
+    /// На какую высоту игрок поднимается при ходьбе без прыжка (выбор пользователя на шаге 8.6 — на целый блок).
+    /// Подъём — только с земли и не в полёте: упёрся сбоку — тот же шаг пробуется с подъёмом (<see cref="StepUp"/>).
+    /// </summary>
+    public const double StepHeight = 1.0;
 
     /// <summary>Начальная скорость прыжка: при шаге 1/20 с вершина около 1,26 блока — на блок запрыгнуть можно, на два нет.</summary>
     public const float JumpVelocity = 9.8f;
@@ -94,6 +101,12 @@ public static class PlayerPhysics
         if (BoxPhysics.Move(BodyAt(state.Position), wanted, chunks, blocks) is not { } moved)
             return state with { Velocity = Vector3.Zero };
 
+        // Шёл по земле и упёрся сбоку — пробуем тот же шаг с подъёмом; берём, если так ушли дальше по горизонтали.
+        if (!state.Flying && state.OnGround && wanted.Y <= 0 && (moved.X != wanted.X || moved.Z != wanted.Z)
+            && StepUp(state.Position, wanted, chunks, blocks) is { } stepped
+            && Horizontal(stepped) > Horizontal(moved) + Aabb.Epsilon)
+            moved = stepped;
+
         // Обрезанная ось — удар: скорость по ней гасится. Удар вниз — опора под ногами.
         // Сравнение точное: необрезанное перемещение Move возвращает без изменений.
         var hitY = moved.Y != wanted.Y;
@@ -109,20 +122,52 @@ public static class PlayerPhysics
     /// так же, как <see cref="Step"/>. Возвращает фактическое перемещение или null, если путь задевает незагруженный чанк.
     /// Сервер так проверяет присланное перемещение: честный клиент получил его этим же кодом, и оно не обрежется.
     /// </summary>
-    public static Vector3d? Sweep(Vector3d feet, Vector3d delta, ChunkMap chunks, BlockRegistry blocks) =>
-        BoxPhysics.Move(BodyAt(feet), delta, chunks, blocks);
+    /// <remarks>
+    /// Подъём на уступ (<see cref="StepUp"/>) прямой протяг не повторяет: тело шло вверх, вбок и вниз. Поэтому, если прямой
+    /// путь обрезан, проверяется и путь подъёма с тем же перемещением: вверх на <see cref="StepHeight"/>, вбок и вниз —
+    /// спуск заканчивается ровно на присланной высоте, если по пути ничего не мешает.
+    /// </remarks>
+    public static Vector3d? Sweep(Vector3d feet, Vector3d delta, ChunkMap chunks, BlockRegistry blocks)
+    {
+        var moved = BoxPhysics.Move(BodyAt(feet), delta, chunks, blocks);
+        if (moved is { } plain && plain != delta && StepUp(feet, delta, chunks, blocks) is { } stepped && Close(stepped, delta))
+            return stepped;
+        return moved;
+    }
+
+    /// <summary>
+    /// Шаг с подъёмом: тело поднимается на <see cref="StepHeight"/> (сколько пустит потолок), проходит по горизонтали
+    /// <paramref name="wanted"/> и опускается на высоту подъёма и ещё на <paramref name="wanted"/>.Y, пока не встанет, —
+    /// на уступ. Null — нечего поднимать (потолок) или путь задевает незагруженный чанк.
+    /// </summary>
+    private static Vector3d? StepUp(Vector3d feet, Vector3d wanted, ChunkMap chunks, BlockRegistry blocks)
+    {
+        var body = BodyAt(feet);
+        if (BoxPhysics.Move(body, new Vector3d(0, StepHeight, 0), chunks, blocks) is not { } up || up.Y <= Aabb.Epsilon)
+            return null;
+        body = body.Offset(up);
+        if (BoxPhysics.Move(body, new Vector3d(wanted.X, 0, wanted.Z), chunks, blocks) is not { } side)
+            return null;
+        body = body.Offset(side);
+        // Только вниз: иначе сервер принял бы подъём выше ступеньки за тик за «спуск» вверх.
+        if (BoxPhysics.Move(body, new Vector3d(0, Math.Min(wanted.Y - up.Y, 0), 0), chunks, blocks) is not { } fall)
+            return null;
+        return new Vector3d(side.X, up.Y + fall.Y, side.Z);
+    }
+
+    private static double Horizontal(Vector3d d) => d.X * d.X + d.Z * d.Z;
+
+    private static bool Close(Vector3d a, Vector3d b) =>
+        Math.Abs(a.X - b.X) <= Aabb.Epsilon && Math.Abs(a.Y - b.Y) <= Aabb.Epsilon && Math.Abs(a.Z - b.Z) <= Aabb.Epsilon;
 
     /// <summary>Пересекает ли тело в этой точке твёрдый блок. Незагруженный мир считается пустым.</summary>
     public static bool Collides(Vector3d feet, ChunkMap chunks, BlockRegistry blocks)
     {
         var body = BodyAt(feet);
         var (min, max) = BoxPhysics.BlockRange(body);
-        for (var y = min.Y; y <= max.Y; y++)
-        for (var x = min.X; x <= max.X; x++)
-        for (var z = min.Z; z <= max.Z; z++)
+        foreach (var obstacle in BoxPhysics.SolidBlocks(min, max, chunks, blocks))
         {
-            var block = new BlockPos(x, y, z);
-            if (blocks.IsSolid(chunks.GetBlock(block)) && body.Intersects(Aabb.OfBlock(block)))
+            if (body.Intersects(obstacle))
                 return true;
         }
         return false;
