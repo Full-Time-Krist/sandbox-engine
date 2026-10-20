@@ -42,6 +42,8 @@ public class ServerHostTests
     /// ловит медианное опоздание: при 10 тиках в секунду к двадцатому тику оно около 0,75 с, а у верного хоста опоздание
     /// больше MaxLagSeconds пропускается, меньшее догоняется. Медиана не боится отдельных задержек потока под нагрузкой
     /// (прошлая версия читала счётчик по часам теста и падала при полном прогоне под нагрузкой).
+    /// Опоздание для медианы — от первого тика, а не от вызова Start: хост ведёт расписание от запуска своего потока,
+    /// а под нагрузкой на все ядра поток запускался на 0,25–0,35 с позже, и эта задержка входила в опоздание каждого тика.
     /// </summary>
     [Fact]
     public void TickRate_MatchesTicksPerSecond()
@@ -65,7 +67,7 @@ public class ServerHostTests
                 var lag = ticks[k].Start - hostStart - ticks[k].Skipped - k * Period;
                 Assert.True(lag >= -Epsilon, $"Тик {k} начался на {-lag * 1000:F1} мс раньше расписания");
                 if (k > 0)
-                    lags.Add(lag);
+                    lags.Add(ticks[k].Start - ticks[0].Start - (ticks[k].Skipped - ticks[0].Skipped) - k * Period);
             }
             lags.Sort();
             Assert.True(lags[lags.Count / 2] < ServerHost.MaxLagSeconds, $"Медианное опоздание {lags[lags.Count / 2] * 1000:F0} мс: тики реже положенного");
