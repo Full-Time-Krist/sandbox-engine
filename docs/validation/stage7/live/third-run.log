@@ -1,0 +1,15 @@
+alive до закрытия: yes; завершилась: yes
+--- stdout ---
+[Server] Загружен мир (сид 1, режим survival): /home/Krist/.local/share/Sandbox/Saves/stage7-live/world.db
+OpenGL 4.6 (Core Profile) Mesa 26.2.5-arch1.1 | Mesa Intel(R) Iris(R) Xe Graphics (TGL GT2)
+[Client] Текстуры: 15 слоёв блоков, 11 картинок предметов, 10 стадий трещин
+[Server] Player подключился (id 1, режим creative)
+[Client] Подключён к серверу, id игрока 1, режим creative
+[Server] Player: режим survival
+[Client] Режим survival
+[Client] Сервер перенёс игрока в <0.50; 9.00; -0.70>
+[Server] 10 с: TPS 20.1, тик в среднем 2.44 мс, максимум 35.08 мс, наибольший промежуток между тиками 52 мс
+[Client] Чанков 1639, мешей 209 (в очереди 0), память 230 МБ, позиция <0.50; 9.00; -0.70>; меши: 2575, основной поток 202 мс (за кадр до 5.0 мс), построение в фоне до 11.2 мс; самый долгий кадр 28.2 мс, кадров дольше 20 мс: 3
+[ItemRenderBenchmark] frames=586, entities=0, visibleAvg=0.16, visibleMax=1, cpuAvgMs=0.0204, cpuMaxMs=4.0689, drawFinishAvgMs=0.0626, drawFinishMaxMs=8.1107
+[Server] Мир сохранён (изменённых чанков 0) за 21 мс
+--- stderr ---

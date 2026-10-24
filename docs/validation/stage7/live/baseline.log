@@ -1,0 +1,18 @@
+alive до закрытия: yes; завершилась: yes
+--- stdout ---
+[Server] Загружен мир (сид 1, режим creative): /home/Krist/.local/share/Sandbox/Saves/stage7-baseline/world.db
+OpenGL 4.6 (Core Profile) Mesa 26.2.5-arch1.1 | Mesa Intel(R) Iris(R) Xe Graphics (TGL GT2)
+[Client] Текстуры: 15 слоёв блоков, 11 картинок предметов, 10 стадий трещин
+[Server] Player подключился (id 1, режим creative)
+[Client] Подключён к серверу, id игрока 1, режим creative
+[Server] 10 с: TPS 20.1, тик в среднем 1.81 мс, максимум 31.48 мс, наибольший промежуток между тиками 52 мс
+[Client] Чанков 1639, мешей 213 (в очереди 0), память 238 МБ, позиция <16.50; 116.00; 58.50>; меши: 3834, основной поток 178 мс (за кадр до 5.4 мс), построение в фоне до 9.5 мс; самый долгий кадр 26.4 мс, кадров дольше 20 мс: 2
+[ItemRenderBenchmark] frames=586, entities=0, visibleAvg=0.00, visibleMax=0, cpuAvgMs=0.0086, cpuMaxMs=1.1555, drawFinishAvgMs=0.0164, drawFinishMaxMs=1.1628
+[Server] 20 с: TPS 20.0, тик в среднем 0.06 мс, максимум 0.78 мс, наибольший промежуток между тиками 50 мс
+[Client] Чанков 1639, мешей 213 (в очереди 0), память 238 МБ, позиция <16.50; 116.00; 58.50>; меши: 0, основной поток 6 мс (за кадр до 0.1 мс), построение в фоне до 0.0 мс; самый долгий кадр 18.4 мс, кадров дольше 20 мс: 0
+[ItemRenderBenchmark] frames=601, entities=0, visibleAvg=0.00, visibleMax=0, cpuAvgMs=0.0044, cpuMaxMs=0.0197, drawFinishAvgMs=0.0128, drawFinishMaxMs=0.0367
+[Server] 30 с: TPS 20.0, тик в среднем 0.20 мс, максимум 1.88 мс, наибольший промежуток между тиками 50 мс
+[Client] Чанков 1639, мешей 213 (в очереди 0), память 239 МБ, позиция <16.50; 116.00; 58.50>; меши: 0, основной поток 6 мс (за кадр до 0.0 мс), построение в фоне до 0.0 мс; самый долгий кадр 18.3 мс, кадров дольше 20 мс: 0
+[ItemRenderBenchmark] frames=600, entities=0, visibleAvg=0.00, visibleMax=0, cpuAvgMs=0.0043, cpuMaxMs=0.0228, drawFinishAvgMs=0.0126, drawFinishMaxMs=0.0424
+[Server] Мир сохранён (изменённых чанков 0) за 22 мс
+--- stderr ---

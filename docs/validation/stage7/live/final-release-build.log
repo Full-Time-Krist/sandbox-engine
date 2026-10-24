@@ -1,0 +1,15 @@
+  Shared -> /home/Krist/Projects/sandbox-engine/src/Shared/bin/Release/net10.0/Sandbox.Shared.dll
+  Api -> /home/Krist/Projects/sandbox-engine/src/Api/bin/Release/net10.0/Sandbox.Api.dll
+  ExampleMod -> /home/Krist/Projects/sandbox-engine/examples/ExampleMod/bin/Release/example_mod/ExampleMod.dll
+  Engine -> /home/Krist/Projects/sandbox-engine/src/Engine/bin/Release/net10.0/Sandbox.Engine.dll
+  Server -> /home/Krist/Projects/sandbox-engine/src/Server/bin/Release/net10.0/Sandbox.Server.dll
+  Client -> /home/Krist/Projects/sandbox-engine/src/Client/bin/Release/net10.0/Sandbox.dll
+  Client.Tests -> /home/Krist/Projects/sandbox-engine/tests/Client.Tests/bin/Release/net10.0/Sandbox.Client.Tests.dll
+  Server.Tests -> /home/Krist/Projects/sandbox-engine/tests/Server.Tests/bin/Release/net10.0/Sandbox.Server.Tests.dll
+  Shared.Tests -> /home/Krist/Projects/sandbox-engine/tests/Shared.Tests/bin/Release/net10.0/Sandbox.Shared.Tests.dll
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:06.23

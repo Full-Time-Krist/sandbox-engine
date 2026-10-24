@@ -480,3 +480,6 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# Логи проверок, на которые ссылается документация проекта
+!docs/validation/**/*.log

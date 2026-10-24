@@ -1,0 +1,11 @@
+xUnit.net v3 In-Process Runner v4.0.2+0c7aa4991f (64-bit .NET 10.0.13)
+  Discovering: Sandbox.Server.Tests
+  Discovered:  Sandbox.Server.Tests
+  Starting:    Sandbox.Server.Tests
+[Server] Создан новый мир (сид 1, режим survival): /tmp/sandbox-stage7-compat/world-v3.db
+[Server] Tester подключился (id 1, режим survival)
+REAL_PREVIOUS_VERSION_WORLD: schema=3 seed=1 marker=(2,15,2):copper_ore slot7=copper_pickaxe*1 slot14=log*23 quest=get_wood
+[Server] Мир сохранён (изменённых чанков 1) за 5 мс
+  Finished:    Sandbox.Server.Tests (ID = 'e313df7cef973f53e1f695033d4ec0a080e2c0966bacd8ea7f382ed4f70bdc2f')
+=== TEST EXECUTION SUMMARY ===
+   Sandbox.Server.Tests  Total: 1, Errors: 0, Failed: 0, Skipped: 0, Not Run: 0, Time: 0.432s

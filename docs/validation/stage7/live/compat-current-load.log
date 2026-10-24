@@ -1,0 +1,15 @@
+PASS: real format3 world upgrades from3
+PASS: seed1 preserved
+PASS: slot7 copper_pickaxe*1 preserved
+PASS: slot14 log*23 preserved
+PASS: completed quest preserved
+PASS: legacy player receives20health alive
+PASS: modified voxel marker preserved
+[Server] Загружен мир (сид 1, режим survival): /tmp/sandbox-stage7-compat/world-upgrade.db
+[Server] Tester подключился (id 1, режим survival)
+PASS: current server joins legacy player and sends20health
+PASS: current gameplay inventory still has23logs
+PASS: current gameplay world keeps voxel marker
+[Server] Мир сохранён (изменённых чанков 0) за 9 мс
+PASS: database commits format4
+REAL_OLD_WORLD_COMPATIBILITY_OK
