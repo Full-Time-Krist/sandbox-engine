@@ -25,7 +25,7 @@ namespace Server;
 /// Сервер не знает, кто и в каком потоке вызывает <see cref="Tick"/>: в одиночной игре это <see cref="ServerHost"/>,
 /// в тестах — сам тест. Всё состояние сервера меняется только внутри <see cref="Tick"/>, из одного потока.
 /// </remarks>
-public sealed class GameServer : IDisposable
+public sealed partial class GameServer : IDisposable
 {
     /// <summary>
     /// Насколько присланная точка взгляда может отличаться от глаза игрока в последней известной позиции.
@@ -132,6 +132,8 @@ public sealed class GameServer : IDisposable
             var isNew = _save?.Info == null;
             World = new World(_blocks, seed ?? Random.Shared.Next(), generatorThreads ?? ChunkGenerator.DefaultWorkerCount,
                 spawnColumn ?? default, _save, defaultMode ?? GameMode.Survival);
+            World.ChunkLoaded += LoadChunkEntities;
+            World.ChunkUnloading += chunk => SaveChunkEntities(chunk, true);
             if (_save != null)
             {
                 LogOpened(isNew, seed, spawnColumn, defaultMode);
@@ -229,7 +231,7 @@ public sealed class GameServer : IDisposable
     public void Tick()
     {
         while (_pendingConnections.TryDequeue(out var connection))
-            _sessions.Add(new ClientSession(connection));
+            _sessions.Add(new ClientSession(connection, Entities));
 
         foreach (var session in _sessions)
         {
@@ -252,6 +254,8 @@ public sealed class GameServer : IDisposable
         _events.Dispatch();
 
         World.CollectGenerated();
+        TickPlayerHealth();
+        TickGroundItems();
         foreach (var session in _sessions)
         {
             if (session.IsJoined)
@@ -262,6 +266,8 @@ public sealed class GameServer : IDisposable
             UnloadUnusedChunks();
         if (_tick % AutosaveIntervalTicks == 0)
             Autosave();
+
+        SyncEntities();
 
         // Задания «иметь предмет» — по инвентарю в конце тика: что бы его ни меняло (добыча, ремесло, клики, моды), оно уже учтено.
         foreach (var session in _sessions)
@@ -290,9 +296,10 @@ public sealed class GameServer : IDisposable
             if (session.IsJoined)
             {
                 _save.SavePlayer(session.PlayerName, new SavedPlayer(session.PlayerPosition, session.Look, session.Mode,
-                    session.Inventory.SelectedSlot, session.Inventory.CopySlots(), session.Quests));
+                    session.Inventory.SelectedSlot, session.Inventory.CopySlots(), session.Quests, session.Health, session.IsDead));
             }
         }
+        foreach (var chunk in World.Chunks.All) SaveChunkEntities(chunk.Position, false);
         return World.SaveDirty();
     }
 
@@ -376,10 +383,19 @@ public sealed class GameServer : IDisposable
 
     private void Handle(ClientSession session, ClientMessage message)
     {
+        if (session.IsJoined && session.IsDead && message is not RespawnRequest) return;
         switch (message)
         {
             case JoinRequest join when !session.IsJoined:
                 HandleJoin(session, join);
+                break;
+
+            case RespawnRequest when session.IsJoined:
+                RespawnPlayer(session);
+                break;
+
+            case DropItem drop when session.IsJoined:
+                DropSelected(session, drop.All);
                 break;
 
             case PlayerMove move when session.IsJoined:
@@ -405,7 +421,7 @@ public sealed class GameServer : IDisposable
                 break;
 
             case ReturnInventoryCursor when session.IsJoined:
-                session.Inventory.ReturnCursor();
+                ReturnCursor(session);
                 break;
 
             case InventoryDragDistribute drag when session.IsJoined:
@@ -458,6 +474,11 @@ public sealed class GameServer : IDisposable
         // До первого PlayerMove игрок стоит в начальной точке, иначе его действия сочлись бы «издалека».
         session.PlayerPosition = start;
         session.Look = saved?.Look ?? default;
+        if (!inventory.Cursor.IsEmpty)
+        {
+            World.EnsureChunk(BlockPos.Containing(start + new Vector3d(0, 1.2, 0)).Chunk);
+            ReturnCursor(session);
+        }
         // Чанки придут в следующих тиках (StreamChunks), начиная с ближайших.
         session.Connection.Send(new JoinAccepted(session.PlayerId, start, session.Look, mode, _blockNames, _itemNames));
         // Инвентарь уходит целиком, поэтому изменения от его заполнения отправлять не нужно.
@@ -465,6 +486,7 @@ public sealed class GameServer : IDisposable
         inventory.TakeChanges();
         session.Connection.Send(new QuestBookContents([.. session.Quests.Completed],
             [.. session.Quests.Progress.Select(entry => new QuestCount(entry.Key, entry.Value))]));
+        InitializePlayerHealth(session, saved);
         Console.WriteLine($"[Server] {session.PlayerName} подключился (id {session.PlayerId}, режим {mode.ToName()})");
         _events.Raise(new PlayerJoined(_editor, session));
     }
@@ -486,12 +508,13 @@ public sealed class GameServer : IDisposable
     /// а клиент ещё тик-другой летит по-творчески: его уже отправленные перемещения сервер отклонил бы.
     /// Телепорт на месте делает их устаревшими (старый номер) и гасит скорость у клиента.
     /// </summary>
-    private static void ChangeMode(ClientSession session, GameMode mode)
+    private void ChangeMode(ClientSession session, GameMode mode)
     {
         if (session.Mode == mode)
             return;
 
         session.SetMode(mode);
+        ResetPlayerFall(session);
         session.Connection.Send(new GameModeChanged(mode));
         if (mode == GameMode.Survival)
             SendTeleport(session);
@@ -517,7 +540,9 @@ public sealed class GameServer : IDisposable
             : "неверная позиция";
         if (problem == null)
         {
+            var previousPosition = session.PlayerPosition;
             session.PlayerPosition = move.Position;
+            ObservePlayerMove(session, previousPosition);
             return;
         }
 
@@ -536,6 +561,7 @@ public sealed class GameServer : IDisposable
 
         var session = _sessions.Single(s => s.IsJoined && s.PlayerId == playerId);
         session.PlayerPosition = feet;
+        ResetPlayerFall(session);
         SendTeleport(session);
     }
 
@@ -646,9 +672,8 @@ public sealed class GameServer : IDisposable
     }
 
     /// <summary>
-    /// Ломает блок и в выживании кладёт добычу, если инструмент позволяет её получить. Если добыча положена, а класть
-    /// некуда, блок не ломается: предметов на земле пока нет, и добыча пропала бы молча. Без добычи (рука по камню)
-    /// блок ломается всегда.
+    /// Ломает блок и роняет добычу в мир, если инструмент позволяет её получить.
+    /// Заполненность инвентаря не мешает ломанию; творческий режим добычи не создаёт.
     /// </summary>
     private void FinishBreaking(ClientSession session)
     {
@@ -663,10 +688,9 @@ public sealed class GameServer : IDisposable
 
         var harvest = Mining.CanHarvest(_registry.Get(breaking.Block).Mining, _items.Get(breaking.Held).Tool);
         var drop = harvest ? new ItemStack(_items.ForBlock(breaking.Block), 1) : ItemStack.Empty;
-        if (!session.Inventory.CanAdd(drop))
-            return;
-        if (_editor.TryBreakBlock(breaking.Position, session))
-            session.Inventory.Add(drop);
+        if (_editor.TryBreakBlock(breaking.Position, session) && !drop.IsEmpty)
+            SpawnItem(new Vector3d(breaking.Position.X + 0.5, breaking.Position.Y + 0.5, breaking.Position.Z + 0.5),
+                drop, new Vector3d(0, 2, 0));
     }
 
     /// <summary>Ломание от имени игрока для поведений предметов (<see cref="ItemUseContext.Breaker"/>).</summary>
@@ -693,6 +717,8 @@ public sealed class GameServer : IDisposable
     /// <summary>Единственная точка изменения блоков на сервере: меняет мир и сообщает игрокам.</summary>
     private sealed class WorldEditor(GameServer server) : IWorld
     {
+        public void SpawnItem(Vector3d position, ItemStack stack) => server.SpawnItem(position, stack);
+
         public BlockId GetBlock(BlockPos pos) => server.World.Chunks.GetBlock(pos);
 
         public bool IsBlockedByPlayer(BlockPos pos, BlockId block)

@@ -43,6 +43,9 @@ internal sealed class PlayerController(Camera camera, ChunkMap world, BlockRegis
         EyePosition = Eye(feet);
     }
 
+    /// <summary>Останавливает тело и интерполяцию камеры на экране смерти.</summary>
+    public void Freeze() => Teleport(Position);
+
     /// <summary>Направление взгляда (углы камеры): его клиент шлёт серверу для сохранения.</summary>
     public LookAngles LookAngles
     {

@@ -22,7 +22,7 @@ public sealed class ModEventsTests : IDisposable
     private readonly List<BlockPlaced> _placed = [];
     private readonly List<PlayerJoined> _joined = [];
 
-    /// <summary>Сколько добычи было в инвентаре, когда пришло событие ломания: обработчик должен видеть действие законченным.</summary>
+    /// <summary>Сколько добычи было на земле, когда пришло событие ломания: обработчик должен видеть действие законченным.</summary>
     private readonly List<int> _dropsSeenByHandler = [];
 
     private GameServer _server = null!;
@@ -43,7 +43,7 @@ public sealed class ModEventsTests : IDisposable
         context.Events.OnBlockBroken(e =>
         {
             _broken.Add(e);
-            _dropsSeenByHandler.Add(e.Player.Inventory[0].Count);
+            _dropsSeenByHandler.Add(_server.GroundItems.Sum(item => item.Stack.Count));
         });
         context.Events.OnBlockPlaced(_placed.Add);
         context.Events.OnPlayerJoined(_joined.Add);
@@ -73,7 +73,7 @@ public sealed class ModEventsTests : IDisposable
     private BlockId BlockAt(BlockPos pos) => _server.World.Chunks.GetBlock(pos);
 
     [Fact]
-    public void Break_RaisesBlockBrokenOnce_AfterDropIsInInventory()
+    public void Break_RaisesBlockBrokenOnce_AfterDropIsSpawned()
     {
         Start(("test_mod", Recorder()));
         var surfaceBlock = BlockAt(_surface);
@@ -89,7 +89,7 @@ public sealed class ModEventsTests : IDisposable
     }
 
     [Fact]
-    public void Break_InventoryFull_NoEvent()
+    public void Break_InventoryFull_StillRaisesEventAndDropsItem()
     {
         Start(("test_mod", Recorder()));
         var planks = _content.Items.Get("base:planks");
@@ -98,8 +98,9 @@ public sealed class ModEventsTests : IDisposable
 
         Use(ItemAction.Primary);
 
-        Assert.False(BlockAt(_surface).IsAir);
-        Assert.Empty(_broken);
+        Assert.True(BlockAt(_surface).IsAir);
+        Assert.Single(_broken);
+        Assert.Equal(1, Assert.Single(_server.GroundItems).Stack.Count);
     }
 
     [Fact]

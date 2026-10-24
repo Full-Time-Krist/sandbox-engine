@@ -24,7 +24,7 @@ public sealed class ExampleMod : IMod
         // Предмет example_mod:wand ссылается на это поведение полем "behavior" в своём JSON.
         context.RegisterItemBehavior("example_mod:wand", new WandBehavior(stone, amethystOre));
 
-        // Аметистовая руда в выживании даёт вдвое больше: одну штуку кладёт игра, вторую — мод.
+        // Аметистовая руда в выживании даёт вдвое больше: одну штуку роняет игра, вторую кладёт в инвентарь мод.
         context.Events.OnBlockBroken(e =>
         {
             if (e.Block != amethystOre || e.Player.Mode != GameMode.Survival)
@@ -33,13 +33,12 @@ public sealed class ExampleMod : IMod
             context.Log($"{e.Player.Name} добыл аметистовую руду: +1 в награду");
         });
 
-        // Награда за своё задание (content/quests/amethyst.json): три медных слитка. Что не влезло — пропадает, как добыча
-        // без места; для примера этого достаточно.
+        // Награда падает предметом: её можно подобрать позже, даже если инвентарь сейчас полон.
         context.Events.OnQuestCompleted(e =>
         {
             if (e.Quest.Name != "example_mod:amethyst")
                 return;
-            e.Player.Inventory.Add(new ItemStack(copperIngot, 3));
+            e.World.SpawnItem(e.Player.Position + new Vector3d(0, 0.6, 0), new ItemStack(copperIngot, 3));
             context.Log($"{e.Player.Name} выполнил «{e.Quest.Title}»: награда — 3 медных слитка");
         });
 

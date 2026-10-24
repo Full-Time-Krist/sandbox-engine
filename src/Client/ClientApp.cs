@@ -35,6 +35,9 @@ internal sealed class ClientApp(
     /// <summary>Камера в глазах игрока. Направление взгляда при входе задаёт сервер (<see cref="JoinAccepted.StartLook"/>).</summary>
     private readonly Camera _camera = new();
     private readonly ClientWorld _world = new();
+    private readonly ClientEntities _entities = new();
+    private readonly HealthView _health = new();
+    private ItemEntityRenderer _itemRenderer = null!;
     private PlayerController _controller = null!;
 
     private BlockRegistry _registry = null!;
@@ -126,6 +129,7 @@ internal sealed class ClientApp(
 
         var shaders = Path.Combine(AppContext.BaseDirectory, "Assets", "Shaders");
         _chunkShader = ShaderProgram.FromFiles(Gl, Path.Combine(shaders, "chunk"));
+        _itemRenderer = new ItemEntityRenderer(Gl, _items, itemVisuals, Path.Combine(shaders, "item"));
         _chunkShader.SetUniform("u_Textures", 0); // сэмплер читает текстурный блок 0
         _lineShader = ShaderProgram.FromFiles(Gl, Path.Combine(shaders, "basic"));
         _selectionBox = LineGeometry.CreateBoxOutline(Gl, new Vector3(0.05f));
@@ -189,9 +193,11 @@ internal sealed class ClientApp(
         if (integratedServer?.Fault is { } fault)
             throw new InvalidOperationException("Встроенный сервер упал", fault);
 
+        _entities.BeginTick();
         ProcessServerMessages();
 
-        _controller.Tick(Input, controlsEnabled: Input.IsCursorCaptured);
+        if (_health.CanControl)
+            _controller.Tick(Input, controlsEnabled: Input.IsCursorCaptured);
 
         if (++_tick % GameTime.TicksPerSecond == 0)
             UpdateStatusText();
@@ -255,6 +261,32 @@ internal sealed class ClientApp(
 
                 case ChunkUnload unload:
                     _world.RemoveChunk(unload.Position);
+                    break;
+
+                case HealthChanged health:
+                    var wasDead = _health.IsDead;
+                    _health.Apply(health);
+                    if (health.IsDead)
+                    {
+                        _controller.Freeze();
+                        _inventoryOpen = false;
+                        _journalOpen = false;
+                        _inventoryScreen.Close();
+                        StopBreaking();
+                        Input.ReleaseCursor();
+                    }
+                    else if (wasDead && _health.CanControl && _joined)
+                        Input.CaptureCursor();
+                    break;
+
+                case EntitySpawned spawned:
+                    _entities.Spawn(spawned);
+                    break;
+                case EntitiesMoved moved:
+                    _entities.Move(moved);
+                    break;
+                case EntityRemoved removed:
+                    _entities.Remove(removed.Id);
                     break;
 
                 case BlockChanged changed:
@@ -343,16 +375,18 @@ internal sealed class ClientApp(
         _blockTextures.Bind(0);
         _drawnChunks = _chunkRenderer.Draw(_chunkShader, eye, Frustum.FromMatrix(viewProjection));
 
+        _itemRenderer.Draw(_entities, eye, _camera, alpha, _clock.Elapsed.TotalSeconds);
         DrawSelection(eye);
         DrawCracks(eye, viewProjection);
         // Задания идут только в выживании: в творческом подсказывать их незачем.
-        _hud.Draw(_framebufferSize, _inventory, deltaTime, _inventoryOpen || _journalOpen, _mode == GameMode.Survival ? _quests : null);
+        _hud.Draw(_framebufferSize, _inventory, deltaTime, _inventoryOpen || _journalOpen || _health.IsDead, _mode == GameMode.Survival ? _quests : null, _mode == GameMode.Survival ? _health : null);
         if (_inventoryOpen)
             _inventoryScreen.Draw(_framebufferSize, _inventory, _mode == GameMode.Creative, MouseFramebufferPosition,
                 station => Crafting.IsStationNear(_world.Chunks, eye, station));
         if (_journalOpen)
             _journal.Draw(_framebufferSize, _quests, _inventory, _mode == GameMode.Survival);
-        _hud.DrawToasts(_framebufferSize, deltaTime);
+        if (_health.IsDead) _hud.DrawDeath(_framebufferSize, _health, MouseFramebufferPosition);
+        else _hud.DrawToasts(_framebufferSize, deltaTime);
     }
 
     private void DrawSelection(Vector3d eye)
@@ -400,6 +434,13 @@ internal sealed class ClientApp(
     /// <summary>Захват курсора, взгляд мышью и выбор слота. Возвращает, можно ли в этом кадре применять предмет.</summary>
     private bool HandleFrameInput()
     {
+        if (_health.IsDead)
+        {
+            if (_health.TryRespawn(MouseFramebufferPosition, Input.WasMousePressed(MouseButton.Left),
+                    _framebufferSize, Engine.Ui.UiScale.For(_framebufferSize.X, _framebufferSize.Y)))
+                connection.Send(new RespawnRequest());
+            return false;
+        }
         if (_inventoryOpen)
         {
             if (Input.WasKeyPressed(Key.Escape) || Input.WasKeyPressed(Key.E))
@@ -477,7 +518,11 @@ internal sealed class ClientApp(
             connection.Send(new SetGameMode(_mode == GameMode.Creative ? GameMode.Survival : GameMode.Creative));
 
         if (_inventoryReceived)
+        {
             HandleSlotSelection();
+            if (Input.WasKeyPressed(Key.Q))
+                connection.Send(new DropItem(Input.IsKeyDown(Key.ControlLeft) || Input.IsKeyDown(Key.ControlRight)));
+        }
 
         return true;
     }
@@ -592,6 +637,7 @@ internal sealed class ClientApp(
 
     protected override void OnUnload()
     {
+        _itemRenderer.Dispose();
         _chunkRenderer.Dispose();
         _blockTextures.Dispose();
         _inventoryScreen.Dispose();

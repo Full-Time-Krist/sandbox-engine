@@ -63,6 +63,8 @@ public sealed class BreakingTests : IDisposable
         Assert.Equal(Block("base:grass"), Surface);
         _server.Tick();
         Assert.True(Surface.IsAir);
+        Assert.Equal(1, Assert.Single(_server.GroundItems).Stack.Count);
+        TestServers.Tick(_server, 30); // задержка и притяжение: добыча сначала появляется в мире
         Assert.Equal(1, CountOf("base:grass"));
     }
 
@@ -79,6 +81,8 @@ public sealed class BreakingTests : IDisposable
         Assert.Equal(23, withPickaxe); // 1,125 с
         TestServers.Tick(_server, withPickaxe + 1);
         Assert.True(Surface.IsAir);
+        Assert.Equal(1, Assert.Single(_server.GroundItems).Stack.Count);
+        TestServers.Tick(_server, 30); // задержка и притяжение: добыча сначала появляется в мире
         Assert.Equal(1, CountOf("base:stone"));
     }
 
@@ -91,6 +95,8 @@ public sealed class BreakingTests : IDisposable
 
         TestServers.Tick(_server, StartBreaking("base:copper_ore", "base:stone_pickaxe") + 1);
         Assert.True(Surface.IsAir);
+        Assert.Equal(1, Assert.Single(_server.GroundItems).Stack.Count);
+        TestServers.Tick(_server, 30); // задержка и притяжение: добыча сначала появляется в мире
         Assert.Equal(1, CountOf("base:copper_ore"));
     }
 

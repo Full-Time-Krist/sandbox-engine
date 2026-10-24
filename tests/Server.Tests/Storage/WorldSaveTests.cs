@@ -307,7 +307,7 @@ public sealed class WorldSaveTests : IDisposable
             save.SavePlayer("Player", new SavedPlayer(position, new LookAngles(1, 0.5f), GameMode.Creative, 2,
                 Slots((4, Stack("base:sand", 9))), Quests()));
         }
-        Assert.Equal(3L, Execute("SELECT value FROM meta WHERE key = 'format_version'"));
+        Assert.Equal(4L, Execute("SELECT value FROM meta WHERE key = 'format_version'"));
 
         using var reopened = Open();
         Assert.Null(reopened.UpgradedFrom);
@@ -345,7 +345,7 @@ public sealed class WorldSaveTests : IDisposable
             AssertPlayer(expected, save.LoadPlayer("Player"));
             save.SavePlayer("Player", expected with { Quests = Quests(["base:get_wood"]) });
         }
-        Assert.Equal(3L, Execute("SELECT value FROM meta WHERE key = 'format_version'"));
+        Assert.Equal(4L, Execute("SELECT value FROM meta WHERE key = 'format_version'"));
 
         using var reopened = Open();
         Assert.Null(reopened.UpgradedFrom);

@@ -13,6 +13,12 @@ public interface IPlayer
 
     GameMode Mode { get; }
 
+    /// <summary>Текущее здоровье (0–20); ноль — игрок ожидает возрождения.</summary>
+    int Health { get; }
+
+    /// <summary>Нанести положительное количество урона. Творческий режим и погибший игрок невосприимчивы.</summary>
+    void Damage(int amount, string reason);
+
     /// <summary>Авторитетный инвентарь: изменения уходят клиенту в конце тика.</summary>
     Inventory Inventory { get; }
 }

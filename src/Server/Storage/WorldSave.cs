@@ -20,7 +20,7 @@ internal sealed record WorldInfo(int Seed, Vector3d SpawnPosition, GameMode Defa
 /// <param name="Slots">Все слоты инвентаря и курсор (<see cref="Inventory.SlotCount"/> штук), в id реестра этого запуска.</param>
 /// <param name="Quests">Задания игрока; у игрока из версий 1–2 и при испорченных данных — пустая книга.</param>
 internal sealed record SavedPlayer(Vector3d Position, LookAngles Look, GameMode? Mode, int SelectedSlot, ImmutableArray<ItemStack> Slots,
-    QuestBook Quests);
+    QuestBook Quests, int Health = 20, bool IsDead = false);
 
 /// <summary>
 /// Сохранение мира: один файл SQLite. Таблицы <c>meta</c> (версия формата, сид, точка появления, режим по умолчанию),
@@ -51,8 +51,9 @@ internal sealed class WorldSave : IDisposable
     /// Версия схемы базы. Формат блоков чанка и инвентаря версионируется отдельно, первым байтом данных.
     /// Версия 2 (этап 3): таблица <c>item_names</c>, у игрока взгляд, режим, выбранный слот и инвентарь.
     /// Версия 3 (шаг 6.5): у игрока задания.
+    /// Версия 4 (этап 7): сущности чанков, здоровье и смерть игрока.
     /// </summary>
-    public const int FormatVersion = 3;
+    public const int FormatVersion = 4;
 
     /// <summary>
     /// Столбцы игрока, появившиеся в версии 2. Новая база создаётся сразу с ними, у базы версии 1 их добавляет
@@ -69,6 +70,7 @@ internal sealed class WorldSave : IDisposable
 
     /// <summary>Столбец игрока, появившийся в версии 3 (<see cref="UpgradeFrom2"/>); NULL — заданий не записано.</summary>
     private const string PlayerColumnAddedIn3 = "quests TEXT";
+    private const string PlayerColumnsAddedIn4 = "health INTEGER NOT NULL DEFAULT 20, is_dead INTEGER NOT NULL DEFAULT 0";
 
     /// <summary>Сколько записей поток записи кладёт в одну транзакцию.</summary>
     private const int MaxBatch = 512;
@@ -78,6 +80,7 @@ internal sealed class WorldSave : IDisposable
     private readonly ThreadLocal<SqliteConnection> _readConnections;
     private readonly BlockingCollection<WriteItem> _queue = new(new ConcurrentQueue<WriteItem>());
     private readonly ConcurrentDictionary<ChunkPos, byte[]> _pendingChunks = new();
+    private readonly ConcurrentDictionary<ChunkPos, byte[]> _pendingEntities = new();
     private readonly ConcurrentDictionary<string, PlayerWrite> _pendingPlayers = new(StringComparer.Ordinal);
     private readonly ItemRegistry _items;
     private Thread? _writer;
@@ -120,18 +123,23 @@ internal sealed class WorldSave : IDisposable
                     x INTEGER NOT NULL, y INTEGER NOT NULL, z INTEGER NOT NULL, data BLOB NOT NULL,
                     PRIMARY KEY (x, y, z)) WITHOUT ROWID;
                 CREATE TABLE IF NOT EXISTS players (name TEXT PRIMARY KEY, x REAL NOT NULL, y REAL NOT NULL, z REAL NOT NULL,
-                    {string.Join(", ", PlayerColumnsAddedIn2)}, {PlayerColumnAddedIn3});
+                    {string.Join(", ", PlayerColumnsAddedIn2)}, {PlayerColumnAddedIn3}, {PlayerColumnsAddedIn4});
+                CREATE TABLE IF NOT EXISTS entities (
+                    x INTEGER NOT NULL, y INTEGER NOT NULL, z INTEGER NOT NULL, data BLOB NOT NULL,
+                    PRIMARY KEY (x, y, z)) WITHOUT ROWID;
                 """);
 
             // Версия записывается вместе со свойствами мира (Initialize); у новой базы её ещё нет, и таблицы уже новые.
             var version = ReadMeta(_writeConnection, "format_version") is { } stored ? Convert.ToInt64(stored) : (long?)null;
             if (version > FormatVersion)
                 throw new InvalidDataException($"Мир сохранён более новой версией игры (формат {version}, поддерживается до {FormatVersion}).");
-            if (version is 1 or 2)
+            if (version is 1 or 2 or 3)
             {
                 if (version == 1)
                     UpgradeFrom1();
-                UpgradeFrom2();
+                if (version <= 2)
+                    UpgradeFrom2();
+                UpgradeFrom3();
                 UpgradedFrom = (int)version;
             }
             if (version != null)
@@ -269,7 +277,7 @@ internal sealed class WorldSave : IDisposable
     {
         ThrowIfFaulted();
         var write = new PlayerWrite(name, player.Position, player.Look, player.Mode, player.SelectedSlot,
-            InventoryCodec.Encode(player.Slots.AsSpan(), ItemIds), QuestCodec.Encode(player.Quests));
+            InventoryCodec.Encode(player.Slots.AsSpan(), ItemIds), QuestCodec.Encode(player.Quests), player.Health, player.IsDead);
         _pendingPlayers[name] = write;
         _queue.Add(write);
     }
@@ -284,7 +292,7 @@ internal sealed class WorldSave : IDisposable
             return ToSavedPlayer(pending);
 
         using var command = _readConnections.Value!.CreateCommand();
-        command.CommandText = "SELECT x, y, z, yaw, pitch, mode, selected_slot, inventory, quests FROM players WHERE name = $name";
+        command.CommandText = "SELECT x, y, z, yaw, pitch, mode, selected_slot, inventory, quests, health, is_dead FROM players WHERE name = $name";
         command.Parameters.AddWithValue("$name", name);
         using var reader = command.ExecuteReader();
         if (!reader.Read())
@@ -303,7 +311,8 @@ internal sealed class WorldSave : IDisposable
         var slot = reader.GetInt64(6) is var s and >= 0 and < Inventory.HotbarSize ? (int)s : 0;
         var inventory = reader.IsDBNull(7) ? null : (byte[])reader.GetValue(7);
         var quests = reader.IsDBNull(8) ? null : reader.GetValue(8) as string;
-        return ToSavedPlayer(new PlayerWrite(name, position, look, mode, slot, inventory, quests));
+        return ToSavedPlayer(new PlayerWrite(name, position, look, mode, slot, inventory, quests,
+            reader.GetInt32(9), reader.GetBoolean(10)));
     }
 
     private SavedPlayer ToSavedPlayer(PlayerWrite player)
@@ -336,7 +345,37 @@ internal sealed class WorldSave : IDisposable
 
         var look = player.Look.IsFinite ? player.Look.Normalized() : default;
         return new SavedPlayer(player.Position, look, player.Mode, player.SelectedSlot, ImmutableCollectionsMarshal.AsImmutableArray(slots),
-            quests);
+            quests, player.IsDead ? 0 : Math.Clamp(player.Health, 1, 20), player.IsDead);
+    }
+
+    /// <summary>Снимок сущностей чанка: доступен для чтения сразу, запись — в общем потоке сохранения.</summary>
+    public void SaveEntities(ChunkPos position, IReadOnlyList<SavedItemEntity> entities)
+    {
+        ThrowIfFaulted();
+        var data = EntityCodec.Encode(entities, _items);
+        _pendingEntities[position] = data;
+        _queue.Add(new EntitiesWrite(position, data));
+    }
+
+    /// <summary>Повреждённый блок сущностей пропускается с записью в лог.</summary>
+    public IReadOnlyList<SavedItemEntity> LoadEntities(ChunkPos position)
+    {
+        if (!_pendingEntities.TryGetValue(position, out var data))
+        {
+            using var command = _readConnections.Value!.CreateCommand();
+            command.CommandText = "SELECT data FROM entities WHERE x=$x AND y=$y AND z=$z";
+            command.Parameters.AddWithValue("$x", position.X);
+            command.Parameters.AddWithValue("$y", position.Y);
+            command.Parameters.AddWithValue("$z", position.Z);
+            data = command.ExecuteScalar() as byte[];
+            if (data == null) return [];
+        }
+        try { return EntityCodec.Decode(data, _items); }
+        catch (InvalidDataException error)
+        {
+            Console.WriteLine($"[Server] Сущности чанка {position} в сохранении испорчены и пропущены: {error.Message}");
+            return [];
+        }
     }
 
     /// <summary>Ждёт, пока всё поставленное в очередь до этого вызова окажется на диске.</summary>
@@ -386,8 +425,8 @@ internal sealed class WorldSave : IDisposable
 
             using var writePlayer = _writeConnection.CreateCommand();
             writePlayer.CommandText = """
-                INSERT OR REPLACE INTO players (name, x, y, z, yaw, pitch, mode, selected_slot, inventory, quests)
-                VALUES ($name, $x, $y, $z, $yaw, $pitch, $mode, $slot, $inventory, $quests)
+                INSERT OR REPLACE INTO players (name, x, y, z, yaw, pitch, mode, selected_slot, inventory, quests, health, is_dead)
+                VALUES ($name, $x, $y, $z, $yaw, $pitch, $mode, $slot, $inventory, $quests, $health, $dead)
                 """;
             var pname = writePlayer.Parameters.Add("$name", SqliteType.Text);
             var px = writePlayer.Parameters.Add("$x", SqliteType.Real);
@@ -399,6 +438,15 @@ internal sealed class WorldSave : IDisposable
             var pslot = writePlayer.Parameters.Add("$slot", SqliteType.Integer);
             var pinventory = writePlayer.Parameters.Add("$inventory", SqliteType.Blob);
             var pquests = writePlayer.Parameters.Add("$quests", SqliteType.Text);
+            var phealth = writePlayer.Parameters.Add("$health", SqliteType.Integer);
+            var pdead = writePlayer.Parameters.Add("$dead", SqliteType.Integer);
+
+            using var writeEntities = _writeConnection.CreateCommand();
+            writeEntities.CommandText = "INSERT OR REPLACE INTO entities (x, y, z, data) VALUES ($x, $y, $z, $data)";
+            var ex = writeEntities.Parameters.Add("$x", SqliteType.Integer);
+            var ey = writeEntities.Parameters.Add("$y", SqliteType.Integer);
+            var ez = writeEntities.Parameters.Add("$z", SqliteType.Integer);
+            var edata = writeEntities.Parameters.Add("$data", SqliteType.Blob);
 
             var batch = new List<WriteItem>(MaxBatch);
             // Цикл завершается, когда Dispose закрывает очередь и всё поставленное записано.
@@ -412,6 +460,7 @@ internal sealed class WorldSave : IDisposable
                 {
                     writeChunk.Transaction = transaction;
                     writePlayer.Transaction = transaction;
+                    writeEntities.Transaction = transaction;
                     foreach (var item in batch)
                     {
                         switch (item)
@@ -420,6 +469,10 @@ internal sealed class WorldSave : IDisposable
                                 (cx.Value, cy.Value, cz.Value, cdata.Value) = (chunk.Position.X, chunk.Position.Y, chunk.Position.Z, chunk.Data);
                                 writeChunk.ExecuteNonQuery();
                                 break;
+                            case EntitiesWrite entities:
+                                (ex.Value, ey.Value, ez.Value, edata.Value) = (entities.Position.X, entities.Position.Y, entities.Position.Z, entities.Data);
+                                writeEntities.ExecuteNonQuery();
+                                break;
                             case PlayerWrite player:
                                 (pname.Value, px.Value, py.Value, pz.Value) = (player.Name, player.Position.X, player.Position.Y, player.Position.Z);
                                 (pyaw.Value, ppitch.Value) = (player.Look.Yaw, player.Look.Pitch);
@@ -427,6 +480,8 @@ internal sealed class WorldSave : IDisposable
                                 pslot.Value = player.SelectedSlot;
                                 pinventory.Value = player.Inventory ?? (object)DBNull.Value;
                                 pquests.Value = player.Quests ?? (object)DBNull.Value;
+                                phealth.Value = player.Health;
+                                pdead.Value = player.IsDead;
                                 writePlayer.ExecuteNonQuery();
                                 break;
                         }
@@ -442,6 +497,9 @@ internal sealed class WorldSave : IDisposable
                     {
                         case ChunkWrite chunk:
                             _pendingChunks.TryRemove(new KeyValuePair<ChunkPos, byte[]>(chunk.Position, chunk.Data));
+                            break;
+                        case EntitiesWrite entities:
+                            _pendingEntities.TryRemove(new KeyValuePair<ChunkPos, byte[]>(entities.Position, entities.Data));
                             break;
                         case PlayerWrite player:
                             _pendingPlayers.TryRemove(new KeyValuePair<string, PlayerWrite>(player.Name, player));
@@ -561,6 +619,16 @@ internal sealed class WorldSave : IDisposable
         transaction.Commit();
     }
 
+    /// <summary>Версия 4: здоровье и состояние смерти; таблица сущностей уже создана конструктором.</summary>
+    private void UpgradeFrom3()
+    {
+        using var transaction = _writeConnection.BeginTransaction();
+        Execute(_writeConnection, "ALTER TABLE players ADD COLUMN health INTEGER NOT NULL DEFAULT 20;");
+        Execute(_writeConnection, "ALTER TABLE players ADD COLUMN is_dead INTEGER NOT NULL DEFAULT 0;");
+        Execute(_writeConnection, "UPDATE meta SET value = 4 WHERE key = 'format_version';");
+        transaction.Commit();
+    }
+
     /// <param name="table">Таблица имён: <c>block_names</c> или <c>item_names</c>.</param>
     private List<string> ReadNames(string table)
     {
@@ -597,11 +665,12 @@ internal sealed class WorldSave : IDisposable
 
     private abstract record WriteItem;
     private sealed record ChunkWrite(ChunkPos Position, byte[] Data) : WriteItem;
+    private sealed record EntitiesWrite(ChunkPos Position, byte[] Data) : WriteItem;
 
     /// <param name="Mode">null — не записан (игрок из версии 1).</param>
     /// <param name="Inventory">Инвентарь в формате <see cref="InventoryCodec"/>; null — не записан (игрок из версии 1).</param>
     /// <param name="Quests">Задания в формате <see cref="QuestCodec"/>; null — не записаны (игрок из версий 1–2).</param>
     private sealed record PlayerWrite(string Name, Vector3d Position, LookAngles Look, GameMode? Mode, int SelectedSlot,
-        byte[]? Inventory, string? Quests) : WriteItem;
+        byte[]? Inventory, string? Quests, int Health, bool IsDead) : WriteItem;
     private sealed record Barrier(ManualResetEventSlim Done) : WriteItem;
 }

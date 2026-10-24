@@ -2,6 +2,7 @@ using System.Numerics;
 using Api;
 using Shared;
 using Shared.Blocks;
+using Shared.Entities;
 using Shared.Items;
 using Shared.Networking;
 using Shared.Protocol;
@@ -11,8 +12,9 @@ using Shared.Voxels;
 namespace Server;
 
 /// <summary>Подключённый клиент с точки зрения сервера.</summary>
-internal sealed class ClientSession(IConnection<ServerMessage, ClientMessage> connection) : IPlayer
+internal sealed class ClientSession(IConnection<ServerMessage, ClientMessage> connection, EntityWorld? entities = null) : IPlayer
 {
+    private readonly EntityWorld _entities = entities ?? new EntityWorld();
     string IPlayer.Name => PlayerName;
     Vector3d IPlayer.Position => PlayerPosition;
 
@@ -21,7 +23,22 @@ internal sealed class ClientSession(IConnection<ServerMessage, ClientMessage> co
     public bool IsJoined { get; private set; }
     public int PlayerId { get; private set; }
     public string PlayerName { get; private set; } = "";
-    public Vector3d PlayerPosition { get; set; }
+    public EntityId Entity { get; private set; }
+    public Vector3d PlayerPosition
+    {
+        get => _entities.Get<PositionComponent>(Entity).Value;
+        set => _entities.Get<PositionComponent>(Entity).Value = value;
+    }
+    public int Health
+    {
+        get => _entities.Get<HealthComponent>(Entity).Value;
+        set => _entities.Get<HealthComponent>(Entity).Value = value;
+    }
+    public bool IsDead => Health == 0;
+    public double FallPeak { get; set; }
+    public int RegenerationTicks { get; set; }
+    public Action<int, string>? DamageHandler { get; set; }
+    public void Damage(int amount, string reason) => DamageHandler?.Invoke(amount, reason);
 
     /// <summary>Направление взгляда из последнего <see cref="PlayerMove"/>. Нужно только для сохранения.</summary>
     public LookAngles Look { get; set; }
@@ -43,6 +60,9 @@ internal sealed class ClientSession(IConnection<ServerMessage, ClientMessage> co
 
     public void Join(int playerId, string playerName, GameMode mode, Inventory inventory, QuestBook quests, PlayerChunkView view)
     {
+        Entity = _entities.Create();
+        _entities.Set(Entity, new PositionComponent(default));
+        _entities.Set(Entity, new HealthComponent(20));
         Quests = quests;
         View = view;
         Mode = mode;

@@ -1,3 +1,5 @@
+using Shared;
+using Shared.Items;
 using Shared.Blocks;
 using Shared.Voxels;
 
@@ -6,6 +8,9 @@ namespace Api;
 /// <summary>Мир сервера для модов. Изменения сразу рассылаются игрокам, у которых есть этот чанк.</summary>
 public interface IWorld
 {
+    /// <summary>Создаёт предмет в загруженном чанке. Неверная стопка или позиция отклоняется.</summary>
+    void SpawnItem(Vector3d position, ItemStack stack);
+
     /// <summary>Блок в точке; в незагруженном чанке — воздух.</summary>
     BlockId GetBlock(BlockPos pos);
 

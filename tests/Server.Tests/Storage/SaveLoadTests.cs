@@ -23,8 +23,9 @@ public sealed class SaveLoadTests : IDisposable
     private static BlockPos BreakSurface(GameServer server, TestServers.TestClient client)
     {
         var surface = TestServers.TopBlock(server.World, 0, 0);
-        var eye = new Vector3d(0.5, surface.Y + 3.5, 0.5);
-        TestServers.Teleport(server, client, eye);
+        var feet = new Vector3d(0.5, surface.Y + 2, 0.5);
+        var eye = feet + new Vector3d(0, Shared.Physics.PlayerPhysics.EyeHeight, 0);
+        TestServers.Teleport(server, client, feet);
         client.Send(new UseItem(ItemAction.Primary, eye, -Vector3.UnitY));
         TestServers.Tick(server, TestServers.HoldBreakTicks);
 

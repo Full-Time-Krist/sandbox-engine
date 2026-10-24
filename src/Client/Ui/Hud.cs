@@ -85,7 +85,7 @@ internal sealed class Hud : IDisposable
     /// <param name="screen">Размер кадра в пикселях.</param>
     /// <param name="deltaTime">Время с прошлого кадра: по нему гаснет название предмета.</param>
     /// <param name="quests">Задания игрока; null — не подсказывать (творческий режим: там задания не идут).</param>
-    public void Draw(Vector2D<int> screen, Inventory inventory, double deltaTime, bool inventoryOpen = false, QuestBook? quests = null)
+    public void Draw(Vector2D<int> screen, Inventory inventory, double deltaTime, bool inventoryOpen = false, QuestBook? quests = null, HealthView? health = null)
     {
         if (screen.X <= 0 || screen.Y <= 0 || inventoryOpen)
             return;
@@ -101,9 +101,36 @@ internal sealed class Hud : IDisposable
 
         _canvas.Clear();
         DrawHotbar(screen, inventory, scale);
+        if (health != null) HealthView.DrawHearts(_canvas, screen, scale, health.Health, health.MaxHealth);
         DrawHeldName(screen, inventory, scale, deltaTime);
         if (quests != null)
             DrawTracker(inventory, quests, scale);
+        _batch.Draw(_canvas, screen, _atlasTexture!, _blockTextures);
+    }
+
+    /// <summary>Экран смерти использует тот же шрифт и цвета панелей, что остальной интерфейс.</summary>
+    public void DrawDeath(Vector2D<int> screen, HealthView health, System.Numerics.Vector2 mouse)
+    {
+        if (!health.IsDead || screen.X <= 0 || screen.Y <= 0) return;
+        var scale = UiScale.For(screen.X, screen.Y);
+        if (_scale != scale) Rebuild(scale);
+        _canvas.Clear();
+        _canvas.FillRect(0, 0, screen.X, screen.Y, new UiColor(45, 8, 12, 190));
+        const string title = "Вы погибли";
+        var y = screen.Y / 2 - 40 * scale;
+        DrawShadowedText(title, (screen.X - _canvas.MeasureText(title)) / 2, y, UiColor.White, scale);
+        const string hint = "Вещи остались на месте смерти";
+        DrawShadowedText(hint, (screen.X - _canvas.MeasureText(hint)) / 2, y + 18 * scale,
+            new UiColor(210, 190, 190), scale);
+        var button = HealthView.RespawnButton(screen, scale);
+        var hover = !health.RespawnPending && button.Contains(mouse);
+        _canvas.FillRect(button.X, button.Y, button.Width, button.Height,
+            hover ? new UiColor(75, 75, 85, 245) : new UiColor(25, 25, 32, 245));
+        _canvas.DrawFrame(button.X, button.Y, button.Width, button.Height, scale,
+            hover ? UiColor.White : new UiColor(150, 150, 160));
+        var label = health.RespawnPending ? "Возрождение..." : "Возродиться";
+        DrawShadowedText(label, button.X + (button.Width - _canvas.MeasureText(label)) / 2,
+            button.Y + (button.Height - CapHeight * scale) / 2, UiColor.White, scale);
         _batch.Draw(_canvas, screen, _atlasTexture!, _blockTextures);
     }
 
@@ -233,7 +260,7 @@ internal sealed class Hud : IDisposable
         var alpha = (float)Math.Min(1, _nameTimeLeft / NameFadeSeconds);
         var hotbar = HudLayout.Hotbar(screen.X, screen.Y, scale);
         var x = (screen.X - _canvas.MeasureText(name)) / 2;
-        var y = hotbar.Y - 4 * scale - _atlas.Ascent;
+        var y = hotbar.Y - 15 * scale - _atlas.Ascent;
         DrawShadowedText(name, x, y, UiColor.White.WithAlpha(alpha), scale);
     }
 

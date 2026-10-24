@@ -29,6 +29,9 @@ public interface IModEvents
 
     /// <summary>Игрок выполнил задание (только в выживании): клиенту уже ушло сообщение о нём.</summary>
     void OnQuestCompleted(Action<QuestCompleted> handler);
+    void OnItemPickedUp(Action<ItemPickedUp> handler);
+    void OnPlayerDamaged(Action<PlayerDamaged> handler);
+    void OnPlayerDied(Action<PlayerDied> handler);
 }
 
 /// <param name="Block">Блок, который был на месте до ломания.</param>
@@ -46,3 +49,8 @@ public readonly record struct PlayerJoined(IWorld World, IPlayer Player);
 public readonly record struct ItemCrafted(IWorld World, IPlayer Player, Recipe Recipe, int Times);
 
 public readonly record struct QuestCompleted(IWorld World, IPlayer Player, Quest Quest);
+
+/// <summary>Игрок подобрал ровно эту часть стопки; остаток может лежать на земле.</summary>
+public readonly record struct ItemPickedUp(IWorld World, IPlayer Player, ItemStack Stack);
+public readonly record struct PlayerDamaged(IWorld World, IPlayer Player, int Amount, string Reason);
+public readonly record struct PlayerDied(IWorld World, IPlayer Player, string Reason);

@@ -148,6 +148,10 @@ public sealed class ExampleModTests : IDisposable
         _server.Tick();
 
         Assert.True(quests.IsCompleted("example_mod:amethyst"));
+        Assert.Equal(0, inventory.Count(content.Items.Get("base:copper_ingot").Id));
+        var reward = Assert.Single(_server.GroundItems);
+        Assert.Equal(new ItemStack(content.Items.Get("base:copper_ingot").Id, 3), reward.Stack);
+        TestServers.Tick(_server, 30);
         Assert.Equal(3, inventory.Count(content.Items.Get("base:copper_ingot").Id));
         Assert.Contains("[Mod example_mod] Tester выполнил «Аметисты»: награда — 3 медных слитка", _log);
     }

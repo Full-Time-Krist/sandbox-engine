@@ -113,7 +113,7 @@ public sealed class ItemUseTests : IDisposable
         Assert.Equal([new BlockChanged(_surface, BlockId.Air)], changes);
         Assert.True(BlockAt(_surface).IsAir);
         Assert.Equal(Stack(surfaceBlock, 1), _inventory[0]);
-        // Клиент узнал о добыче в том же тике.
+        // Клиент узнал о добыче после подбора.
         Assert.Equal([new InventorySlot(0, Stack(surfaceBlock, 1))], Assert.Single(_inventoryChanges).Slots);
     }
 
@@ -131,7 +131,7 @@ public sealed class ItemUseTests : IDisposable
     }
 
     [Fact]
-    public void Primary_InventoryFull_BlockIsNotBroken()
+    public void Primary_InventoryFull_BlockBreaksAndDropRemainsInWorld()
     {
         var surfaceBlock = BlockAt(_surface);
         Assert.NotEqual(_blocks.Planks, surfaceBlock);
@@ -141,8 +141,9 @@ public sealed class ItemUseTests : IDisposable
 
         var changes = BreakSurface();
 
-        Assert.Empty(changes);
-        Assert.Equal(surfaceBlock, BlockAt(_surface));
+        Assert.Equal([new BlockChanged(_surface, BlockId.Air)], changes);
+        Assert.True(BlockAt(_surface).IsAir);
+        Assert.Equal(Stack(surfaceBlock, 1), Assert.Single(_server.GroundItems).Stack);
         Assert.Empty(_inventoryChanges);
     }
 
@@ -338,8 +339,11 @@ public sealed class ItemUseTests : IDisposable
 
         Assert.True(second.TryReceive(out var message));
         Assert.Equal(new BlockChanged(_surface, BlockId.Air), message);
-        // Добыча — только в инвентарь того, кто ломал.
-        Assert.False(second.TryReceive(out _));
+        // Второй игрок тоже видит предмет, но его инвентарь не меняется.
+        var remaining = new List<ServerMessage>();
+        while (second.TryReceive(out var next)) remaining.Add(next);
+        Assert.Contains(remaining, message => message is EntitySpawned);
+        Assert.DoesNotContain(remaining, message => message is InventoryChanged);
     }
 
     // --- Клики по инвентарю ---

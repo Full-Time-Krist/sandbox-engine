@@ -37,6 +37,8 @@ public sealed class World : IDisposable
     private int _generatedCount;
 
     public ChunkMap Chunks { get; } = new();
+    internal event Action<ChunkPos>? ChunkLoaded;
+    internal event Action<ChunkPos>? ChunkUnloading;
 
     public int Seed { get; }
 
@@ -88,6 +90,14 @@ public sealed class World : IDisposable
         _generator = new ChunkGenerator(Produce, generatorThreads);
     }
 
+    /// <summary>Редкий синхронный путь: смерть до подгрузки мира не должна терять вещи.</summary>
+    internal void EnsureChunk(ChunkPos position)
+    {
+        if (Chunks.Contains(position)) return;
+        Chunks.Set(Produce(position));
+        ChunkLoaded?.Invoke(position);
+    }
+
     public bool IsGenerating(ChunkPos position) => _generating.Contains(position);
 
     /// <summary>
@@ -125,7 +135,9 @@ public sealed class World : IDisposable
         while (_generator.TryTakeCompleted(out var chunk))
         {
             _generating.Remove(chunk.Position);
+            if (Chunks.Contains(chunk.Position)) continue;
             Chunks.Set(chunk);
+            ChunkLoaded?.Invoke(chunk.Position);
         }
     }
 
@@ -138,6 +150,7 @@ public sealed class World : IDisposable
         var unneeded = Chunks.All.Where(c => !isNeeded(c.Position)).ToList();
         foreach (var chunk in unneeded)
         {
+            ChunkUnloading?.Invoke(chunk.Position);
             if (_dirty.Remove(chunk.Position))
                 _save?.SaveChunk(chunk);
             Chunks.Remove(chunk.Position);
