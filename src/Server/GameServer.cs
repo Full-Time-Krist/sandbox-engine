@@ -112,6 +112,9 @@ public sealed class GameServer : IDisposable
     /// <summary>Разлёт добычи. Без сида: на исход игры он не влияет, тесты проверяют не точку, а что предмет есть.</summary>
     private readonly Random _random = new();
 
+    /// <summary>Мозги мобов: поведение, поиск пути в бюджете тика, ведение по пути (шаг 9.3).</summary>
+    internal MobAi MobAi { get; }
+
     /// <summary>Сохранение мира или null, если мир только в памяти. Для тестов: дождаться записи на диск.</summary>
     internal WorldSave? Save => _save;
 
@@ -155,6 +158,7 @@ public sealed class GameServer : IDisposable
         _itemNames = [.. _items.All.Select(i => i.Name)];
         _mobs = content.Mobs;
         _mobNames = [.. _mobs.All.Select(m => m.Name)];
+        MobAi = new MobAi(_mobs, _random);
         _recipes = content.Recipes;
         _events = new GameEvents(modLog);
         _quests = new QuestTracker(content.Quests, _events);
@@ -309,6 +313,7 @@ public sealed class GameServer : IDisposable
         _itemSystem.Age(Entities);
         _itemSystem.Attract(Entities, _sessions);
         MovementSystem.Run(Entities, World.Chunks, _registry);
+        MobAi.Run(Entities, World.Chunks, _registry, _sessions);
         MobEntities.Move(Entities, _mobs, World.Chunks, _registry);
         _itemSystem.PickUp(Entities, _sessions, (session, stack) => _events.Raise(new ItemPickedUp(_editor, session, stack)));
         _itemSystem.Merge(Entities);

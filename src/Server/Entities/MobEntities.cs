@@ -15,6 +15,12 @@ internal struct Mob
 
     /// <summary>Желаемое направление ходьбы по горизонтали (X — мировой X, Y — мировой Z), длина до 1; ноль — стоит.</summary>
     public Vector2 Move;
+
+    /// <summary>Бежать: скорость ×<see cref="MobEntities.SprintFactor"/> (мирный моб убегает от удара).</summary>
+    public bool Sprint;
+
+    /// <summary>На какую точку смотреть (глаза игрока при погоне); null — голова смотрит, куда идёт тело.</summary>
+    public Vector3d? LookAt;
 }
 
 /// <summary>Состояние ходьбы моба между тиками — то же, что у игрока (<see cref="PlayerState"/> без позиции и полёта).</summary>
@@ -37,9 +43,12 @@ internal struct Facing
 /// <summary>Создание мобов и их ходьба (шаг 9.1). Поведение — шаг 9.3, бой — 9.4, появление и сохранение — 9.5.</summary>
 internal static class MobEntities
 {
-    /// <summary>Моб как ходок: короб и скорость его вида; бега у мобов пока нет.</summary>
+    /// <summary>Во сколько раз бег (<see cref="Mob.Sprint"/>) быстрее шага.</summary>
+    public const float SprintFactor = 1.5f;
+
+    /// <summary>Моб как ходок: короб и скорость его вида, бег — в <see cref="SprintFactor"/> раз быстрее.</summary>
     public static Walker WalkerOf(MobDefinition definition) =>
-        new(definition.Width, definition.Height, definition.Speed, definition.Speed);
+        new(definition.Width, definition.Height, definition.Speed, definition.Speed * SprintFactor);
 
     /// <summary>Моб вида <paramref name="definition"/> ногами в <paramref name="feet"/>, повёрнутый на <paramref name="yaw"/>.</summary>
     public static EntityId Spawn(EntityWorld entities, MobDefinition definition, Vector3d feet, float yaw)
@@ -51,6 +60,7 @@ internal static class MobEntities
         entities.Set(entity, new Facing { Yaw = yaw, HeadYaw = yaw });
         entities.Set(entity, new Health { Current = definition.Health, Max = definition.Health });
         entities.Set(entity, new Synced { SentPosition = feet, SentYaw = yaw, SentHeadTurn = 0 });
+        entities.Set(entity, new Brain());
         return entity;
     }
 
@@ -74,8 +84,9 @@ internal static class MobEntities
 
     /// <summary>
     /// Тик ходьбы всех мобов: та же физика, что у игрока (<see cref="PlayerPhysics.Step(PlayerState, PlayerInput, Walker, ChunkMap, BlockRegistry)"/>),
-    /// с подъёмом на уступ по направлению движения. Идущий моб поворачивается туда, куда идёт. В незагруженном чанке —
-    /// стоит, как игрок.
+    /// с подъёмом на уступ по направлению движения. Идущий моб поворачивается туда, куда идёт; голова смотрит на
+    /// <see cref="Mob.LookAt"/> не дальше <see cref="MobAi.MaxHeadTurn"/> от тела (стоящий поворачивается к точке целиком),
+    /// а без неё — по ходу. В незагруженном чанке — стоит, как игрок.
     /// </summary>
     public static void Move(EntityWorld entities, MobRegistry mobs, ChunkMap chunks, BlockRegistry blocks)
     {
@@ -87,14 +98,25 @@ internal static class MobEntities
             var mob = entities.Get<Mob>(entity);
             var move = mob.Move;
             var next = PlayerPhysics.Step(new PlayerState(position.Value, walk.Velocity, walk.OnGround),
-                new PlayerInput(move, Facing: move), WalkerOf(mobs.Get(mob.Kind)), chunks, blocks);
+                new PlayerInput(move, Sprint: mob.Sprint, Facing: move), WalkerOf(mobs.Get(mob.Kind)), chunks, blocks);
             position.Value = next.Position;
             walk.Velocity = next.Velocity;
             walk.OnGround = next.OnGround;
-            if (move.LengthSquared() > 1e-6f)
-            {
-                // Как у камеры: направление (sin yaw, −cos yaw) по X и Z.
+            var moving = move.LengthSquared() > 1e-6f;
+            // Как у камеры: направление (sin yaw, −cos yaw) по X и Z.
+            if (moving)
                 facing.Yaw = MathF.Atan2(move.X, -move.Y);
+            if (mob.LookAt is { } point)
+            {
+                var to = point - position.Value;
+                var look = MathF.Atan2((float)to.X, -(float)to.Z);
+                if (!moving)
+                    facing.Yaw = look;
+                var turn = Math.Clamp(MathF.IEEERemainder(look - facing.Yaw, MathF.Tau), -MobAi.MaxHeadTurn, MobAi.MaxHeadTurn);
+                facing.HeadYaw = facing.Yaw + turn;
+            }
+            else if (moving)
+            {
                 facing.HeadYaw = facing.Yaw;
             }
         }

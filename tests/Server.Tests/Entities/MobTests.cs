@@ -32,6 +32,19 @@ public sealed class MobTests : IDisposable
 
     private List<Shared.Entities.EntityId> Mobs() => [.. _server.Entities.Query<Mob>()];
 
+    /// <summary>
+    /// Моб без мозга (<see cref="Brain"/>): ИИ его не ведёт, тест двигает его сам через <see cref="Mob.Move"/> — так
+    /// проверяется физика ходьбы и рассылка отдельно от поведения (шаг 9.3).
+    /// </summary>
+    private bool SpawnPuppet(Vector3d feet)
+    {
+        if (!_server.ModWorld.TrySpawnMob(_zombie.Id, feet))
+            return false;
+        foreach (var mob in Mobs())
+            _server.Entities.Remove<Brain>(mob);
+        return true;
+    }
+
     private List<ServerMessage> Drain()
     {
         var messages = new List<ServerMessage>();
@@ -66,7 +79,7 @@ public sealed class MobTests : IDisposable
     [Fact]
     public void Mob_FallsToGround_AndStands()
     {
-        Assert.True(_server.ModWorld.TrySpawnMob(_zombie.Id, OnSurface + new Vector3d(0, 4, 0)));
+        Assert.True(SpawnPuppet(OnSurface + new Vector3d(0, 4, 0)));
         var mob = Assert.Single(Mobs());
 
         TestServers.Tick(_server, 40);
@@ -90,7 +103,7 @@ public sealed class MobTests : IDisposable
                 Assert.True(_server.World.TrySetBlock(floor + new BlockPos(x, y, z), Shared.Blocks.BlockId.Air));
         }
         var start = new Vector3d(floor.X + 0.5, floor.Y + 1, floor.Z + 0.5);
-        Assert.True(_server.ModWorld.TrySpawnMob(_zombie.Id, start));
+        Assert.True(SpawnPuppet(start));
         var mob = Assert.Single(Mobs());
         _server.Entities.Get<Mob>(mob).Move = Vector2.UnitX;
 
@@ -106,7 +119,7 @@ public sealed class MobTests : IDisposable
     public void Client_GetsMobSpawn_AndMovesWithYaw()
     {
         Drain();
-        Assert.True(_server.ModWorld.TrySpawnMob(_zombie.Id, OnSurface));
+        Assert.True(SpawnPuppet(OnSurface));
         _server.Tick();
 
         var spawned = Assert.Single(Drain().OfType<EntitySpawned>());
@@ -137,7 +150,7 @@ public sealed class MobTests : IDisposable
             if (x != 0 || z != 0)
                 Assert.True(_server.World.TrySetBlock(_surface + new BlockPos(x, y, z), stone));
         }
-        Assert.True(_server.ModWorld.TrySpawnMob(_zombie.Id, OnSurface));
+        Assert.True(SpawnPuppet(OnSurface));
         var mob = Assert.Single(Mobs());
         _server.Entities.Get<Mob>(mob).Move = Vector2.Normalize(new Vector2(1, 1));
         TestServers.Tick(_server, 20); // прижался в угол +X +Z
@@ -159,7 +172,7 @@ public sealed class MobTests : IDisposable
     public void Client_GetsHeadTurn_RelativeToBody()
     {
         Drain();
-        Assert.True(_server.ModWorld.TrySpawnMob(_zombie.Id, OnSurface));
+        Assert.True(SpawnPuppet(OnSurface));
         var mob = Assert.Single(Mobs());
         _server.Entities.Get<Facing>(mob) = new Facing { Yaw = 0.1f, HeadYaw = MathF.Tau - 0.3f };
         _server.Tick();
@@ -174,6 +187,32 @@ public sealed class MobTests : IDisposable
 
         _server.Tick(); // голова больше не двигалась — нечего и слать
         Assert.Empty(Drain().OfType<EntitiesMoved>());
+    }
+
+    /// <summary>
+    /// Взгляд (шаг 9.3): идущий моб смотрит на точку <see cref="Mob.LookAt"/> головой, но не дальше 75° от тела; стоящий
+    /// поворачивается к ней целиком.
+    /// </summary>
+    [Fact]
+    public void LookAt_HeadTurnsUpTo75Degrees_StandingMobTurnsBody()
+    {
+        Assert.True(SpawnPuppet(OnSurface));
+        var mob = Assert.Single(Mobs());
+        ref var state = ref _server.Entities.Get<Mob>(mob);
+        state.LookAt = OnSurface + new Vector3d(-5, 1, 0); // на −X: yaw −π/2
+        state.Move = new Vector2(0, -1);                   // идёт на −Z: yaw 0
+        _server.Tick();
+
+        var facing = _server.Entities.Get<Facing>(mob);
+        Assert.Equal(0, facing.Yaw, 4);
+        Assert.Equal(-MobAi.MaxHeadTurn, facing.HeadTurn, 4); // хотел бы на −90°, но голова — до −75°
+
+        _server.Entities.Get<Mob>(mob).Move = Vector2.Zero;
+        _server.Tick();
+        facing = _server.Entities.Get<Facing>(mob);
+        var to = OnSurface + new Vector3d(-5, 1, 0) - _server.Entities.Get<Position>(mob).Value; // за тик ходьбы моб чуть сдвинулся
+        Assert.Equal(MathF.Atan2((float)to.X, -(float)to.Z), facing.Yaw, 4);
+        Assert.Equal(0, facing.HeadTurn, 4);
     }
 
     /// <summary>Пока мобы не сохраняются (шаг 9.5), выгруженный чанк уносит их с собой.</summary>
