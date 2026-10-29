@@ -145,14 +145,15 @@ public enum EntityKind : byte
 /// <param name="Item">Стопка у предмета на земле (<see cref="EntityKind.Item"/>).</param>
 /// <param name="Mob">Вид моба (<see cref="EntityKind.Mob"/>).</param>
 /// <param name="Yaw">Поворот тела, радианы — как у камеры (0 — на −Z).</param>
+/// <param name="HeadTurn">Поворот головы относительно тела, радианы, от −π до π (с шага 9.2): 0 — смотрит прямо.</param>
 public sealed record EntitySpawned(EntityId Entity, EntityKind Kind, Vector3d Position, ItemStack Item, Mobs.MobId Mob = default,
-    float Yaw = 0) : ServerMessage;
+    float Yaw = 0, float HeadTurn = 0) : ServerMessage;
 
 /// <summary>Сущности, сдвинувшиеся за тик, — одним сообщением в конце тика; неподвижные не шлются.</summary>
 public sealed record EntitiesMoved(ImmutableArray<EntityPosition> Entities) : ServerMessage;
 
-/// <summary>Новое положение и поворот сущности для <see cref="EntitiesMoved"/>.</summary>
-public readonly record struct EntityPosition(EntityId Entity, Vector3d Position, float Yaw = 0);
+/// <summary>Новое положение и поворот сущности для <see cref="EntitiesMoved"/> (поворот головы — как в <see cref="EntitySpawned"/>).</summary>
+public readonly record struct EntityPosition(EntityId Entity, Vector3d Position, float Yaw = 0, float HeadTurn = 0);
 
 /// <summary>Сущность больше не видна клиенту: удалена на сервере или ушла (вместе с чанком) за пределы отправленного.</summary>
 public sealed record EntityRemoved(EntityId Entity) : ServerMessage;

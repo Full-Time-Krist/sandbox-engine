@@ -21,7 +21,11 @@ public sealed unsafe class TextureArray : IDisposable
     public int Height { get; }
     public int Layers { get; }
 
-    public TextureArray(GL gl, IReadOnlyList<Image> layers)
+    /// <param name="mipmaps">
+    /// Строить ли mip-карты. Без них — для развёрток моделей (мобы): там рядом лежат куски разных граней и прозрачный фон,
+    /// и уменьшенные уровни смешивали бы их — вдали по рёбрам моба шла бы чужая кайма.
+    /// </param>
+    public TextureArray(GL gl, IReadOnlyList<Image> layers, bool mipmaps = true)
     {
         if (layers.Count == 0)
             throw new ArgumentException("Нужен хотя бы один слой.", nameof(layers));
@@ -38,7 +42,7 @@ public sealed unsafe class TextureArray : IDisposable
         }
 
         // Число уровней mip-карт: 16 → 8 → 4 → 2 → 1, то есть log2(16) + 1 = 5.
-        var levels = (uint)(Math.Log2(Math.Max(Width, Height)) + 1);
+        var levels = mipmaps ? (uint)(Math.Log2(Math.Max(Width, Height)) + 1) : 1u;
 
         Handle = gl.CreateTexture(TextureTarget.Texture2DArray);
         // Неизменяемое хранилище: размер и формат задаются один раз, драйверу не нужно ничего проверять при отрисовке.
@@ -53,12 +57,14 @@ public sealed unsafe class TextureArray : IDisposable
             }
         }
 
-        gl.GenerateTextureMipmap(Handle);
+        if (mipmaps)
+            gl.GenerateTextureMipmap(Handle);
 
         // Вблизи пиксели остаются чёткими квадратами (nearest). Вдали выбирается ближайший пиксель
         // и смешиваются два соседних уровня mip-карт: без мерцания, но без размытия пиксель-арта.
         gl.TextureParameter(Handle, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
-        gl.TextureParameter(Handle, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.NearestMipmapLinear);
+        gl.TextureParameter(Handle, TextureParameterName.TextureMinFilter,
+            (int)(mipmaps ? TextureMinFilter.NearestMipmapLinear : TextureMinFilter.Nearest));
         gl.TextureParameter(Handle, TextureParameterName.TextureWrapS, (int)TextureWrapMode.Repeat);
         gl.TextureParameter(Handle, TextureParameterName.TextureWrapT, (int)TextureWrapMode.Repeat);
     }

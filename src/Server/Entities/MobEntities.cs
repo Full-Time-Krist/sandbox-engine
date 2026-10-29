@@ -29,6 +29,9 @@ internal struct Facing
 {
     public float Yaw;
     public float HeadYaw;
+
+    /// <summary>Поворот головы относительно тела, от −π до π: так его получает клиент (0 — смотрит прямо).</summary>
+    public readonly float HeadTurn => MathF.IEEERemainder(HeadYaw - Yaw, MathF.Tau);
 }
 
 /// <summary>Создание мобов и их ходьба (шаг 9.1). Поведение — шаг 9.3, бой — 9.4, появление и сохранение — 9.5.</summary>
@@ -47,7 +50,7 @@ internal static class MobEntities
         entities.Set(entity, new Walk());
         entities.Set(entity, new Facing { Yaw = yaw, HeadYaw = yaw });
         entities.Set(entity, new Health { Current = definition.Health, Max = definition.Health });
-        entities.Set(entity, new Synced { SentPosition = feet, SentYaw = yaw });
+        entities.Set(entity, new Synced { SentPosition = feet, SentYaw = yaw, SentHeadTurn = 0 });
         return entity;
     }
 

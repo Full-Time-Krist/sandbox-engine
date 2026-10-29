@@ -37,16 +37,25 @@ public sealed record ContentPack(string Name, string Directory, IReadOnlyCollect
 /// <param name="Quests">Задания (<c>type: "quest"</c>); цели и предшествующие задания проверены, циклов нет.</param>
 /// <param name="Mobs">Виды мобов (<c>type: "mob"</c>, с шага 9.1); добыча проверена.</param>
 /// <param name="MobDisplayNames">Названия мобов для игрока (поле <c>displayName</c>); моба без названия здесь нет.</param>
+/// <param name="MobLooks">
+/// Модель и текстура каждого моба (с шага 9.2) — как <paramref name="BlockTextures"/>: серверу не нужны, их берёт только клиент.
+/// </param>
 public sealed record ContentRegistries(BlockRegistry Blocks, ItemRegistry Items,
     ImmutableDictionary<string, BlockTextures> BlockTextures, ImmutableDictionary<string, string> ItemDisplayNames,
     ImmutableDictionary<string, string> ItemIcons, RecipeRegistry Recipes, QuestRegistry Quests,
-    MobRegistry Mobs, ImmutableDictionary<string, string> MobDisplayNames);
+    MobRegistry Mobs, ImmutableDictionary<string, string> MobDisplayNames, ImmutableDictionary<string, MobLook> MobLooks);
 
 /// <summary>
 /// Текстуры граней блока — полные имена <c>пакет:имя</c>. В JSON можно писать коротко (<c>"stone"</c>): имя дополняется
 /// пакетом, где описан блок. Файл ищет клиент по пакету (ванильные — в своих ассетах, мода — в папке мода).
 /// </summary>
 public sealed record BlockTextures(string Top, string Side, string Bottom);
+
+/// <summary>
+/// Как выглядит моб: модель (файл <c>models/имя.json</c>) и текстура (<c>textures/mobs/имя.png</c>) — полные имена
+/// <c>пакет:имя</c>, как у текстур блоков. Файлы ищет клиент; по умолчанию оба — имя самого моба.
+/// </summary>
+public sealed record MobLook(string Model, string Texture);
 
 /// <summary>Ошибка описания контента. Сообщение всегда содержит путь к исходному файлу.</summary>
 public sealed class ContentLoadException : Exception
@@ -265,7 +274,8 @@ public static partial class ContentLoader
                     break;
 
                 case "mob":
-                    CheckProperties(root, file, "type", "name", "displayName", "health", "speed", "size", "behavior", "drops", "override");
+                    CheckProperties(root, file, "type", "name", "displayName", "health", "speed", "size", "behavior", "drops", "model",
+                        "texture", "override");
                     if (!isOverride && !mobNames.Add(name))
                         throw Error(file, $"моб '{name}' объявлен более одного раза.");
                     (isOverride ? mobOverrides : mobs).Add(MobOf(root, file, pack, name));
@@ -331,6 +341,7 @@ public static partial class ContentLoader
 
         var mobRegistry = new MobRegistry();
         var mobDisplayNames = ImmutableDictionary.CreateBuilder<string, string>(StringComparer.Ordinal);
+        var mobLooks = ImmutableDictionary.CreateBuilder<string, MobLook>(StringComparer.Ordinal);
         foreach (var mob in sortedMobs)
         {
             var drops = mob.Drops.Select(drop => itemRegistry.TryGet(drop.Item, out var item)
@@ -342,17 +353,20 @@ public static partial class ContentLoader
                 throw new InvalidOperationException($"Id моба '{mob.Name}' разошёлся с заранее розданным.");
             if (mob.DisplayName is not null)
                 mobDisplayNames.Add(mob.Name, mob.DisplayName);
+            mobLooks.Add(mob.Name, mob.Look);
         }
         mobRegistry.Freeze();
 
         var recipeRegistry = new RecipeRegistry(recipes.Select(recipe => ResolveRecipe(recipe, blockRegistry, itemRegistry)));
         return new ContentRegistries(blockRegistry, itemRegistry, textures.ToImmutable(), displayNames.ToImmutable(), icons.ToImmutable(),
-            recipeRegistry, ResolveQuests(quests, blockRegistry, itemRegistry), mobRegistry, mobDisplayNames.ToImmutable());
+            recipeRegistry, ResolveQuests(quests, blockRegistry, itemRegistry), mobRegistry, mobDisplayNames.ToImmutable(),
+            mobLooks.ToImmutable());
     }
 
     /// <summary>
     /// Моб: <c>health</c> (целое ≥ 1), <c>speed</c> (блоков в секунду, > 0), <c>size</c> (<c>{width, height}</c>, до 4 блоков),
-    /// <c>behavior</c> (имя поведения), <c>drops</c> (<c>[{item, min, max}]</c>, по умолчанию пусто), <c>displayName</c>.
+    /// <c>behavior</c> (имя поведения), <c>drops</c> (<c>[{item, min, max}]</c>, по умолчанию пусто), <c>displayName</c>,
+    /// <c>model</c> и <c>texture</c> (имена, как у текстур блоков; по умолчанию — имя моба).
     /// </summary>
     private static MobJson MobOf(JsonElement root, ContentJsonFile file, string pack, string name)
     {
@@ -394,8 +408,11 @@ public static partial class ContentLoader
                 drops.Add((item, min, max));
             }
         }
+        // Своя модель или текстура нужна не каждому: зомби-утопленник мода может взять модель зомби с другой текстурой.
+        var model = root.TryGetProperty("model", out var modelValue) ? TextureName(modelValue, "model", pack, file) : name;
+        var texture = root.TryGetProperty("texture", out var textureValue) ? TextureName(textureValue, "texture", pack, file) : name;
         return new MobJson(file.Path, pack, name, OptionalString(root, "displayName", file), health, speed, width, height, behavior,
-            drops.ToImmutable());
+            drops.ToImmutable(), new MobLook(model, texture));
     }
 
     /// <summary>
@@ -856,7 +873,7 @@ public static partial class ContentLoader
     private sealed record ItemJson(string Path, string Pack, string Name, int MaxStackSize, string? PlacesBlock, string? Behavior,
         string? DisplayName, string? Icon, ToolInfo? Tool, string? SpawnsMob);
     private sealed record MobJson(string Path, string Pack, string Name, string? DisplayName, int Health, float Speed, double Width,
-        double Height, string Behavior, ImmutableArray<(string Item, int Min, int Max)> Drops);
+        double Height, string Behavior, ImmutableArray<(string Item, int Min, int Max)> Drops, MobLook Look);
     private sealed record RecipeJson(string Path, string Pack, string Name, StackJson Result, ImmutableArray<StackJson> Ingredients,
         string? Station);
     private sealed record StackJson(string Item, int Count);

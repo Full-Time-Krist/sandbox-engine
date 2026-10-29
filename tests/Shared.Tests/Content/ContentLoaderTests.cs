@@ -92,6 +92,8 @@ public class ContentLoaderTests
     [InlineData("""{"type":"mob","name":"base:cow","health":5,"speed":2,"size":{"width":1,"height":1},"behavior":"passive"}""", "base/cow.json")]
     [InlineData("""{"type":"mob","name":"base:cow","health":5,"speed":2,"size":{"width":1,"height":1},"behavior":"base:passive","drops":[{"item":"base:stone","min":2,"max":1}]}""", "base/cow.json")]
     [InlineData("""{"type":"mob","name":"base:cow","health":5,"speed":2,"size":{"width":1,"height":1},"behavior":"base:passive","drops":[{"item":"base:missing","min":0,"max":1}]}""", "base/cow.json")]
+    [InlineData("""{"type":"mob","name":"base:cow","health":5,"speed":2,"size":{"width":1,"height":1},"behavior":"base:passive","model":"../cow"}""", "base/cow.json")]
+    [InlineData("""{"type":"mob","name":"base:cow","health":5,"speed":2,"size":{"width":1,"height":1},"behavior":"base:passive","texture":7}""", "base/cow.json")]
     [InlineData("""{"type":"item","name":"base:egg","maxStackSize":64,"spawnsMob":"base:missing"}""", "base/egg.json")]
     [InlineData("""{"type":"item","name":"base:egg","maxStackSize":64,"spawnsMob":"base:cow","placesBlock":"base:stone"}""", "base/egg.json")]
     [InlineData("""{"type":"block","name":"base:stone","isOpaque":true,"tool":"Pick Axe"}""", "base/stone.json")]
@@ -303,6 +305,24 @@ public class ContentLoaderTests
         var egg = content.Items.Get("base:egg");
         Assert.Equal((cow.Id, ItemRegistry.SpawnMobBehavior), (egg.SpawnsMob, egg.Behavior));
         Assert.True(content.Items.Get("base:stick").SpawnsMob.IsNone);
+    }
+
+    /// <summary>
+    /// Вид моба (шаг 9.2): модель и текстура по умолчанию — имя самого моба; свои — как имена текстур: короткое
+    /// дополняется пакетом, полное берётся как есть (чужая модель — зомби мода в модели ванильного зомби).
+    /// </summary>
+    [Fact]
+    public void Load_MobLook_DefaultsToMobName_ShortNamesGetPack()
+    {
+        var content = ContentLoader.Load([
+            File("base/cow.json", """{"type":"mob","name":"base:cow","health":10,"speed":1,"size":{"width":0.9,"height":1.4},"behavior":"base:passive"}"""),
+            File("base/calf.json", """{"type":"mob","name":"base:calf","health":5,"speed":1,"size":{"width":0.5,"height":0.7},"behavior":"base:passive","model":"cow","texture":"calf_spots"}"""),
+            File("other/husk.json", """{"type":"mob","name":"other:husk","health":5,"speed":1,"size":{"width":0.6,"height":1.9},"behavior":"base:hostile_melee","model":"base:zombie"}"""),
+        ]);
+
+        Assert.Equal(new MobLook("base:cow", "base:cow"), content.MobLooks["base:cow"]);
+        Assert.Equal(new MobLook("base:cow", "base:calf_spots"), content.MobLooks["base:calf"]);
+        Assert.Equal(new MobLook("base:zombie", "other:husk"), content.MobLooks["other:husk"]);
     }
 
     [Fact]

@@ -32,7 +32,7 @@ internal sealed class EntitySync
             ref var synced = ref entities.Get<Synced>(entity);
             synced.SentPosition = entities.Get<Position>(entity).Value;
             if (entities.Has<Facing>(entity))
-                synced.SentYaw = entities.Get<Facing>(entity).Yaw;
+                (synced.SentYaw, synced.SentHeadTurn) = (entities.Get<Facing>(entity).Yaw, entities.Get<Facing>(entity).HeadTurn);
         }
     }
 
@@ -68,16 +68,18 @@ internal sealed class EntitySync
             var position = entities.Get<Position>(entity).Value;
             if (!session.View.WasSent(ChunkOf(position)))
                 continue;
-            var yaw = entities.Get<Facing>(entity).Yaw;
+            var facing = entities.Get<Facing>(entity);
+            var (yaw, headTurn) = (facing.Yaw, facing.HeadTurn);
             if (known.Add(entity))
             {
-                session.Connection.Send(new EntitySpawned(entity, EntityKind.Mob, position, default, entities.Get<Mob>(entity).Kind, yaw));
+                session.Connection.Send(new EntitySpawned(entity, EntityKind.Mob, position, default, entities.Get<Mob>(entity).Kind, yaw,
+                    headTurn));
             }
             else
             {
                 var synced = entities.Get<Synced>(entity);
-                if (synced.SentPosition != position || synced.SentYaw != yaw)
-                    _moved.Add(new EntityPosition(entity, position, yaw));
+                if (synced.SentPosition != position || synced.SentYaw != yaw || synced.SentHeadTurn != headTurn)
+                    _moved.Add(new EntityPosition(entity, position, yaw, headTurn));
             }
         }
         if (_moved.Count > 0)

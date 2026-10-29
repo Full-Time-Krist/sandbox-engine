@@ -40,4 +40,7 @@ internal struct Synced
 
     /// <summary>Разосланный поворот (у сущностей с <see cref="Facing"/>): повернулся — тоже сдвинулся для рассылки.</summary>
     public float SentYaw;
+
+    /// <summary>Разосланный поворот головы относительно тела (<see cref="Facing.HeadTurn"/>).</summary>
+    public float SentHeadTurn;
 }

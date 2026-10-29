@@ -4,7 +4,7 @@
   "displayName": "Зомби",
   "health": 20,
   "speed": 2.3,
-  "size": { "width": 0.6, "height": 1.9 },
+  "size": { "width": 0.6, "height": 1.95 },
   "behavior": "base:hostile_melee",
   "drops": [
     { "item": "base:bone", "min": 0, "max": 2 }

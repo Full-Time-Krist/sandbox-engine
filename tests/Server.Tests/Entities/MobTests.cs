@@ -151,6 +151,31 @@ public sealed class MobTests : IDisposable
         Assert.Equal(_server.Entities.Get<Position>(mob).Value, moved.Position);
     }
 
+    /// <summary>
+    /// Голова (шаг 9.2): клиент получает её поворот относительно тела — и при появлении, и когда моб, не сходя с места
+    /// и не поворачивая тела, только повернул голову. Через 0 (с 350° на 10°) — по кратчайшей дуге, а не на −340°.
+    /// </summary>
+    [Fact]
+    public void Client_GetsHeadTurn_RelativeToBody()
+    {
+        Drain();
+        Assert.True(_server.ModWorld.TrySpawnMob(_zombie.Id, OnSurface));
+        var mob = Assert.Single(Mobs());
+        _server.Entities.Get<Facing>(mob) = new Facing { Yaw = 0.1f, HeadYaw = MathF.Tau - 0.3f };
+        _server.Tick();
+        Assert.Equal(-0.4f, Assert.Single(Drain().OfType<EntitySpawned>()).HeadTurn, 4);
+
+        _server.Entities.Get<Facing>(mob).HeadYaw = 0.6f;
+        _server.Tick();
+
+        var moved = Assert.Single(Assert.Single(Drain().OfType<EntitiesMoved>()).Entities);
+        Assert.Equal((0.1f, _server.Entities.Get<Position>(mob).Value), (moved.Yaw, moved.Position));
+        Assert.Equal(0.5f, moved.HeadTurn, 4);
+
+        _server.Tick(); // голова больше не двигалась — нечего и слать
+        Assert.Empty(Drain().OfType<EntitiesMoved>());
+    }
+
     /// <summary>Пока мобы не сохраняются (шаг 9.5), выгруженный чанк уносит их с собой.</summary>
     [Fact]
     public void UnloadedChunk_RemovesItsMobs()

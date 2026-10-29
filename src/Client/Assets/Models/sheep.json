@@ -1,0 +1,10 @@
+{
+  "parts": [
+    { "name": "head", "box": [-3, 14, -14, 3, 21, -6], "pivot": [0, 17, -7], "uv": [0, 0], "look": true },
+    { "name": "body", "box": [-5, 11, -8, 5, 20, 8], "uv": [0, 32] },
+    { "name": "front_right_leg", "box": [1, 0, -7, 5, 12, -3], "pivot": [3, 12, -5], "uv": [32, 0], "walk": 40 },
+    { "name": "front_left_leg", "box": [-5, 0, -7, -1, 12, -3], "pivot": [-3, 12, -5], "uv": [32, 0], "walk": -40 },
+    { "name": "back_right_leg", "box": [1, 0, 3, 5, 12, 7], "pivot": [3, 12, 5], "uv": [32, 0], "walk": -40 },
+    { "name": "back_left_leg", "box": [-5, 0, 3, -1, 12, 7], "pivot": [-3, 12, 5], "uv": [32, 0], "walk": 40 }
+  ]
+}

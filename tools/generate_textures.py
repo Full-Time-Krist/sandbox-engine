@@ -1,5 +1,5 @@
 """Генерирует текстуры-заглушки 16×16: блоки — в src/Client/Assets/Textures/Blocks, картинки предметов — в …/Items,
-стадии трещин при ломании — в …/Effects, солнце и луна — в …/Sky.
+стадии трещин при ломании — в …/Effects, солнце и луна — в …/Sky; развёртки мобов 64×64 — в …/Mobs.
 
 Без зависимостей (PNG пишется вручную через zlib), seed фиксирован: результат всегда одинаковый.
 Запуск из корня репозитория: python tools/generate_textures.py
@@ -17,6 +17,8 @@ OUT_DIR = TEXTURES_DIR / "Blocks"
 ITEMS_DIR = TEXTURES_DIR / "Items"
 EFFECTS_DIR = TEXTURES_DIR / "Effects"
 SKY_DIR = TEXTURES_DIR / "Sky"
+MOBS_DIR = TEXTURES_DIR / "Mobs"
+MOB_SIZE = 64
 CLEAR = (0, 0, 0, 0)
 
 
@@ -27,7 +29,7 @@ def write_png(path: Path, pixels: list[list[tuple[int, int, int]]]) -> None:
     def chunk(tag: bytes, data: bytes) -> bytes:
         return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
 
-    header = struct.pack(">IIBBBBB", SIZE, SIZE, 8, 6, 0, 0, 0)  # 8 бит, RGBA
+    header = struct.pack(">IIBBBBB", len(pixels[0]), len(pixels), 8, 6, 0, 0, 0)  # 8 бит, RGBA
     path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
 
 
@@ -403,6 +405,86 @@ def moon(rng):
 SKY = {"sun": sun, "moon": moon}
 
 
+# --- Мобы: развёртки коробов моделей (Assets/Models) на текстуре 64×64, как в Minecraft (шаг 9.2). ---
+# Короб w × h × d (X, Y, Z) от угла (u, v): сверху верх и низ, под ними кольцом бок +X, перед (−Z), бок −X, спина.
+# Перед моба смотрит на −Z, его правый бок — +X (на развёртке слева от переда). Раскладка — как BoxUv в клиенте.
+
+def box_faces(u, v, w, h, d):
+    return {"right": (u, v + d, d, h), "front": (u + d, v + d, w, h), "left": (u + d + w, v + d, d, h),
+            "back": (u + 2 * d + w, v + d, w, h), "top": (u + d, v, w, d), "bottom": (u + d + w, v, w, d)}
+
+
+def paint_box(px, rng, u, v, size, color_at):
+    """color_at(грань, x, y, ширина, высота) — цвет пикселя грани (x, y от левого верхнего угла грани) или None."""
+    for face, (fx, fy, fw, fh) in box_faces(u, v, *size).items():
+        for y in range(fh):
+            for x in range(fw):
+                color = color_at(face, x, y, fw, fh)
+                if color is not None:
+                    d = rng.randint(-8, 8)
+                    px[fy + y][fx + x] = (clamp(color[0] + d), clamp(color[1] + d), clamp(color[2] + d), 255)
+
+
+def zombie(rng):
+    px = [[CLEAR] * MOB_SIZE for _ in range(MOB_SIZE)]
+    skin, hair, eye, mouth = (92, 142, 80), (52, 86, 46), (24, 30, 22), (58, 88, 50)
+    shirt, pants, shoes = (48, 152, 164), (66, 62, 150), (54, 54, 60)
+
+    def head(face, x, y, w, h):
+        if face == "top" or (face != "bottom" and y < 2) or (face == "back" and y < 6):
+            return hair
+        if face == "front" and y == 4 and x in (1, 2, 5, 6):
+            return eye
+        if face == "front" and y == 6 and 2 <= x <= 5:
+            return mouth
+        return skin
+
+    def body(face, x, y, w, h):
+        return pants if face != "top" and y >= h - 1 else shirt
+
+    def arm(face, x, y, w, h):
+        return shirt if face == "top" or (face not in ("top", "bottom") and y < 4) else skin
+
+    def leg(face, x, y, w, h):
+        return shoes if face == "bottom" or (face != "top" and y >= h - 2) else pants
+
+    paint_box(px, rng, 0, 0, (8, 8, 8), head)
+    paint_box(px, rng, 16, 16, (8, 12, 4), body)
+    paint_box(px, rng, 40, 16, (4, 12, 4), arm)
+    paint_box(px, rng, 0, 16, (4, 12, 4), leg)
+    return px
+
+
+def sheep(rng):
+    px = [[CLEAR] * MOB_SIZE for _ in range(MOB_SIZE)]
+    wool, face_skin, eye, nose, hoof = (232, 232, 224), (214, 184, 160), (30, 26, 24), (190, 140, 130), (96, 80, 70)
+
+    def head(face, x, y, w, h):
+        if face == "top" or (face in ("left", "right", "back") and y < 2):
+            return wool  # шапка шерсти
+        if face == "front" and y == 3 and x in (1, 4):
+            return eye
+        if face == "front" and y == 5 and 2 <= x <= 3:
+            return nose
+        return face_skin
+
+    def body(face, x, y, w, h):
+        return wool
+
+    def leg(face, x, y, w, h):
+        if face == "bottom" or (face != "top" and y >= h - 2):
+            return hoof
+        return wool if face != "bottom" and y < 4 else face_skin
+
+    paint_box(px, rng, 0, 0, (6, 7, 8), head)
+    paint_box(px, rng, 0, 32, (10, 9, 16), body)
+    paint_box(px, rng, 32, 0, (4, 12, 4), leg)
+    return px
+
+
+MOBS = {"zombie": zombie, "sheep": sheep}
+
+
 def main() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     for name, generate in TEXTURES.items():
@@ -425,6 +507,11 @@ def main() -> None:
     for name, generate in SKY.items():
         write_png(SKY_DIR / f"{name}.png", generate(random.Random(name)))
         print(f"Sky/{name}.png")
+
+    MOBS_DIR.mkdir(parents=True, exist_ok=True)
+    for name, generate in MOBS.items():
+        write_png(MOBS_DIR / f"{name}.png", generate(random.Random(name)))
+        print(f"Mobs/{name}.png")
 
 
 if __name__ == "__main__":

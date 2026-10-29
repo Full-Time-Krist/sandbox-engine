@@ -19,6 +19,12 @@ public sealed record ModInfo(string Id, string Name, Version Version, IReadOnlyD
     /// <summary>Картинки предметов мода: <c>textures/items/&lt;имя&gt;.png</c>.</summary>
     public string ItemTextureDirectory => Path.Combine(Directory, "textures", "items");
 
+    /// <summary>Текстуры мобов мода: <c>textures/mobs/&lt;имя&gt;.png</c>, 64×64 (с шага 9.2).</summary>
+    public string MobTextureDirectory => Path.Combine(Directory, "textures", "mobs");
+
+    /// <summary>Модели мобов мода: <c>models/&lt;имя&gt;.json</c> (с шага 9.2).</summary>
+    public string ModelDirectory => Path.Combine(Directory, "models");
+
     public string? AssemblyPath => AssemblyFile is null ? null : Path.Combine(Directory, AssemblyFile);
 
     public override string ToString() => $"{Id} {Version}";

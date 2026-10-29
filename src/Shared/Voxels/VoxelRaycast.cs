@@ -104,6 +104,17 @@ public static class VoxelRaycast
     }
 
     /// <summary>
+    /// Расстояние по лучу до короба <paramref name="box"/> (тела сущности): до точки входа, 0 — луч начался внутри,
+    /// null — мимо. Тот же расчёт, что у коробов формы блоков.
+    /// </summary>
+    public static double? Distance(Physics.Aabb box, Vector3d origin, Vector3 direction)
+    {
+        if (direction == Vector3.Zero || !float.IsFinite(direction.LengthSquared()))
+            return null;
+        return HitBox(origin, Vector3.Normalize(direction), box.Min, box.Max)?.Distance;
+    }
+
+    /// <summary>
     /// Пересечение луча с коробом (метод плит): расстояние до входа и нормаль грани входа; луч из короба — расстояние 0
     /// и нулевая нормаль; null — мимо. Разности считаются в double: короб и начало луча — абсолютные позиции.
     /// </summary>

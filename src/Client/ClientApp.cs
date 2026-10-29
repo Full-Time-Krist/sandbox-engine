@@ -67,12 +67,15 @@ internal sealed class ClientApp(
     private ShaderProgram _lineShader = null!;
     private ColorMesh _selectionBox = null!;
 
-    /// <summary>Временный вид моба до моделей (шаг 9.2): красная рамка по коробу тела.</summary>
-    private ColorMesh _mobBox = null!;
     private ShaderProgram _crackShader = null!;
     private CrackRenderer _cracks = null!;
     private ShaderProgram _itemShader = null!;
     private ItemEntityRenderer _itemRenderer = null!;
+    private ShaderProgram _mobShader = null!;
+    private MobRenderer _mobRenderer = null!;
+
+    /// <summary>Текстуры мобов — свой массив: развёртки 64×64, без mip-карт (<see cref="MobVisuals"/>).</summary>
+    private TextureArray _mobTextures = null!;
 
     /// <summary>Здоровье от сервера (<see cref="HealthChanged"/>); null — ещё не пришло.</summary>
     private (int Current, int Max)? _health;
@@ -132,8 +135,14 @@ internal sealed class ClientApp(
     private long _framesRendered;
     private Vector2D<int> _framebufferSize;
 
-    /// <summary>Блок под прицелом в текущем кадре.</summary>
+    /// <summary>Блок под прицелом в текущем кадре. Нет его, если ближе блока — моб (<see cref="_mobTarget"/>).</summary>
     private BlockHit? _target;
+
+    /// <summary>
+    /// Моб под прицелом в текущем кадре — ближе блока и в досягаемости <see cref="GameRules.EntityReach"/>: вокруг него
+    /// рамка, а ЛКМ не ломает блок за ним (удар по мобу — шаг 9.4).
+    /// </summary>
+    private ClientEntity? _mobTarget;
 
     protected override void OnLoad()
     {
@@ -151,7 +160,8 @@ internal sealed class ClientApp(
 
         var visuals = new BlockVisuals(_registry, BlockVisuals.AppearancesFrom(content.BlockTextures));
         var itemVisuals = new ItemVisuals(visuals, _items, content.ItemIcons);
-        _blockTextures = LoadTextures(visuals.TextureNames, itemVisuals.TextureNames, new TextureFiles(mods));
+        var textureFiles = new TextureFiles(mods);
+        _blockTextures = LoadTextures(visuals.TextureNames, itemVisuals.TextureNames, textureFiles);
         var crackLayer = visuals.TextureNames.Count + itemVisuals.TextureNames.Count;
         var sunLayer = crackLayer + CrackRenderer.Stages;
         var names = new ItemNames(content.ItemDisplayNames);
@@ -162,13 +172,19 @@ internal sealed class ClientApp(
         _chunkShader.SetUniform("u_Textures", 0); // сэмплер читает текстурный блок 0
         _lineShader = ShaderProgram.FromFiles(Gl, Path.Combine(shaders, "basic"));
         _selectionBox = LineGeometry.CreateBoxOutline(Gl, new Vector3(0.05f));
-        _mobBox = LineGeometry.CreateBoxOutline(Gl, new Vector3(0.9f, 0.15f, 0.15f));
         _crackShader = ShaderProgram.FromFiles(Gl, Path.Combine(shaders, "crack"));
         _crackShader.SetUniform("u_Textures", 0);
         _cracks = new CrackRenderer(Gl, _crackShader, crackLayer);
         _itemShader = ShaderProgram.FromFiles(Gl, Path.Combine(shaders, "item"));
         _itemShader.SetUniform("u_Textures", 0);
         _itemRenderer = new ItemEntityRenderer(Gl, _itemShader, itemVisuals, _items);
+        var mobVisuals = new MobVisuals(_mobs, content.MobLooks, textureFiles, Console.WriteLine);
+        _mobTextures = new TextureArray(Gl, [.. mobVisuals.TextureNames.Select(name => name == MobVisuals.MissingTexture
+            ? Image.CreateMissing(MobModel.TextureSize, MobModel.TextureSize)
+            : LoadImage(name, textureFiles.PathFor(name, TextureKind.Mob), MobModel.TextureSize))], mipmaps: false);
+        _mobShader = ShaderProgram.FromFiles(Gl, Path.Combine(shaders, "mob"));
+        _mobShader.SetUniform("u_Textures", 1); // массив текстур мобов — на текстурном блоке 1, блоки остаются на 0
+        _mobRenderer = new MobRenderer(Gl, _mobShader, _mobs, mobVisuals);
         _skyShader = ShaderProgram.FromFiles(Gl, Path.Combine(shaders, "sky"));
         _skyShader.SetUniform("u_Textures", 0);
         _sky = new SkyRenderer(Gl, _skyShader, sunLayer, sunLayer + 1);
@@ -209,21 +225,25 @@ internal sealed class ClientApp(
         Console.WriteLine($"[Client] Текстуры: {blockNames.Count} слоёв блоков, {itemNames.Count} картинок предметов, {CrackRenderer.Stages} стадий трещин, солнце и луна");
         return new TextureArray(Gl, images);
 
-        Image Load(string name, string path)
+        Image Load(string name, string path) => LoadImage(name, path, MissingSize);
+    }
+
+    /// <summary>
+    /// Картинка для слоя массива текстур. Нет файла или не тот размер (все слои массива одного размера) — не повод падать:
+    /// будет шахматка, а в логе видно, что не так. Картинку чужого размера могла положить и опечатка, и мод.
+    /// </summary>
+    private static Image LoadImage(string name, string path, int size)
+    {
+        if (!File.Exists(path))
         {
-            // Нет файла или не тот размер (все слои массива одного размера) — не повод падать: будет шахматка,
-            // а в логе видно, что не так. Картинку чужого размера могла положить и опечатка, и мод.
-            if (!File.Exists(path))
-            {
-                Console.WriteLine($"[Client] Нет текстуры {name}: {path}");
-                return Image.CreateMissing(MissingSize, MissingSize);
-            }
-            var image = Image.Load(path);
-            if (image.Width == MissingSize && image.Height == MissingSize)
-                return image;
-            Console.WriteLine($"[Client] Текстура {name} — {image.Width}×{image.Height}, нужна {MissingSize}×{MissingSize}: {path}");
-            return Image.CreateMissing(MissingSize, MissingSize);
+            Console.WriteLine($"[Client] Нет текстуры {name}: {path}");
+            return Image.CreateMissing(size, size);
         }
+        var image = Image.Load(path);
+        if (image.Width == size && image.Height == size)
+            return image;
+        Console.WriteLine($"[Client] Текстура {name} — {image.Width}×{image.Height}, нужна {size}×{size}: {path}");
+        return Image.CreateMissing(size, size);
     }
 
     protected override void OnTick()
@@ -237,6 +257,8 @@ internal sealed class ClientApp(
         // Часы — до сообщений: сверка, пришедшая в этом тике, уже учитывает его (сервер прибавляет тик в конце своего).
         _worldClock.Tick();
         ProcessServerMessages();
+        // После сообщений: путь мобов за этот тик качает их лапы.
+        _entities.EndTick();
 
         _controller.Tick(Input, controlsEnabled: Input.IsCursorCaptured);
 
@@ -402,6 +424,14 @@ internal sealed class ClientApp(
         _controller.UpdateEye(alpha);
         var eye = _controller.EyePosition;
         _target = VoxelRaycast.Cast(_world.Chunks, _registry, eye, _camera.Forward, GameRules.BlockReach);
+        // Моб ближе блока закрывает его собой: выделен моб, блок за ним не выделяется и не ломается.
+        _mobTarget = null;
+        if (_entities.RaycastMob(_mobs, eye, _camera.Forward, GameRules.EntityReach, alpha) is { } mobHit
+            && (_target is not { } blockHit || mobHit.Distance < blockHit.Distance))
+        {
+            _mobTarget = mobHit.Value;
+            _target = null;
+        }
         if (actionsAllowed)
         {
             HandleItemActions();
@@ -433,9 +463,10 @@ internal sealed class ClientApp(
         atmosphere.Apply(_chunkShader);
         _drawnChunks = _chunkRenderer.Draw(_chunkShader, eye, Frustum.FromMatrix(viewProjection));
         _itemRenderer.Draw(viewProjection, eye, _entities, alpha, _clock.Elapsed.TotalSeconds, _world, atmosphere);
+        _mobRenderer.Draw(viewProjection, eye, _entities, alpha, _clock.Elapsed.TotalSeconds, _world, atmosphere, _mobTextures);
 
         DrawSelection(eye);
-        DrawMobs(eye, alpha);
+        DrawMobSelection(eye, alpha);
         DrawCracks(eye, viewProjection);
         // Задания идут только в выживании: в творческом подсказывать их незачем.
         // На экране смерти обычный интерфейс (перекрестие, хотбар, задания) не нужен.
@@ -452,26 +483,22 @@ internal sealed class ClientApp(
     }
 
     /// <summary>
-    /// Мобы — пока рамкой по коробу тела, повёрнутой по взгляду (модели — шаг 9.2). Положение и поворот — между тиками,
-    /// как у предметов на земле.
+    /// Рамка вокруг моба под прицелом — по коробу тела, как его видит сервер (по осям мира, не повёрнута с мобом): по нему
+    /// и попадает луч. Положение — то же, что у нарисованной модели.
     /// </summary>
-    private void DrawMobs(Vector3d eye, float alpha)
+    private void DrawMobSelection(Vector3d eye, float alpha)
     {
+        if (_mobTarget is not { } entity)
+            return;
+        const float Grow = 0.004f;
+        var mob = _mobs.Get(entity.Mob);
+        var body = Shared.Physics.BoxPhysics.BodyAt(entity.At(alpha), mob.Width, mob.Height);
+        var size = (body.Max - body.Min).ToVector3();
         _lineShader.Use();
         _lineShader.SetUniform("u_ViewProjection", _camera.ViewProjection);
-        foreach (var (_, entity) in _entities.All)
-        {
-            if (entity.Kind != EntityKind.Mob || !_mobs.Contains(entity.Mob))
-                continue;
-            var mob = _mobs.Get(entity.Mob);
-            var offset = (entity.At(alpha) - eye).ToVector3();
-            // Рамка [0; 1]³ — по центру основания, в размер тела, поворот как у камеры: −Z смотрит по взгляду.
-            _lineShader.SetUniform("u_Model", Matrix4x4.CreateTranslation(-0.5f, 0, -0.5f)
-                                              * Matrix4x4.CreateScale((float)mob.Width, (float)mob.Height, (float)mob.Width)
-                                              * Matrix4x4.CreateRotationY(-entity.YawAt(alpha))
-                                              * Matrix4x4.CreateTranslation(offset));
-            _mobBox.Draw();
-        }
+        _lineShader.SetUniform("u_Model", Matrix4x4.CreateScale(size + new Vector3(Grow))
+                                          * Matrix4x4.CreateTranslation((body.Min - eye).ToVector3() - new Vector3(Grow / 2)));
+        _selectionBox.Draw();
     }
 
     private void DrawSelection(Vector3d eye)
@@ -660,7 +687,13 @@ internal sealed class ClientApp(
         // В творческом блок ломается сразу, поэтому удержание ЛКМ повторяет действие с паузой; в выживании ЛКМ ломает
         // удержанием, и темп задаёт твёрдость блока.
         var now = _clock.Elapsed.TotalSeconds;
-        if (_mode == GameMode.Creative)
+        if (_mobTarget != null)
+        {
+            // ЛКМ по мобу — удар (шаг 9.4); пока — ничего, но и не ломание блока за ним.
+            _primaryRepeat.Reset();
+            StopBreaking();
+        }
+        else if (_mode == GameMode.Creative)
         {
             if (_primaryRepeat.Update(Input.WasMousePressed(MouseButton.Left), Input.IsMouseDown(MouseButton.Left), now))
                 connection.Send(new UseItem(ItemAction.Primary, _controller.EyePosition, _camera.Forward));
@@ -754,12 +787,14 @@ internal sealed class ClientApp(
         _crackShader.Dispose();
         _itemRenderer.Dispose();
         _itemShader.Dispose();
+        _mobRenderer.Dispose();
+        _mobShader.Dispose();
+        _mobTextures.Dispose();
         _sky.Dispose();
         _skyShader.Dispose();
         _hud.Dispose();
         _journal.Dispose();
         _selectionBox.Dispose();
-        _mobBox.Dispose();
         _lineShader.Dispose();
         _chunkShader.Dispose();
     }

@@ -85,5 +85,16 @@ public sealed unsafe class VertexArrayObject : IDisposable
         _gl.DrawArraysInstanced(primitive, 0, (uint)vertexCount, (uint)instanceCount);
     }
 
+    /// <summary>
+    /// Рисует <paramref name="instanceCount"/> копий вершин <c>[first; first + vertexCount)</c>; данные экземпляров читаются
+    /// с номера <paramref name="baseInstance"/>. Так один буфер вершин держит несколько мешей, а один буфер экземпляров —
+    /// их копии подряд: каждый меш рисуется своим вызовом со своим куском экземпляров.
+    /// </summary>
+    public void DrawArraysInstanced(PrimitiveType primitive, int first, int vertexCount, int instanceCount, int baseInstance)
+    {
+        _gl.BindVertexArray(Handle);
+        _gl.DrawArraysInstancedBaseInstance(primitive, first, (uint)vertexCount, (uint)instanceCount, (uint)baseInstance);
+    }
+
     public void Dispose() => _gl.DeleteVertexArray(Handle);
 }

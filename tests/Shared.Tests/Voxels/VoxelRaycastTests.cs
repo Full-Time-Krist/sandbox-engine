@@ -154,6 +154,24 @@ public class VoxelRaycastTests
         }
     }
 
+    /// <summary>
+    /// Луч до короба тела (шаг 9.2, моб под прицелом): расстояние до входа, изнутри — 0, мимо и назад — null; вдали от
+    /// центра — так же точно (разности в double).
+    /// </summary>
+    [Fact]
+    public void Distance_ToBox()
+    {
+        var far = 1_000_000.0;
+        var box = new Shared.Physics.Aabb(new Vector3d(far - 0.3, 0, -2.3), new Vector3d(far + 0.3, 1.9, -1.7));
+        var eye = new Vector3d(far, 1.6, 0);
+
+        Assert.Equal(1.7, VoxelRaycast.Distance(box, eye, -Vector3.UnitZ * 5)!.Value, 6); // длина направления не важна
+        Assert.Null(VoxelRaycast.Distance(box, eye, Vector3.UnitZ));
+        Assert.Null(VoxelRaycast.Distance(box, eye + new Vector3d(0, 0.5, 0), -Vector3.UnitZ)); // над макушкой
+        Assert.Null(VoxelRaycast.Distance(box, eye, Vector3.Zero));
+        Assert.Equal(0, VoxelRaycast.Distance(box, new Vector3d(far, 1, -2), Vector3.UnitX)!.Value);
+    }
+
     private static (BlockPos Block, float Distance)? BruteForce(ChunkMap world, Vector3 origin, Vector3 direction, float maxDistance)
     {
         const float Step = 0.001f;
